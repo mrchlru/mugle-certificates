@@ -18,6 +18,9 @@ _ALIASES: dict[str, set[str]] = {
     "balance": {"остаток", "баланс", "balance", "осталось"},
     "note": {"комментарий", "примечание", "note", "коммент", "ресторан", "примечание"},
     "expires": {"срок", "действует до", "expires", "дата", "годен до"},
+    "department": {"отдел", "department", "подразделение"},
+    "job_title": {"должность", "job_title", "позиция", "position"},
+    "phone": {"телефон", "phone", "тел", "мобильный"},
 }
 
 
@@ -140,6 +143,9 @@ def _draft_from_cells(cells: tuple[object, ...], header: dict[str, int]) -> Issu
         balance=balance,
         note=str(_cell(cells, header, "note") or "").strip(),
         expires_on=expires if isinstance(expires, date) or expires is None else None,
+        department=str(_cell(cells, header, "department") or "").strip(),
+        job_title=str(_cell(cells, header, "job_title") or "").strip(),
+        phone=str(_cell(cells, header, "phone") or "").strip(),
     )
 
 

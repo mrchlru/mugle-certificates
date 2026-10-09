@@ -140,6 +140,31 @@ def test_certificate_expiry_can_be_set() -> None:
     assert format_date(issued.certificate.expires_on) == "31.12.2026"
 
 
+def test_issue_without_login_stores_internal_fields() -> None:
+    db = _db()
+    hr = _person(db, "hr", Role.hr)
+    issued = issue_certificate(
+        db,
+        IssueDraft(
+            full_name="Анна Козлова",
+            login="",
+            password="",
+            nominal=100_000,
+            balance=None,
+            note="",
+            expires_on=None,
+            department="Кухня",
+            job_title="Повар",
+            phone="+7 900 111-22-33",
+        ),
+        hr,
+    )
+    assert issued.user.login != ""
+    assert issued.user.department == "Кухня"
+    assert issued.user.job_title == "Повар"
+    assert issued.user.phone == "+7 900 111-22-33"
+
+
 def test_credit_adds_bonuses_to_balance() -> None:
     db = _db()
     hr = _person(db, "hr", Role.hr)

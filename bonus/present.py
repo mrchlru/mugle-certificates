@@ -45,6 +45,9 @@ class CardView:
     expires_on: date | None
     holder_name: str
     holder_login: str
+    department: str
+    job_title: str
+    phone: str
     status: CertificateStatus
     can_spend: bool
     color: str
@@ -87,10 +90,16 @@ def load_cards(db: Session, holder_id: int, base_url: str, actor: User) -> list[
 def load_card(db: Session, certificate: Certificate, base_url: str, actor: User | None) -> CardView:
     """Одна карточка вместе с историей."""
     holder = db.get(User, certificate.holder_id)
-    holder_name = holder.full_name if holder is not None else ""
-    login = holder.login if holder is not None else ""
-    history = tuple(_history(db, certificate.id, actor, holder_name, certificate.public_number))
-    return _card_view(db, certificate, holder_name, login, base_url, history)
+    history = tuple(
+        _history(
+            db,
+            certificate.id,
+            actor,
+            holder.full_name if holder is not None else "",
+            certificate.public_number,
+        )
+    )
+    return _card_view(db, certificate, holder, base_url, history)
 
 
 def recent_debits(db: Session, actor: User, limit: int = 8) -> list[TxView]:
@@ -127,7 +136,9 @@ def search_certificates(db: Session, query: str, segment_id: int | None = None) 
         haystack = " ".join(
             (
                 holder.full_name,
-                holder.login,
+                holder.department,
+                holder.job_title,
+                holder.phone,
                 certificate.public_number,
                 certificate.short_code,
                 certificate.note,
@@ -136,7 +147,7 @@ def search_certificates(db: Session, query: str, segment_id: int | None = None) 
         ).casefold()
         if needle and needle not in haystack:
             continue
-        found.append(_card_view(db, certificate, holder.full_name, holder.login, "", ()))
+        found.append(_card_view(db, certificate, holder, "", ()))
         if len(found) >= 300:
             break
     return found
@@ -263,8 +274,7 @@ def _tx_view(
 def _card_view(
     db: Session,
     certificate: Certificate,
-    holder_name: str,
-    login: str,
+    holder: User | None,
     base_url: str,
     history: tuple[TxView, ...],
 ) -> CardView:
@@ -283,8 +293,11 @@ def _card_view(
         nominal=certificate.nominal,
         note=certificate.note,
         expires_on=certificate.expires_on,
-        holder_name=holder_name,
-        holder_login=login,
+        holder_name="" if holder is None else holder.full_name,
+        holder_login="" if holder is None else holder.login,
+        department="" if holder is None else holder.department,
+        job_title="" if holder is None else holder.job_title,
+        phone="" if holder is None else holder.phone,
         status=certificate.status,
         can_spend=_can_spend(certificate),
         color=certificate.color or "#00A8A8",

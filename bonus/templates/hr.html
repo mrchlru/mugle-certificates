@@ -16,7 +16,7 @@
   </article>
 </section>
 <form class="search filters" method="get" action="/hr">
-  <input name="q" value="{{ query }}" placeholder="Имя, логин или номер">
+  <input name="q" value="{{ query }}" placeholder="Имя, отдел, должность, телефон или номер">
   <select name="segment">
     <option value="0">Все сегменты</option>
     {% for item in segments %}
@@ -52,7 +52,12 @@
           <a href="/hr/c/{{ card.id }}">{{ card.public_number }}</a>
           <span class="swatch" style="background: {{ card.color }}"></span>
         </td>
-        <td>{{ card.holder_name }}<br><span class="muted">{{ card.holder_login }}</span></td>
+        <td>
+          {{ card.holder_name }}
+          {% if card.department or card.job_title or card.phone %}
+          <br><span class="muted">{% if card.department %}{{ card.department }}{% endif %}{% if card.job_title %}{% if card.department %} · {% endif %}{{ card.job_title }}{% endif %}{% if card.phone %}{% if card.department or card.job_title %} · {% endif %}{{ card.phone }}{% endif %}</span>
+          {% endif %}
+        </td>
         <td>{{ card.segment_name or "—" }}</td>
         <td>{{ card.balance|money }}</td>
         <td>{{ status_label(card.status, card.balance, card.expires_on) }}</td>

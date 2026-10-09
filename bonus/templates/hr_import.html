@@ -4,7 +4,7 @@
 <section class="stack narrow-block">
   <p class="eyebrow">Старая таблица</p>
   <h1>Импорт сертификатов</h1>
-  <p class="lede">Подойдёт Excel или CSV. Первая строка — заголовки: ФИО, логин, номинал, комментарий, срок. На каждую строку появится ссылка. Если в старом файле есть колонка «остаток», перенесём его.</p>
+  <p class="lede">Подойдёт Excel или CSV. Первая строка — заголовки: ФИО, номинал, отдел, должность, телефон, комментарий, срок. Логин не обязателен. На каждую строку появится ссылка. Если в старом файле есть колонка «остаток», перенесём его.</p>
   <p><a class="text-link" href="/hr/import/sample.csv">Скачать пример</a></p>
   <form method="post" action="/hr/import" enctype="multipart/form-data" class="stack">
     <input type="hidden" name="csrf_token" value="{{ csrf }}">
@@ -18,14 +18,13 @@
 <div class="table-wrap">
   <table>
     <thead>
-      <tr><th>Строка</th><th>Результат</th><th>Логин</th><th>Ссылка</th><th>Сертификат</th></tr>
+      <tr><th>Строка</th><th>Результат</th><th>Ссылка</th><th>Сертификат</th></tr>
     </thead>
     <tbody>
       {% for row in results %}
       <tr>
         <td>{{ row.row_number }}</td>
         <td>{{ row.message }}</td>
-        <td>{{ row.login }}</td>
         <td class="share">{{ row.link }}</td>
         <td>{{ row.public_number }}</td>
       </tr>

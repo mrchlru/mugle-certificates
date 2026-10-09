@@ -5,16 +5,34 @@
   {% include "_card.html" %}
   <section class="stack">
     <h1>{{ card.holder_name }}</h1>
-    <p class="muted">Логин {{ card.holder_login }}</p>
+    {% if card.department or card.job_title or card.phone %}
+    <p class="muted">
+      {% if card.department %}{{ card.department }}{% endif %}
+      {% if card.job_title %}{% if card.department %} · {% endif %}{{ card.job_title }}{% endif %}
+      {% if card.phone %}{% if card.department or card.job_title %} · {% endif %}{{ card.phone }}{% endif %}
+    </p>
+    {% endif %}
     <div class="flash secret">
       <p class="eyebrow">Ссылка сотруднику</p>
       <p class="share">{{ share_url }}</p>
       <button class="text-link" type="button" data-copy="{{ share_url }}">Скопировать</button>
     </div>
-    <form method="post" action="/hr/c/{{ card.id }}/name" class="inline">
+    <form method="post" action="/hr/c/{{ card.id }}/name" class="stack">
       <input type="hidden" name="csrf_token" value="{{ csrf }}">
-      <input name="full_name" value="{{ card.holder_name }}" required>
-      <button class="btn ghost" type="submit">Имя</button>
+      <p class="eyebrow">Сотрудник</p>
+      <label class="field">ФИО
+        <input name="full_name" value="{{ card.holder_name }}" required>
+      </label>
+      <label class="field">Отдел
+        <input name="department" value="{{ card.department }}" maxlength="120">
+      </label>
+      <label class="field">Должность
+        <input name="job_title" value="{{ card.job_title }}" maxlength="120">
+      </label>
+      <label class="field">Телефон
+        <input name="phone" value="{{ card.phone }}" maxlength="40" inputmode="tel">
+      </label>
+      <button class="btn ghost" type="submit">Сохранить</button>
     </form>
     <form method="post" action="/hr/c/{{ card.id }}/expires" class="stack">
       <input type="hidden" name="csrf_token" value="{{ csrf }}">

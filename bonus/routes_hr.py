@@ -32,10 +32,10 @@ from bonus.services import (
     create_staff,
     credit_certificate,
     issue_certificate,
-    rename_holder,
     set_blocked,
     set_certificate_expiry,
     set_user_active,
+    update_holder_profile,
 )
 from bonus.values import MoneyError, format_money, parse_date
 
@@ -83,7 +83,9 @@ def issue_submit(
     db: Session = Depends(get_db),
     user: User = Depends(require(Role.hr)),
     full_name: str = Form(""),
-    login: str = Form(""),
+    department: str = Form(""),
+    job_title: str = Form(""),
+    phone: str = Form(""),
     nominal: str = Form(""),
     note: str = Form(""),
     expires_on: str = Form(""),
@@ -107,7 +109,7 @@ def issue_submit(
             db,
             IssueDraft(
                 full_name=full_name,
-                login=login,
+                login="",
                 password="",
                 nominal=nominal_value,
                 balance=None,
@@ -116,6 +118,9 @@ def issue_submit(
                 segment_id=segment.id,
                 template_id=None if template is None else template.id,
                 color=normalize_color(color),
+                department=department,
+                job_title=job_title,
+                phone=phone,
             ),
             user,
         )
@@ -341,9 +346,12 @@ def name_submit(
     db: Session = Depends(get_db),
     user: User = Depends(require(Role.hr)),
     full_name: str = Form(""),
+    department: str = Form(""),
+    job_title: str = Form(""),
+    phone: str = Form(""),
     csrf_token: str = Form(""),
 ):
-    """Исправляет имя на карточке."""
+    """Обновляет ФИО и внутренние поля сотрудника."""
     certificate = _certificate_or_redirect(db, request, certificate_id)
     if certificate is None:
         return RedirectResponse("/hr", status_code=303)
@@ -352,11 +360,18 @@ def name_submit(
         guard_csrf(request, csrf_token)
         if holder is None:
             raise BonusError("Сотрудник не найден")
-        rename_holder(db, holder, full_name)
+        update_holder_profile(
+            db,
+            holder,
+            full_name=full_name,
+            department=department,
+            job_title=job_title,
+            phone=phone,
+        )
     except BonusError as exc:
         flash(request, exc.message, "bad")
     else:
-        flash(request, "Имя обновлено")
+        flash(request, "Данные сотрудника сохранены")
     return RedirectResponse(f"/hr/c/{certificate_id}", status_code=303)
 
 

@@ -11,9 +11,16 @@
     <label class="field">ФИО
       <input name="full_name" required>
     </label>
-    <label class="field">Логин
-      <input name="login" autocomplete="off" required>
+    <label class="field">Отдел
+      <input name="department" maxlength="120" placeholder="Необязательно">
     </label>
+    <label class="field">Должность
+      <input name="job_title" maxlength="120" placeholder="Необязательно">
+    </label>
+    <label class="field">Телефон
+      <input name="phone" maxlength="40" inputmode="tel" placeholder="Необязательно">
+    </label>
+    <p class="muted">Отдел, должность и телефон видны только в кабинете HR и участвуют в поиске.</p>
     <label class="field">Сегмент
       <select name="segment_id" id="segment-select" required>
         <option value="" data-requires-expiry="0">Выберите сегмент</option>

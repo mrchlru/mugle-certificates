@@ -45,6 +45,9 @@ class IssueDraft:
     segment_id: int | None = None
     template_id: int | None = None
     color: str = "#00A8A8"
+    department: str = ""
+    job_title: str = ""
+    phone: str = ""
 
 
 def issue_certificate(db: Session, draft: IssueDraft, actor: User | None) -> IssuedCertificate:
@@ -202,10 +205,26 @@ def set_blocked(db: Session, certificate: Certificate, actor: User, blocked: boo
 
 def rename_holder(db: Session, user: User, full_name: str) -> None:
     """Исправляет имя на карточке."""
+    update_holder_profile(db, user, full_name=full_name)
+
+
+def update_holder_profile(
+    db: Session,
+    user: User,
+    *,
+    full_name: str,
+    department: str = "",
+    job_title: str = "",
+    phone: str = "",
+) -> None:
+    """Обновляет ФИО и внутренние поля сотрудника."""
     cleaned = " ".join(full_name.split())
     if len(cleaned) < 2:
         raise BonusError("Укажите имя и фамилию")
     user.full_name = cleaned[:200]
+    user.department = _clean_optional(department, 120)
+    user.job_title = _clean_optional(job_title, 120)
+    user.phone = _clean_optional(phone, 40)
     db.commit()
 
 
@@ -305,6 +324,9 @@ def _holder_for_issue(db: Session, draft: IssueDraft) -> tuple[User, str | None]
             password_hash=hash_password(generate_password()),
             role=Role.employee,
             restaurant="",
+            department=_clean_optional(draft.department, 120),
+            job_title=_clean_optional(draft.job_title, 120),
+            phone=_clean_optional(draft.phone, 40),
             is_active=True,
         )
         db.add(user)
@@ -317,7 +339,19 @@ def _holder_for_issue(db: Session, draft: IssueDraft) -> tuple[User, str | None]
     name = _clean_name(draft.full_name)
     if name != "":
         existing.full_name = name
+    _apply_holder_meta(existing, draft)
     return existing, None
+
+
+def _apply_holder_meta(user: User, draft: IssueDraft) -> None:
+    """Пишет отдел, должность и телефон с черновика выпуска."""
+    user.department = _clean_optional(draft.department, 120)
+    user.job_title = _clean_optional(draft.job_title, 120)
+    user.phone = _clean_optional(draft.phone, 40)
+
+
+def _clean_optional(value: str, limit: int) -> str:
+    return " ".join(value.split())[:limit]
 
 
 def _opening_amounts(nominal: int | None, balance: int | None) -> tuple[int, int]:

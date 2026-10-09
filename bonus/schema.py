@@ -17,6 +17,14 @@ def ensure_schema(engine: Engine) -> None:
             statements.append("ALTER TABLE certificates ADD COLUMN template_id INTEGER")
         if "color" not in columns:
             statements.append("ALTER TABLE certificates ADD COLUMN color VARCHAR(7) DEFAULT '#00A8A8'")
+    if "users" in tables:
+        columns = {column["name"] for column in inspector.get_columns("users")}
+        if "department" not in columns:
+            statements.append("ALTER TABLE users ADD COLUMN department VARCHAR(120) DEFAULT ''")
+        if "job_title" not in columns:
+            statements.append("ALTER TABLE users ADD COLUMN job_title VARCHAR(120) DEFAULT ''")
+        if "phone" not in columns:
+            statements.append("ALTER TABLE users ADD COLUMN phone VARCHAR(40) DEFAULT ''")
     if "segments" in tables:
         columns = {column["name"] for column in inspector.get_columns("segments")}
         if "accrual_period" not in columns:
