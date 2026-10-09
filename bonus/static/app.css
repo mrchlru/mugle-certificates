@@ -1315,11 +1315,19 @@ body:has(.wallet-wrap) .flash {
   pointer-events: none;
 }
 
-.staff-search input {
+.staff-page .staff-search input[type="search"] {
   min-height: 42px;
-  padding-left: 36px;
+  padding: 0 14px 0 38px;
   border-radius: 12px;
   background: white;
+}
+
+.staff-page .staff-search input[type="search"]::-webkit-search-decoration,
+.staff-page .staff-search input[type="search"]::-webkit-search-cancel-button,
+.staff-page .staff-search input[type="search"]::-webkit-search-results-button,
+.staff-page .staff-search input[type="search"]::-webkit-search-results-decoration {
+  display: none;
+  -webkit-appearance: none;
 }
 
 .staff-create,
