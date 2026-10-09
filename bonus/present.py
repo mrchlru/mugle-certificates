@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from bonus.catalog import media_url
 from bonus.models import Certificate, CertificateStatus, Role, Segment, Transaction, TxType, User
 from bonus.qr import qr_svg
+from bonus.services import apply_due_expiries, apply_expiry_writeoff
 from bonus.values import MSK, as_utc, format_short_code, today_msk
 
 UNDO_WINDOW = timedelta(minutes=15)
@@ -92,6 +93,9 @@ def load_cards(db: Session, holder_id: int, base_url: str, actor: User) -> list[
 
 def load_card(db: Session, certificate: Certificate, base_url: str, actor: User | None) -> CardView:
     """Одна карточка вместе с историей."""
+    if apply_expiry_writeoff(db, certificate):
+        db.commit()
+        db.refresh(certificate)
     holder = db.get(User, certificate.holder_id)
     history = tuple(
         _history(
@@ -132,6 +136,7 @@ def recent_debits(db: Session, actor: User, limit: int = 8) -> list[TxView]:
 
 def search_certificates(db: Session, query: str, segment_id: int | None = None) -> list[CardView]:
     """Список для HR. Поиск по имени и фильтр по сегменту."""
+    apply_due_expiries(db)
     statement = (
         select(Certificate, User)
         .join(User, Certificate.holder_id == User.id)
@@ -166,6 +171,7 @@ def search_certificates(db: Session, query: str, segment_id: int | None = None) 
 
 def dashboard_stats(db: Session) -> DashboardStats:
     """Сколько живых сертификатов, какой общий остаток и сколько списали сегодня."""
+    apply_due_expiries(db)
     active_count = int(
         db.scalar(
             select(func.count()).select_from(Certificate).where(Certificate.status == CertificateStatus.active)

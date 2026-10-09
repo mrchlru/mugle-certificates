@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from bonus.models import Certificate, CertificateStatus, Role, Transaction, TxType, User
 from bonus.security import generate_password, hash_password
-from bonus.values import as_utc, today_msk
+from bonus.values import as_utc, format_date, today_msk
 
 UNDO_WINDOW = timedelta(minutes=15)
 
@@ -49,6 +49,7 @@ class IssueDraft:
     job_title: str = ""
     phone: str = ""
     discount_percent: int = 0
+    segment_name: str = ""
 
 
 def issue_certificate(db: Session, draft: IssueDraft, actor: User | None) -> IssuedCertificate:
@@ -107,6 +108,9 @@ def debit_certificate(
     comment: str,
 ) -> Transaction:
     """Списывает бонусы. Повторный клик не уводит остаток ниже нуля."""
+    if apply_expiry_writeoff(db, certificate):
+        db.commit()
+        db.refresh(certificate)
     _ensure_can_debit(certificate, amount)
     changed = _change_balance(db, certificate.id, -amount, require_active=True)
     if not changed:
@@ -234,7 +238,50 @@ def update_holder_profile(
 def set_certificate_expiry(db: Session, certificate: Certificate, expires_on: date | None) -> None:
     """Задаёт или снимает срок действия сертификата."""
     certificate.expires_on = expires_on
+    db.flush()
+    apply_expiry_writeoff(db, certificate)
     db.commit()
+    db.refresh(certificate)
+
+
+def apply_expiry_writeoff(db: Session, certificate: Certificate) -> bool:
+    """Если срок прошёл — списывает весь остаток в журнал."""
+    if certificate.expires_on is None or certificate.expires_on >= today_msk():
+        return False
+    if certificate.balance <= 0:
+        return False
+    amount = certificate.balance
+    until = format_date(certificate.expires_on)
+    certificate.balance = 0
+    _add_transaction(
+        db,
+        certificate_id=certificate.id,
+        actor_id=None,
+        tx_type=TxType.expire,
+        amount=amount,
+        balance_after=0,
+        comment=f"Списано: истёк срок (годен до {until})",
+    )
+    db.flush()
+    return True
+
+
+def apply_due_expiries(db: Session) -> int:
+    """Проходит по просроченным сертификатам с остатком и списывает их."""
+    rows = db.scalars(
+        select(Certificate).where(
+            Certificate.expires_on.is_not(None),
+            Certificate.expires_on < today_msk(),
+            Certificate.balance > 0,
+        )
+    ).all()
+    changed = 0
+    for certificate in rows:
+        if apply_expiry_writeoff(db, certificate):
+            changed += 1
+    if changed:
+        db.commit()
+    return changed
 
 
 def change_password(db: Session, user: User, current: str, new_password: str) -> None:
@@ -321,15 +368,25 @@ def find_certificate(db: Session, raw: str) -> Certificate | None:
         return None
     by_token = db.scalar(select(Certificate).where(Certificate.token == extracted))
     if by_token is not None:
-        return by_token
+        return _ready_certificate(db, by_token)
     compact = extracted.replace("-", "").replace(" ", "").upper()
     by_short = db.scalar(select(Certificate).where(Certificate.short_code == compact))
     if by_short is not None:
-        return by_short
+        return _ready_certificate(db, by_short)
     public = _public_number(compact)
     if public == "":
         return None
-    return db.scalar(select(Certificate).where(Certificate.public_number == public))
+    found = db.scalar(select(Certificate).where(Certificate.public_number == public))
+    if found is None:
+        return None
+    return _ready_certificate(db, found)
+
+
+def _ready_certificate(db: Session, certificate: Certificate) -> Certificate:
+    if apply_expiry_writeoff(db, certificate):
+        db.commit()
+        db.refresh(certificate)
+    return certificate
 
 
 def _holder_for_issue(db: Session, draft: IssueDraft) -> tuple[User, str | None]:

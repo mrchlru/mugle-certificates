@@ -126,6 +126,7 @@ def tx_label(tx_type: TxType | str, reversal_of_id: int | None) -> str:
         TxType.block.value: "Блокировка",
         TxType.unblock.value: "Разблокировка",
         TxType.migrate.value: "Перенос остатка",
+        TxType.expire.value: "Списание по сроку",
     }
     key = tx_type.value if isinstance(tx_type, TxType) else tx_type
     return labels.get(key, key)

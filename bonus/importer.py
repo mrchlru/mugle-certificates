@@ -5,9 +5,10 @@ import io
 from dataclasses import dataclass
 from datetime import date
 
-from openpyxl import load_workbook
+from openpyxl import Workbook, load_workbook
+from openpyxl.utils import get_column_letter
 
-from bonus.services import BonusError, IssueDraft
+from bonus.services import BonusError, IssueDraft, normalize_discount
 from bonus.values import MoneyError, parse_date, parse_money
 
 _ALIASES: dict[str, set[str]] = {
@@ -16,12 +17,56 @@ _ALIASES: dict[str, set[str]] = {
     "password": {"пароль", "password", "pass"},
     "nominal": {"номинал", "сумма", "nominal", "выдано", "сумма сертификата", "лимит"},
     "balance": {"остаток", "баланс", "balance", "осталось"},
-    "note": {"комментарий", "примечание", "note", "коммент", "ресторан", "примечание"},
+    "note": {"комментарий", "примечание", "note", "коммент"},
     "expires": {"срок", "действует до", "expires", "дата", "годен до"},
     "department": {"отдел", "department", "подразделение"},
-    "job_title": {"должность", "job_title", "позиция", "position"},
+    "job_title": {"должность", "job_title", "позиция", "position", "роль"},
     "phone": {"телефон", "phone", "тел", "мобильный"},
+    "discount": {"процент", "скидка", "discount", "%", "процент на карточке"},
+    "segment": {"сегмент", "segment", "тип", "тип сертификата"},
 }
+
+_SAMPLE_HEADERS: tuple[str, ...] = (
+    "ФИО",
+    "Отдел",
+    "Должность",
+    "Телефон",
+    "Номинал",
+    "Процент",
+    "Сегмент",
+    "Комментарий",
+    "Срок",
+    "Остаток",
+)
+
+_SAMPLE_WIDTHS: tuple[int, ...] = (22, 14, 16, 18, 12, 10, 26, 16, 14, 12)
+
+_SAMPLE_ROWS: tuple[tuple[object, ...], ...] = (
+    (
+        "Иванов Иван",
+        "Офис",
+        "Менеджер",
+        "+7 900 111-22-33",
+        10000,
+        30,
+        "Ежемесячные бонусы",
+        "Офис",
+        "31.12.2026",
+        "",
+    ),
+    (
+        "Петрова Анна",
+        "Кухня",
+        "Повар",
+        "+7 900 222-33-44",
+        5000,
+        "",
+        "Ланч",
+        "Кухня",
+        "",
+        3500,
+    ),
+)
 
 
 @dataclass(frozen=True)
@@ -44,6 +89,22 @@ class ImportRowResult:
     password: str = ""
     public_number: str = ""
     link: str = ""
+
+
+def build_sample_workbook() -> bytes:
+    """Готовый Excel-пример с нормальной шириной столбцов."""
+    workbook = Workbook()
+    sheet = workbook.active
+    assert sheet is not None
+    sheet.title = "sertifikaty"
+    sheet.append(list(_SAMPLE_HEADERS))
+    for row in _SAMPLE_ROWS:
+        sheet.append(list(row))
+    for index, width in enumerate(_SAMPLE_WIDTHS, start=1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
 
 
 def parse_table(filename: str, payload: bytes) -> list[ParsedRow]:
@@ -109,12 +170,15 @@ def _header_map(first: tuple[object, ...]) -> tuple[dict[str, int], int]:
         return mapping, 1
     return {
         "full_name": 0,
-        "login": 1,
-        "password": 2,
-        "nominal": 3,
-        "balance": 4,
-        "note": 5,
-        "expires": 6,
+        "department": 1,
+        "job_title": 2,
+        "phone": 3,
+        "nominal": 4,
+        "discount": 5,
+        "segment": 6,
+        "note": 7,
+        "expires": 8,
+        "balance": 9,
     }, 0
 
 
@@ -133,6 +197,7 @@ def _draft_from_cells(cells: tuple[object, ...], header: dict[str, int]) -> Issu
         nominal = parse_money(_cell(cells, header, "nominal"), blank_as_none=True)
         balance = parse_money(_cell(cells, header, "balance"), blank_as_none=True)
         expires = parse_date(_cell(cells, header, "expires"))
+        discount = _parse_discount(_cell(cells, header, "discount"))
     except MoneyError as exc:
         raise BonusError(exc.message) from exc
     return IssueDraft(
@@ -146,7 +211,19 @@ def _draft_from_cells(cells: tuple[object, ...], header: dict[str, int]) -> Issu
         department=str(_cell(cells, header, "department") or "").strip(),
         job_title=str(_cell(cells, header, "job_title") or "").strip(),
         phone=str(_cell(cells, header, "phone") or "").strip(),
+        discount_percent=discount,
+        segment_name=str(_cell(cells, header, "segment") or "").strip(),
     )
+
+
+def _parse_discount(raw: object) -> int:
+    text = str(raw or "").strip().replace("%", "")
+    if text == "":
+        return 0
+    try:
+        return normalize_discount(int(float(text)))
+    except (TypeError, ValueError) as exc:
+        raise BonusError("Процент — целое число от 0 до 100") from exc
 
 
 def _cell(cells: tuple[object, ...], header: dict[str, int], key: str) -> object:

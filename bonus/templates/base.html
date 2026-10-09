@@ -28,7 +28,35 @@
     {% endif %}
   </header>
   {% endblock %}
+  {% if user and user.role.value == 'hr' and section is defined %}
+  <div class="wrap nav-wrap">
+    {% if user.must_change_password %}
+    <p class="flash bad">Смените пароль, который выдали при запуске. Это занимает минуту.</p>
+    {% endif %}
+    {% if warn_secret %}
+    <p class="flash bad">Перед реальными сертификатами задайте свой SECRET_KEY в настройках Timeweb.</p>
+    {% endif %}
+    {% for item in flashes %}
+      {% if item.level == 'secret' %}
+      <p class="flash secret">Пароль <strong>{{ item.message }}</strong>
+        <button class="text-link" type="button" data-copy="{{ item.message }}">Скопировать</button>
+      </p>
+      {% else %}
+      <p class="flash {{ item.level }}">{{ item.message }}</p>
+      {% endif %}
+    {% endfor %}
+    <nav class="subnav">
+      <a href="/hr" {% if section == 'home' %}class="is-on"{% endif %}>Сводка</a>
+      <a href="/hr/new" {% if section == 'issue' %}class="is-on"{% endif %}>Выписать</a>
+      <a href="/hr/design" {% if section == 'design' %}class="is-on"{% endif %}>Оформление</a>
+      <a href="/hr/ledger" {% if section == 'ledger' %}class="is-on"{% endif %}>Журнал</a>
+      <a href="/hr/import" {% if section == 'import' %}class="is-on"{% endif %}>Импорт</a>
+      <a href="/hr/staff" {% if section == 'staff' %}class="is-on"{% endif %}>Доступ</a>
+    </nav>
+  </div>
+  {% endif %}
   <main class="{% block main_class %}wrap{% endblock %}">
+    {% if not (user and user.role.value == 'hr' and section is defined) %}
     {% if user and user.must_change_password %}
     <p class="flash bad">Смените пароль, который выдали при запуске. Это занимает минуту.</p>
     {% endif %}
@@ -44,15 +72,6 @@
       <p class="flash {{ item.level }}">{{ item.message }}</p>
       {% endif %}
     {% endfor %}
-    {% if user and user.role.value == 'hr' and section is defined %}
-    <nav class="subnav">
-      <a href="/hr" {% if section == 'home' %}class="is-on"{% endif %}>Сводка</a>
-      <a href="/hr/new" {% if section == 'issue' %}class="is-on"{% endif %}>Выписать</a>
-      <a href="/hr/design" {% if section == 'design' %}class="is-on"{% endif %}>Оформление</a>
-      <a href="/hr/ledger" {% if section == 'ledger' %}class="is-on"{% endif %}>Журнал</a>
-      <a href="/hr/import" {% if section == 'import' %}class="is-on"{% endif %}>Импорт</a>
-      <a href="/hr/staff" {% if section == 'staff' %}class="is-on"{% endif %}>Доступ</a>
-    </nav>
     {% endif %}
     {% block content %}{% endblock %}
   </main>

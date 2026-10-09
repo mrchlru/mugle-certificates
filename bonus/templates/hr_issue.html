@@ -1,97 +1,210 @@
 {% extends "base.html" %}
 {% block title %}Выписать{% endblock %}
-{% block main_class %}narrow{% endblock %}
+{% block main_class %}wrap{% endblock %}
 {% block content %}
-<section class="stack">
-  <p class="eyebrow">Новый сертификат</p>
-  <h1>Выписать</h1>
-  <p class="lede">После выпуска появится ссылка. Её нужно отправить сотруднику — это и есть его сертификат.</p>
-  <form method="post" action="/hr/new" class="stack">
-    <input type="hidden" name="csrf_token" value="{{ csrf }}">
-    <label class="field">ФИО
-      <input name="full_name" required>
-    </label>
-    <label class="field">Отдел
-      <input name="department" maxlength="120" placeholder="Необязательно">
-    </label>
-    <label class="field">Должность
-      <input name="job_title" maxlength="120" placeholder="Необязательно">
-    </label>
-    <label class="field">Телефон
-      <input name="phone" maxlength="40" inputmode="tel" placeholder="Необязательно">
-    </label>
-    <p class="muted">Отдел, должность и телефон видны только в кабинете HR и участвуют в поиске.</p>
-    <label class="field">Сегмент
-      <select name="segment_id" id="segment-select" required>
-        <option value="" data-requires-expiry="0">Выберите сегмент</option>
-        {% for segment in segments %}
-        <option value="{{ segment.id }}" data-requires-expiry="{{ '1' if segment.requires_expiry else '0' }}">{{ segment.name }}</option>
-        {% endfor %}
-      </select>
-    </label>
-    <label class="field" id="expires-field">Срок действия
-      <input type="date" name="expires_on" id="expires-on">
-      <span class="muted field-hint" id="expires-hint">Для бартера и дня рождения обязателен</span>
-    </label>
-    <label class="field">Номинал, ₽
-      <input name="nominal" inputmode="decimal" required placeholder="10000">
-    </label>
-    <fieldset class="color-field">
-      <legend>Цвет карточки</legend>
-      <div class="color-grid">
-        {% for value, title in colors %}
-        <label class="color-option" title="{{ title }}">
-          <input type="radio" name="color" value="{{ value }}" {% if loop.first %}checked{% endif %}>
-          <span style="background: {{ value }}"></span>
-        </label>
-        {% endfor %}
+<div class="issue-layout">
+  <aside class="issue-preview stack">
+    <p class="eyebrow">Как увидит сотрудник</p>
+    <article class="wallet-card" id="card-preview" style="--card: {{ colors[0][0] }};">
+      <div class="wallet-top">
+        <img class="wallet-logo" src="/static/logo.svg" alt="Mugle Rest" width="58" height="47">
+        <div class="wallet-balance">
+          <p class="wallet-label">Баланс</p>
+          <p class="wallet-amount" id="preview-amount">0</p>
+          <p class="wallet-discount" id="preview-discount" hidden></p>
+        </div>
       </div>
-    </fieldset>
-    <label class="field">Шаблон баннера
-      <select name="template_id" id="template-select">
-        <option value="0" data-discount="0">Без картинки</option>
-        {% for item in templates %}
-        <option value="{{ item.id }}" data-discount="{{ item.discount_percent or 0 }}">{{ item.name }}{% if item.discount_percent %} · {{ item.discount_percent }}%{% endif %}</option>
-        {% endfor %}
-      </select>
-    </label>
-    {% if not templates %}
-    <p class="muted">Сначала загрузите картинку в разделе «Оформление».</p>
-    {% endif %}
-    <label class="field">Процент на карточке
-      <input name="discount_percent" id="discount-percent" inputmode="numeric" placeholder="например 30" maxlength="3">
-    </label>
-    <p class="muted">На карточке покажется просто «30%», без слова «скидка». Можно подставить из шаблона.</p>
-    <label class="field">Комментарий
-      <input name="note" maxlength="500">
-    </label>
-    <button class="btn wide" type="submit">Выписать сертификат</button>
-  </form>
-</section>
+      <div class="wallet-banner is-empty" id="preview-banner">
+        <img id="preview-banner-img" alt="" width="720" height="264" hidden>
+        <div class="wallet-placeholder" id="preview-banner-empty">
+          <span>mugle rest</span>
+        </div>
+      </div>
+      <div class="wallet-body">
+        <p class="wallet-label">Владелец карты</p>
+        <p class="wallet-holder" id="preview-holder">Имя сотрудника</p>
+        <p class="wallet-expiry" id="preview-expiry" hidden></p>
+        <div class="wallet-code">
+          <div class="wallet-qr preview-qr" aria-hidden="true"></div>
+          <p class="wallet-code-number">••••••</p>
+        </div>
+        <p class="wallet-meta">MR-••••• · Черновик</p>
+      </div>
+    </article>
+  </aside>
+  <section class="stack issue-form">
+    <p class="eyebrow">Новый сертификат</p>
+    <h1>Выписать</h1>
+    <p class="lede">После выпуска появится ссылка. Её нужно отправить сотруднику — это и есть его сертификат.</p>
+    <form method="post" action="/hr/new" class="stack" id="issue-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <label class="field">ФИО
+        <input name="full_name" id="field-name" required>
+      </label>
+      <label class="field">Отдел
+        <input name="department" maxlength="120" placeholder="Необязательно">
+      </label>
+      <label class="field">Должность
+        <input name="job_title" maxlength="120" placeholder="Необязательно">
+      </label>
+      <label class="field">Телефон
+        <input name="phone" maxlength="40" inputmode="tel" placeholder="Необязательно">
+      </label>
+      <p class="muted">Отдел, должность и телефон видны только в кабинете HR и участвуют в поиске.</p>
+      <label class="field">Сегмент
+        <select name="segment_id" id="segment-select" required>
+          <option value="" data-requires-expiry="0">Выберите сегмент</option>
+          {% for segment in segments %}
+          <option value="{{ segment.id }}" data-requires-expiry="{{ '1' if segment.requires_expiry else '0' }}">{{ segment.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="field" id="expires-field">Срок действия
+        <input type="date" name="expires_on" id="expires-on">
+        <span class="muted field-hint" id="expires-hint">Для бартера и дня рождения обязателен</span>
+      </label>
+      <label class="field">Номинал, ₽
+        <input name="nominal" id="field-nominal" inputmode="decimal" required placeholder="10000">
+      </label>
+      <fieldset class="color-field">
+        <legend>Цвет карточки</legend>
+        <div class="color-grid">
+          {% for value, title in colors %}
+          <label class="color-option" title="{{ title }}">
+            <input type="radio" name="color" value="{{ value }}" {% if loop.first %}checked{% endif %}>
+            <span style="background: {{ value }}"></span>
+          </label>
+          {% endfor %}
+        </div>
+      </fieldset>
+      <label class="field">Шаблон баннера
+        <select name="template_id" id="template-select">
+          <option value="0" data-discount="0" data-image="">Без картинки</option>
+          {% for item in templates %}
+          <option value="{{ item.id }}" data-discount="{{ item.discount_percent or 0 }}" data-image="{{ media_url(item.image_path) }}">{{ item.name }}{% if item.discount_percent %} · {{ item.discount_percent }}%{% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% if not templates %}
+      <p class="muted">Сначала загрузите картинку в разделе «Оформление».</p>
+      {% endif %}
+      <label class="field">Процент на карточке
+        <input name="discount_percent" id="discount-percent" inputmode="numeric" placeholder="например 30" maxlength="3">
+      </label>
+      <p class="muted">На карточке покажется просто «30%», без слова «скидка». Можно подставить из шаблона.</p>
+      <label class="field">Комментарий
+        <input name="note" maxlength="500">
+      </label>
+      <button class="btn wide" type="submit">Выписать сертификат</button>
+    </form>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}
 <script>
 (function () {
   var select = document.getElementById("segment-select");
-  var input = document.getElementById("expires-on");
+  var expires = document.getElementById("expires-on");
   var hint = document.getElementById("expires-hint");
-  if (select && input) {
-    function syncExpiry() {
-      var option = select.options[select.selectedIndex];
-      var needed = option && option.getAttribute("data-requires-expiry") === "1";
-      input.required = needed;
-      if (hint) hint.hidden = !needed;
-    }
-    select.addEventListener("change", syncExpiry);
-    syncExpiry();
-  }
   var templates = document.getElementById("template-select");
   var discount = document.getElementById("discount-percent");
+  var nameInput = document.getElementById("field-name");
+  var nominalInput = document.getElementById("field-nominal");
+  var card = document.getElementById("card-preview");
+  var amountEl = document.getElementById("preview-amount");
+  var discountEl = document.getElementById("preview-discount");
+  var holderEl = document.getElementById("preview-holder");
+  var expiryEl = document.getElementById("preview-expiry");
+  var banner = document.getElementById("preview-banner");
+  var bannerImg = document.getElementById("preview-banner-img");
+  var bannerEmpty = document.getElementById("preview-banner-empty");
+
+  function syncExpiry() {
+    if (!select || !expires) return;
+    var option = select.options[select.selectedIndex];
+    var needed = option && option.getAttribute("data-requires-expiry") === "1";
+    expires.required = needed;
+    if (hint) hint.hidden = !needed;
+  }
+
+  function formatMoney(raw) {
+    var text = String(raw || "").replace(/\s/g, "").replace(",", ".");
+    var value = Number(text);
+    if (!isFinite(value) || value < 0) return "0";
+    var whole = Math.floor(value);
+    return String(whole).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  }
+
+  function formatDate(iso) {
+    if (!iso) return "";
+    var parts = iso.split("-");
+    if (parts.length !== 3) return "";
+    return parts[2] + "." + parts[1] + "." + parts[0];
+  }
+
+  function syncPreview() {
+    if (!card) return;
+    var color = document.querySelector('input[name="color"]:checked');
+    card.style.setProperty("--card", color ? color.value : "#00A8A8");
+    var name = (nameInput && nameInput.value.trim()) || "Имя сотрудника";
+    var segment = "";
+    if (select && select.selectedIndex > 0) {
+      segment = select.options[select.selectedIndex].textContent.trim().toLowerCase();
+    }
+    holderEl.textContent = segment ? name + ", " + segment : name;
+    amountEl.textContent = formatMoney(nominalInput ? nominalInput.value : "");
+    var pct = discount && discount.value.trim() ? Number(discount.value.trim()) : 0;
+    if (pct > 0) {
+      discountEl.hidden = false;
+      discountEl.textContent = pct + "%";
+    } else {
+      discountEl.hidden = true;
+      discountEl.textContent = "";
+    }
+    var until = formatDate(expires ? expires.value : "");
+    if (until) {
+      expiryEl.hidden = false;
+      expiryEl.textContent = "Действует до " + until;
+    } else {
+      expiryEl.hidden = true;
+      expiryEl.textContent = "";
+    }
+    var image = "";
+    if (templates && templates.selectedIndex >= 0) {
+      image = templates.options[templates.selectedIndex].getAttribute("data-image") || "";
+    }
+    if (image) {
+      banner.classList.remove("is-empty");
+      bannerImg.hidden = false;
+      bannerImg.src = image;
+      bannerEmpty.hidden = true;
+    } else {
+      banner.classList.add("is-empty");
+      bannerImg.hidden = true;
+      bannerImg.removeAttribute("src");
+      bannerEmpty.hidden = false;
+    }
+  }
+
+  if (select) select.addEventListener("change", function () { syncExpiry(); syncPreview(); });
+  if (expires) expires.addEventListener("change", syncPreview);
+  if (expires) expires.addEventListener("input", syncPreview);
+  if (nameInput) nameInput.addEventListener("input", syncPreview);
+  if (nominalInput) nominalInput.addEventListener("input", syncPreview);
+  if (discount) discount.addEventListener("input", syncPreview);
+  document.querySelectorAll('input[name="color"]').forEach(function (radio) {
+    radio.addEventListener("change", syncPreview);
+  });
   if (templates && discount) {
     templates.addEventListener("change", function () {
       var option = templates.options[templates.selectedIndex];
       var value = option ? option.getAttribute("data-discount") : "0";
       if (value && value !== "0") discount.value = value;
+      syncPreview();
     });
   }
+  syncExpiry();
+  syncPreview();
 })();
 </script>
 {% endblock %}

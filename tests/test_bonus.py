@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 import bonus.db as database
@@ -18,11 +19,12 @@ from bonus.catalog import (
 )
 from bonus.config import get_settings
 from bonus.importer import parse_table
-from bonus.models import AccrualPeriod, Base, Role, User
+from bonus.models import AccrualPeriod, Base, Role, Transaction, TxType, User
 from bonus.security import hash_password
 from bonus.services import (
     BonusError,
     IssueDraft,
+    apply_expiry_writeoff,
     create_staff,
     credit_certificate,
     debit_certificate,
@@ -146,6 +148,25 @@ def test_certificate_expiry_can_be_set() -> None:
     set_certificate_expiry(db, issued.certificate, date(2026, 12, 31))
     assert issued.certificate.expires_on == date(2026, 12, 31)
     assert format_date(issued.certificate.expires_on) == "31.12.2026"
+
+
+def test_expired_certificate_writes_off_balance() -> None:
+    db = _db()
+    hr = _person(db, "hr", Role.hr)
+    issued = issue_certificate(db, _draft(500_000), hr)
+    set_certificate_expiry(db, issued.certificate, date(2020, 1, 1))
+    db.refresh(issued.certificate)
+    assert issued.certificate.balance == 0
+    assert apply_expiry_writeoff(db, issued.certificate) is False
+    tx = db.scalar(
+        select(Transaction).where(
+            Transaction.certificate_id == issued.certificate.id,
+            Transaction.tx_type == TxType.expire,
+        )
+    )
+    assert tx is not None
+    assert tx.amount == 500_000
+    assert "годен до" in tx.comment
 
 
 def test_template_replace_deletes_old_file() -> None:

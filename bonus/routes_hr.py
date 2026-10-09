@@ -23,7 +23,11 @@ from bonus.catalog import (
 )
 from bonus.db import get_db
 from bonus.http import form_money, guard_csrf, optional_money, public_base, render, require
-from bonus.importer import ImportRowResult, parse_table
+from dataclasses import replace
+
+from sqlalchemy import select
+
+from bonus.importer import ImportRowResult, build_sample_workbook, parse_table
 from bonus.models import CardTemplate, Role, Segment, User
 from bonus.present import dashboard_stats, ledger, list_staff, load_card, search_certificates
 from bonus.security import flash
@@ -76,6 +80,7 @@ def issue_form(request: Request, db: Session = Depends(get_db), user: User = Dep
         segments=list_segments(db),
         templates=list_templates(db),
         colors=CARD_COLORS,
+        media_url=media_url,
     )
 
 
@@ -458,9 +463,17 @@ def ledger_page(request: Request, db: Session = Depends(get_db), user: User = De
 
 
 @router.get("/hr/import")
-def import_form(request: Request, user: User = Depends(require(Role.hr))):
+def import_form(request: Request, db: Session = Depends(get_db), user: User = Depends(require(Role.hr))):
     """Загрузка таблицы из старого Statix Bonus."""
-    return render(request, "hr_import.html", section="import", results=None)
+    templates = list_templates(db)
+    return render(
+        request,
+        "hr_import.html",
+        section="import",
+        results=None,
+        templates=templates,
+        selected_template_id=templates[0].id if templates else 0,
+    )
 
 
 @router.post("/hr/import")
@@ -469,33 +482,46 @@ def import_submit(
     db: Session = Depends(get_db),
     user: User = Depends(require(Role.hr)),
     table: UploadFile = File(...),
+    template_id: int = Form(0),
     csrf_token: str = Form(""),
 ):
-    """Переносит строки таблицы в сертификаты."""
+    """Переносит строки таблицы в сертификаты с одним общим дизайном."""
     try:
         guard_csrf(request, csrf_token)
+        template = resolve_template(db, template_id)
         payload = table.file.read()
         parsed = parse_table(table.filename or "table.csv", payload)
     except BonusError as exc:
         flash(request, exc.message, "bad")
         return RedirectResponse("/hr/import", status_code=303)
-    results = [_import_row(db, user, row, public_base(request)) for row in parsed]
-    return render(request, "hr_import.html", section="import", results=results)
+    shared_template_id = None if template is None else template.id
+    results = [
+        _import_row(db, user, row, public_base(request), shared_template_id) for row in parsed
+    ]
+    return render(
+        request,
+        "hr_import.html",
+        section="import",
+        results=results,
+        templates=list_templates(db),
+        selected_template_id=shared_template_id or 0,
+    )
+
+
+@router.get("/hr/import/sample.xlsx")
+def sample_xlsx(user: User = Depends(require(Role.hr))) -> Response:
+    """Пример таблицы Excel с актуальными колонками и шириной."""
+    return Response(
+        content=build_sample_workbook(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=sertifikaty.xlsx"},
+    )
 
 
 @router.get("/hr/import/sample.csv")
 def sample_csv(user: User = Depends(require(Role.hr))) -> Response:
-    """Пример таблицы, который открывается в Excel."""
-    body = (
-        "ФИО;Логин;Номинал;Комментарий;Срок\n"
-        "Иванов Иван;ivanov;10000;Офис;31.12.2026\n"
-        "Петрова Анна;petrova;5000;Кухня;\n"
-    )
-    return Response(
-        content=body.encode("utf-8-sig"),
-        media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": "attachment; filename=sertifikaty.csv"},
-    )
+    """Старый адрес примера — отдаём актуальный Excel."""
+    return sample_xlsx(user)
 
 
 @router.get("/hr/staff")
@@ -587,11 +613,23 @@ def _discount(raw: str) -> int:
         raise BonusError("Процент — целое число от 0 до 100") from exc
 
 
-def _import_row(db: Session, actor: User, row, base_url: str) -> ImportRowResult:
+def _import_row(
+    db: Session,
+    actor: User,
+    row,
+    base_url: str,
+    template_id: int | None,
+) -> ImportRowResult:
+    """Выпускает одну строку импорта с общим шаблоном оформления."""
     if row.draft is None:
         return ImportRowResult(row_number=row.row_number, ok=False, message=row.error)
     try:
-        issued = issue_certificate(db, row.draft, actor)
+        draft = replace(
+            row.draft,
+            segment_id=_segment_id_by_name(db, row.draft.segment_name),
+            template_id=template_id,
+        )
+        issued = issue_certificate(db, draft, actor)
     except BonusError as exc:
         db.rollback()
         return ImportRowResult(row_number=row.row_number, ok=False, message=exc.message)
@@ -603,3 +641,17 @@ def _import_row(db: Session, actor: User, row, base_url: str) -> ImportRowResult
         public_number=issued.certificate.public_number,
         link=f"{base_url}/c/{issued.certificate.token}",
     )
+
+
+def _segment_id_by_name(db: Session, name: str) -> int | None:
+    cleaned = " ".join(name.split())
+    if cleaned == "":
+        return None
+    found = db.scalar(select(Segment).where(Segment.name == cleaned))
+    if found is None:
+        found = db.scalar(select(Segment).where(Segment.name.ilike(cleaned)))
+    if found is None:
+        raise BonusError(f"Сегмент «{cleaned}» не найден")
+    if not found.is_active:
+        raise BonusError(f"Сегмент «{cleaned}» скрыт")
+    return found.id

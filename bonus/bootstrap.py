@@ -9,7 +9,7 @@ from bonus.config import Settings
 from bonus.db import open_session
 from bonus.models import Role, User
 from bonus.security import hash_password
-from bonus.services import IssueDraft, debit_certificate, issue_certificate
+from bonus.services import IssueDraft, apply_due_expiries, debit_certificate, issue_certificate
 
 
 def bootstrap(settings: Settings) -> None:
@@ -20,6 +20,7 @@ def bootstrap(settings: Settings) -> None:
     try:
         ensure_default_segments(db)
         optimize_existing_templates(db)
+        apply_due_expiries(db)
         exists = db.scalar(select(User.id).limit(1))
         if exists is not None:
             return

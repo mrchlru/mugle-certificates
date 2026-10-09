@@ -44,6 +44,7 @@ class TxType(str, enum.Enum):
     block = "block"
     unblock = "unblock"
     migrate = "migrate"
+    expire = "expire"
 
 
 class AccrualPeriod(str, enum.Enum):
