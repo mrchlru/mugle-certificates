@@ -10,6 +10,7 @@ import bonus.db as database
 from bonus.importer import parse_table
 from bonus.models import Base, Role, User
 from bonus.security import hash_password
+from bonus.catalog import create_segment, ensure_default_segments, save_template
 from bonus.services import (
     BonusError,
     IssueDraft,
@@ -49,6 +50,39 @@ def test_debit_stops_at_zero() -> None:
     with pytest.raises(BonusError):
         debit_certificate(db, issued.certificate, manager, 700_000, "ещё")
     assert issued.certificate.balance == 600_000
+
+
+def test_issue_with_segment_color_and_template() -> None:
+    db = _db()
+    ensure_default_segments(db)
+    hr = _person(db, "hr", Role.hr)
+    segment = create_segment(db, "Тестовый бартер")
+    template = save_template(
+        db,
+        name="Баннер",
+        filename="banner.png",
+        payload=_tiny_png(),
+        content_type="image/png",
+    )
+    issued = issue_certificate(
+        db,
+        IssueDraft(
+            full_name="Роман Мазов",
+            login="mazov",
+            password="",
+            nominal=500_000,
+            balance=None,
+            note="",
+            expires_on=None,
+            segment_id=segment.id,
+            template_id=template.id,
+            color="#FF5A00",
+        ),
+        hr,
+    )
+    assert issued.certificate.color == "#FF5A00"
+    assert issued.certificate.segment_id == segment.id
+    assert issued.certificate.template_id == template.id
 
 
 def test_credit_adds_bonuses_to_balance() -> None:
@@ -137,8 +171,9 @@ def test_login_card_and_debit(tmp_path, monkeypatch) -> None:
         assert card.status_code == 200
         assert "Мария Соколова" in card.text
         assert "<svg" in card.text
-        short = re.search(r'class="short">([^<]+)', card.text)
+        short = re.search(r'class="wallet-code-number">([^<]+)', card.text)
         assert short is not None
+        assert "wallet-card" in card.text
         _logout(client, hr.text)
         _login(client, "manager", "mugle-desk")
         opened = client.get("/desk", params={"code": short.group(1)}, follow_redirects=True)
@@ -203,4 +238,12 @@ def _draft(nominal: int) -> IssueDraft:
         balance=None,
         note="",
         expires_on=None,
+    )
+
+
+def _tiny_png() -> bytes:
+    return (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f"
+        b"\x00\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82"
     )

@@ -22,6 +22,8 @@ from bonus.routes_hr import router as hr_router
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     settings = get_settings()
+    settings.data_path().mkdir(parents=True, exist_ok=True)
+    (settings.data_path() / "uploads").mkdir(parents=True, exist_ok=True)
     configure_database(settings.normalized_database_url())
     bootstrap(settings)
     yield
@@ -30,6 +32,8 @@ async def _lifespan(_app: FastAPI):
 def create_app() -> FastAPI:
     """Собирает сайт, статику и четыре раздела."""
     settings = get_settings()
+    uploads = settings.data_path() / "uploads"
+    uploads.mkdir(parents=True, exist_ok=True)
     app = FastAPI(title="Mugle Rest — сертификаты", version=__version__, lifespan=_lifespan)
     app.add_middleware(
         SessionMiddleware,
@@ -40,6 +44,7 @@ def create_app() -> FastAPI:
         https_only=settings.https_only,
     )
     app.mount("/static", StaticFiles(directory=str(PACKAGE_DIR / "static")), name="static")
+    app.mount("/media", StaticFiles(directory=str(uploads)), name="media")
     app.include_router(auth_router)
     app.include_router(card_router)
     app.include_router(desk_router)

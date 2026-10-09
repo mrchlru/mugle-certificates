@@ -6,9 +6,10 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from bonus.models import Certificate, CertificateStatus, Role, Transaction, TxType, User
+from bonus.catalog import media_url
+from bonus.models import Certificate, CertificateStatus, Role, Segment, Transaction, TxType, User
 from bonus.qr import qr_svg
-from bonus.values import MSK, as_utc, today_msk
+from bonus.values import MSK, as_utc, format_short_code, today_msk
 
 UNDO_WINDOW = timedelta(minutes=15)
 
@@ -46,6 +47,10 @@ class CardView:
     holder_login: str
     status: CertificateStatus
     can_spend: bool
+    color: str
+    segment_name: str
+    template_url: str
+    barcode_value: str
     qr_svg: str
     history: tuple[TxView, ...]
 
@@ -85,21 +90,7 @@ def load_card(db: Session, certificate: Certificate, base_url: str, actor: User 
     holder_name = holder.full_name if holder is not None else ""
     login = holder.login if holder is not None else ""
     history = tuple(_history(db, certificate.id, actor, holder_name, certificate.public_number))
-    return CardView(
-        id=certificate.id,
-        public_number=certificate.public_number,
-        short_code=certificate.short_code,
-        balance=certificate.balance,
-        nominal=certificate.nominal,
-        note=certificate.note,
-        expires_on=certificate.expires_on,
-        holder_name=holder_name,
-        holder_login=login,
-        status=certificate.status,
-        can_spend=_can_spend(certificate),
-        qr_svg=qr_svg(f"{base_url}/m/{certificate.token}"),
-        history=history,
-    )
+    return _card_view(db, certificate, holder_name, login, base_url, history)
 
 
 def recent_debits(db: Session, actor: User, limit: int = 8) -> list[TxView]:
@@ -119,38 +110,33 @@ def recent_debits(db: Session, actor: User, limit: int = 8) -> list[TxView]:
     ]
 
 
-def search_certificates(db: Session, query: str) -> list[CardView]:
-    """Список для HR. Поиск по имени, логину и номеру без учёта регистра."""
-    rows = db.execute(
+def search_certificates(db: Session, query: str, segment_id: int | None = None) -> list[CardView]:
+    """Список для HR. Поиск по имени и фильтр по сегменту."""
+    statement = (
         select(Certificate, User)
         .join(User, Certificate.holder_id == User.id)
         .order_by(Certificate.id.desc())
-    ).all()
+    )
+    if segment_id is not None and segment_id > 0:
+        statement = statement.where(Certificate.segment_id == segment_id)
+    rows = db.execute(statement).all()
     needle = query.strip().casefold()
     found: list[CardView] = []
     for certificate, holder in rows:
+        segment_name = _segment_name(db, certificate.segment_id)
         haystack = " ".join(
-            (holder.full_name, holder.login, certificate.public_number, certificate.short_code, certificate.note)
+            (
+                holder.full_name,
+                holder.login,
+                certificate.public_number,
+                certificate.short_code,
+                certificate.note,
+                segment_name,
+            )
         ).casefold()
         if needle and needle not in haystack:
             continue
-        found.append(
-            CardView(
-                id=certificate.id,
-                public_number=certificate.public_number,
-                short_code=certificate.short_code,
-                balance=certificate.balance,
-                nominal=certificate.nominal,
-                note=certificate.note,
-                expires_on=certificate.expires_on,
-                holder_name=holder.full_name,
-                holder_login=holder.login,
-                status=certificate.status,
-                can_spend=_can_spend(certificate),
-                qr_svg="",
-                history=(),
-            )
-        )
+        found.append(_card_view(db, certificate, holder.full_name, holder.login, "", ()))
         if len(found) >= 300:
             break
     return found
@@ -272,6 +258,49 @@ def _tx_view(
         undone=undone,
         can_undo=_can_undo(tx, viewer, undone),
     )
+
+
+def _card_view(
+    db: Session,
+    certificate: Certificate,
+    holder_name: str,
+    login: str,
+    base_url: str,
+    history: tuple[TxView, ...],
+) -> CardView:
+    template_path = ""
+    if certificate.template_id is not None:
+        from bonus.models import CardTemplate
+
+        template = db.get(CardTemplate, certificate.template_id)
+        if template is not None and template.image_path:
+            template_path = media_url(template.image_path)
+    return CardView(
+        id=certificate.id,
+        public_number=certificate.public_number,
+        short_code=certificate.short_code,
+        balance=certificate.balance,
+        nominal=certificate.nominal,
+        note=certificate.note,
+        expires_on=certificate.expires_on,
+        holder_name=holder_name,
+        holder_login=login,
+        status=certificate.status,
+        can_spend=_can_spend(certificate),
+        color=certificate.color or "#00A8A8",
+        segment_name=_segment_name(db, certificate.segment_id),
+        template_url=template_path,
+        barcode_value=format_short_code(certificate.short_code).replace("-", ""),
+        qr_svg=qr_svg(f"{base_url}/m/{certificate.token}") if base_url else "",
+        history=history,
+    )
+
+
+def _segment_name(db: Session, segment_id: int | None) -> str:
+    if segment_id is None:
+        return ""
+    segment = db.get(Segment, segment_id)
+    return segment.name if segment is not None else ""
 
 
 def _can_spend(certificate: Certificate) -> bool:

@@ -67,6 +67,30 @@ class User(Base):
     )
 
 
+class Segment(Base):
+    """Тип сертификата: ланч, бартер, день рождения и свои сегменты."""
+
+    __tablename__ = "segments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), unique=True)
+    slug: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(default=True)
+
+
+class CardTemplate(Base):
+    """Картинка баннера, которую HR выбирает при выпуске."""
+
+    __tablename__ = "card_templates"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    image_path: Mapped[str] = mapped_column(String(200))
+    is_active: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: _utcnow())
+
+
 class Certificate(Base):
     """Именной сертификат с остатком бонусов."""
 
@@ -81,6 +105,9 @@ class Certificate(Base):
     token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     short_code: Mapped[str] = mapped_column(String(8), unique=True, index=True)
     holder_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    segment_id: Mapped[int | None] = mapped_column(ForeignKey("segments.id"), nullable=True, index=True)
+    template_id: Mapped[int | None] = mapped_column(ForeignKey("card_templates.id"), nullable=True)
+    color: Mapped[str] = mapped_column(String(7), default="#00A8A8")
     nominal: Mapped[int] = mapped_column(Integer)
     balance: Mapped[int] = mapped_column(Integer)
     note: Mapped[str] = mapped_column(String(500), default="")
@@ -94,6 +121,8 @@ class Certificate(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: _utcnow())
 
     holder: Mapped[User] = relationship(back_populates="certificates", foreign_keys=[holder_id])
+    segment: Mapped[Segment | None] = relationship()
+    template: Mapped[CardTemplate | None] = relationship()
 
 
 class Transaction(Base):

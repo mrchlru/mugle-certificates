@@ -44,10 +44,11 @@
       <p class="flash {{ item.level }}">{{ item.message }}</p>
       {% endif %}
     {% endfor %}
-    {% if user and user.role.value == 'hr' %}
+    {% if user and user.role.value == 'hr' and section is defined %}
     <nav class="subnav">
       <a href="/hr" {% if section == 'home' %}class="is-on"{% endif %}>Сводка</a>
       <a href="/hr/new" {% if section == 'issue' %}class="is-on"{% endif %}>Выписать</a>
+      <a href="/hr/design" {% if section == 'design' %}class="is-on"{% endif %}>Оформление</a>
       <a href="/hr/ledger" {% if section == 'ledger' %}class="is-on"{% endif %}>Журнал</a>
       <a href="/hr/import" {% if section == 'import' %}class="is-on"{% endif %}>Импорт</a>
       <a href="/hr/staff" {% if section == 'staff' %}class="is-on"{% endif %}>Доступ</a>

@@ -42,6 +42,9 @@ class IssueDraft:
     balance: int | None
     note: str
     expires_on: date | None
+    segment_id: int | None = None
+    template_id: int | None = None
+    color: str = "#00A8A8"
 
 
 def issue_certificate(db: Session, draft: IssueDraft, actor: User | None) -> IssuedCertificate:
@@ -53,6 +56,9 @@ def issue_certificate(db: Session, draft: IssueDraft, actor: User | None) -> Iss
         token=_new_token(db),
         short_code=_new_short_code(db),
         holder_id=holder.id,
+        segment_id=draft.segment_id,
+        template_id=draft.template_id,
+        color=draft.color or "#00A8A8",
         nominal=nominal,
         balance=balance,
         note=draft.note.strip()[:500],

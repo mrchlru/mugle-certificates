@@ -4,10 +4,23 @@ from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import RedirectResponse, Response
 from sqlalchemy.orm import Session
 
+from bonus.catalog import (
+    CARD_COLORS,
+    create_segment,
+    list_segments,
+    list_templates,
+    media_url,
+    normalize_color,
+    resolve_segment,
+    resolve_template,
+    save_template,
+    set_segment_active,
+    set_template_active,
+)
 from bonus.db import get_db
 from bonus.http import form_money, guard_csrf, optional_money, public_base, render, require
 from bonus.importer import ImportRowResult, parse_table
-from bonus.models import Role, User
+from bonus.models import CardTemplate, Role, Segment, User
 from bonus.present import dashboard_stats, ledger, list_staff, load_card, search_certificates
 from bonus.security import flash
 from bonus.services import (
@@ -31,22 +44,33 @@ def dashboard(
     db: Session = Depends(get_db),
     user: User = Depends(require(Role.hr)),
     q: str = "",
+    segment: int = 0,
 ):
-    """Сводка и поиск сертификатов."""
+    """Сводка и поиск сертификатов с фильтром по сегменту."""
+    segment_id = segment if segment > 0 else None
     return render(
         request,
         "hr.html",
         section="home",
         stats=dashboard_stats(db),
-        cards=search_certificates(db, q),
+        cards=search_certificates(db, q, segment_id),
         query=q,
+        segment_id=segment_id or 0,
+        segments=list_segments(db),
     )
 
 
 @router.get("/hr/new")
-def issue_form(request: Request, user: User = Depends(require(Role.hr))):
+def issue_form(request: Request, db: Session = Depends(get_db), user: User = Depends(require(Role.hr))):
     """Форма нового сертификата."""
-    return render(request, "hr_issue.html", section="issue")
+    return render(
+        request,
+        "hr_issue.html",
+        section="issue",
+        segments=list_segments(db),
+        templates=list_templates(db),
+        colors=CARD_COLORS,
+    )
 
 
 @router.post("/hr/new")
@@ -59,6 +83,9 @@ def issue_submit(
     nominal: str = Form(""),
     note: str = Form(""),
     expires_on: str = Form(""),
+    segment_id: int = Form(0),
+    template_id: int = Form(0),
+    color: str = Form("#00A8A8"),
     csrf_token: str = Form(""),
 ):
     """Выписывает сертификат на полный номинал и ведёт к ссылке для сотрудника."""
@@ -67,6 +94,8 @@ def issue_submit(
         nominal_value = optional_money(nominal)
         if nominal_value is None:
             raise BonusError("Укажите номинал")
+        segment = resolve_segment(db, segment_id)
+        template = resolve_template(db, template_id)
         issued = issue_certificate(
             db,
             IssueDraft(
@@ -77,6 +106,9 @@ def issue_submit(
                 balance=None,
                 note=note,
                 expires_on=_expires(expires_on),
+                segment_id=segment.id,
+                template_id=None if template is None else template.id,
+                color=normalize_color(color),
             ),
             user,
         )
@@ -85,6 +117,111 @@ def issue_submit(
         return RedirectResponse("/hr/new", status_code=303)
     flash(request, f"Сертификат {issued.certificate.public_number} выписан. Отправьте ссылку сотруднику.")
     return RedirectResponse(f"/hr/c/{issued.certificate.id}", status_code=303)
+
+
+@router.get("/hr/design")
+def design_page(request: Request, db: Session = Depends(get_db), user: User = Depends(require(Role.hr))):
+    """Сегменты и шаблоны для внешнего вида карточек."""
+    return render(
+        request,
+        "hr_design.html",
+        section="design",
+        segments=list_segments(db, active_only=False),
+        templates=list_templates(db, active_only=False),
+        media_url=media_url,
+    )
+
+
+@router.post("/hr/design/segments")
+def segment_create(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.hr)),
+    name: str = Form(""),
+    csrf_token: str = Form(""),
+):
+    """Добавляет свой сегмент."""
+    try:
+        guard_csrf(request, csrf_token)
+        create_segment(db, name)
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+    else:
+        flash(request, "Сегмент добавлен")
+    return RedirectResponse("/hr/design", status_code=303)
+
+
+@router.post("/hr/design/segments/{segment_id}/active")
+def segment_active(
+    segment_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.hr)),
+    active: str = Form("0"),
+    csrf_token: str = Form(""),
+):
+    """Включает или прячет сегмент."""
+    segment = db.get(Segment, segment_id)
+    try:
+        guard_csrf(request, csrf_token)
+        if segment is None:
+            raise BonusError("Сегмент не найден")
+        set_segment_active(db, segment, active == "1")
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+    else:
+        flash(request, "Сегмент обновлён")
+    return RedirectResponse("/hr/design", status_code=303)
+
+
+@router.post("/hr/design/templates")
+def template_create(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.hr)),
+    name: str = Form(""),
+    image: UploadFile = File(...),
+    csrf_token: str = Form(""),
+):
+    """Загружает картинку шаблона для баннера карточки."""
+    try:
+        guard_csrf(request, csrf_token)
+        payload = image.file.read()
+        save_template(
+            db,
+            name=name,
+            filename=image.filename or "template.png",
+            payload=payload,
+            content_type=image.content_type or "",
+        )
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+    else:
+        flash(request, "Шаблон загружен")
+    return RedirectResponse("/hr/design", status_code=303)
+
+
+@router.post("/hr/design/templates/{template_id}/active")
+def template_active(
+    template_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.hr)),
+    active: str = Form("0"),
+    csrf_token: str = Form(""),
+):
+    """Включает или отключает шаблон."""
+    template = db.get(CardTemplate, template_id)
+    try:
+        guard_csrf(request, csrf_token)
+        if template is None:
+            raise BonusError("Шаблон не найден")
+        set_template_active(db, template, active == "1")
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+    else:
+        flash(request, "Шаблон обновлён")
+    return RedirectResponse("/hr/design", status_code=303)
 
 
 @router.get("/hr/c/{certificate_id}")

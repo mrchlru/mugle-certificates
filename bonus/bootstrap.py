@@ -4,6 +4,7 @@ from pathlib import Path
 
 from sqlalchemy import select
 
+from bonus.catalog import ensure_default_segments, list_segments
 from bonus.config import Settings
 from bonus.db import open_session
 from bonus.models import Role, User
@@ -12,10 +13,12 @@ from bonus.services import IssueDraft, debit_certificate, issue_certificate
 
 
 def bootstrap(settings: Settings) -> None:
-    """Создаёт каталог данных и стартовые входы, если пользователей ещё нет."""
+    """Создаёт каталог данных, сегменты и стартовые входы."""
     settings.data_path().mkdir(parents=True, exist_ok=True)
+    (settings.data_path() / "uploads").mkdir(parents=True, exist_ok=True)
     db = open_session()
     try:
+        ensure_default_segments(db)
         exists = db.scalar(select(User.id).limit(1))
         if exists is not None:
             return
@@ -43,6 +46,7 @@ def bootstrap(settings: Settings) -> None:
             f"Управляющий: {manager.login} / {settings.manager_password}",
         ]
         if settings.seed_demo:
+            segments = list_segments(db)
             issued = issue_certificate(
                 db,
                 IssueDraft(
@@ -53,6 +57,9 @@ def bootstrap(settings: Settings) -> None:
                     balance=None,
                     note="Демонстрационный сертификат",
                     expires_on=None,
+                    segment_id=segments[0].id if segments else None,
+                    template_id=None,
+                    color="#00A8A8",
                 ),
                 hr,
             )

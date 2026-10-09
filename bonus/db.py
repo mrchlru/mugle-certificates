@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from bonus.models import Base
+from bonus.schema import ensure_schema
 
 engine: Engine | None = None
 SessionLocal: sessionmaker[Session] | None = None
@@ -25,6 +26,7 @@ def configure_database(url: str) -> None:
     _install_sqlite_pragmas(engine)
     SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     Base.metadata.create_all(engine)
+    ensure_schema(engine)
 
 
 def open_session() -> Session:

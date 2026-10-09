@@ -14,9 +14,39 @@
     <label class="field">Логин
       <input name="login" autocomplete="off" required>
     </label>
+    <label class="field">Сегмент
+      <select name="segment_id" required>
+        <option value="">Выберите сегмент</option>
+        {% for segment in segments %}
+        <option value="{{ segment.id }}">{{ segment.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
     <label class="field">Номинал, ₽
       <input name="nominal" inputmode="decimal" required placeholder="10000">
     </label>
+    <fieldset class="color-field">
+      <legend>Цвет карточки</legend>
+      <div class="color-grid">
+        {% for value, title in colors %}
+        <label class="color-option" title="{{ title }}">
+          <input type="radio" name="color" value="{{ value }}" {% if loop.first %}checked{% endif %}>
+          <span style="background: {{ value }}"></span>
+        </label>
+        {% endfor %}
+      </div>
+    </fieldset>
+    <label class="field">Шаблон баннера
+      <select name="template_id">
+        <option value="0">Без картинки</option>
+        {% for item in templates %}
+        <option value="{{ item.id }}">{{ item.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    {% if not templates %}
+    <p class="muted">Сначала загрузите картинку в разделе «Оформление».</p>
+    {% endif %}
     <label class="field">Комментарий
       <input name="note" maxlength="500">
     </label>

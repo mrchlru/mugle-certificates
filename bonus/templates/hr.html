@@ -15,10 +15,24 @@
     <p class="stat">{{ stats.spent_today|money }}</p>
   </article>
 </section>
-<form class="search" method="get" action="/hr">
+<form class="search filters" method="get" action="/hr">
   <input name="q" value="{{ query }}" placeholder="Имя, логин или номер">
+  <select name="segment">
+    <option value="0">Все сегменты</option>
+    {% for item in segments %}
+    <option value="{{ item.id }}" {% if segment_id == item.id %}selected{% endif %}>{{ item.name }}</option>
+    {% endfor %}
+  </select>
   <button class="btn" type="submit">Найти</button>
 </form>
+{% if segments %}
+<nav class="segment-chips">
+  <a href="/hr?q={{ query }}" class="{% if not segment_id %}is-on{% endif %}">Все</a>
+  {% for item in segments %}
+  <a href="/hr?q={{ query }}&segment={{ item.id }}" class="{% if segment_id == item.id %}is-on{% endif %}">{{ item.name }}</a>
+  {% endfor %}
+</nav>
+{% endif %}
 {% if cards %}
 <div class="table-wrap">
   <table>
@@ -26,6 +40,7 @@
       <tr>
         <th>Сертификат</th>
         <th>Сотрудник</th>
+        <th>Сегмент</th>
         <th>Остаток</th>
         <th>Статус</th>
       </tr>
@@ -33,8 +48,12 @@
     <tbody>
       {% for card in cards %}
       <tr>
-        <td><a href="/hr/c/{{ card.id }}">{{ card.public_number }}</a><span class="muted"> {{ format_short_code(card.short_code) }}</span></td>
+        <td>
+          <a href="/hr/c/{{ card.id }}">{{ card.public_number }}</a>
+          <span class="swatch" style="background: {{ card.color }}"></span>
+        </td>
         <td>{{ card.holder_name }}<br><span class="muted">{{ card.holder_login }}</span></td>
+        <td>{{ card.segment_name or "—" }}</td>
         <td>{{ card.balance|money }}</td>
         <td>{{ status_label(card.status, card.balance, card.expires_on) }}</td>
       </tr>

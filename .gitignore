@@ -6,3 +6,5 @@ __pycache__/
 data/*.db
 data/*.db-*
 data/CREDENTIALS.txt
+data/uploads/*
+!data/uploads/.gitkeep

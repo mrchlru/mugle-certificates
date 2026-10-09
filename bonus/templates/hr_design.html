@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Оформление{% endblock %}
+{% block content %}
+<div class="cert-layout">
+  <section class="stack">
+    <h1>Сегменты</h1>
+    <p class="lede">Ими фильтруют сертификаты и подписывают владельца на карточке.</p>
+    <form method="post" action="/hr/design/segments" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <input name="name" placeholder="Новый сегмент" required>
+      <button class="btn" type="submit">Добавить</button>
+    </form>
+    <ul class="people">
+      {% for item in segments %}
+      <li>
+        <div>
+          <p class="history-title">{{ item.name }}</p>
+          <p class="muted">{% if item.is_active %}активен{% else %}скрыт{% endif %}</p>
+        </div>
+        <form method="post" action="/hr/design/segments/{{ item.id }}/active">
+          <input type="hidden" name="csrf_token" value="{{ csrf }}">
+          <input type="hidden" name="active" value="{{ '0' if item.is_active else '1' }}">
+          <button class="text-link" type="submit">{{ 'Скрыть' if item.is_active else 'Показать' }}</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  <section class="stack">
+    <h1>Шаблоны</h1>
+    <p class="lede">Картинка попадает в середину карточки, как в старом Statix.</p>
+    <form method="post" action="/hr/design/templates" enctype="multipart/form-data" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <label class="field">Название
+        <input name="name" placeholder="Ланч, бартер…">
+      </label>
+      <label class="field">Картинка
+        <input type="file" name="image" accept="image/jpeg,image/png,image/webp" required>
+      </label>
+      <button class="btn" type="submit">Загрузить</button>
+    </form>
+    <ul class="template-list">
+      {% for item in templates %}
+      <li>
+        <img src="{{ media_url(item.image_path) }}" alt="{{ item.name }}">
+        <div>
+          <p class="history-title">{{ item.name }}</p>
+          <p class="muted">{% if item.is_active %}активен{% else %}скрыт{% endif %}</p>
+          <form method="post" action="/hr/design/templates/{{ item.id }}/active">
+            <input type="hidden" name="csrf_token" value="{{ csrf }}">
+            <input type="hidden" name="active" value="{{ '0' if item.is_active else '1' }}">
+            <button class="text-link" type="submit">{{ 'Отключить' if item.is_active else 'Включить' }}</button>
+          </form>
+        </div>
+      </li>
+      {% else %}
+      <li class="muted">Шаблонов пока нет.</li>
+      {% endfor %}
+    </ul>
+  </section>
+</div>
+{% endblock %}
