@@ -47,6 +47,10 @@ def ensure_schema(engine: Engine) -> None:
             statements.append(
                 "ALTER TABLE segments ADD COLUMN requires_expiry BOOLEAN DEFAULT FALSE"
             )
+        if "discount_percent" not in columns:
+            statements.append(
+                "ALTER TABLE segments ADD COLUMN discount_percent INTEGER DEFAULT 0"
+            )
     if not statements:
         return
     with engine.begin() as connection:

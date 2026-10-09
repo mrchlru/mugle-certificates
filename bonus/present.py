@@ -76,6 +76,8 @@ class StaffView:
 
     id: int
     full_name: str
+    first_name: str
+    last_name: str
     login: str
     role: Role
     restaurant: str
@@ -228,23 +230,50 @@ def ledger(db: Session, actor: User, limit: int = 200) -> list[TxView]:
     ]
 
 
-def list_staff(db: Session) -> list[StaffView]:
-    """Управляющие и HR."""
+def list_staff(db: Session, query: str = "") -> list[StaffView]:
+    """Управляющие и HR, опционально отфильтрованные поиском."""
     users = db.scalars(
         select(User).where(User.role != Role.employee).order_by(User.role, User.full_name)
     ).all()
-    return [
-        StaffView(
+    needle = " ".join(query.casefold().split())
+    rows: list[StaffView] = []
+    for user in users:
+        first_name, last_name = _staff_name_parts(user.full_name)
+        view = StaffView(
             id=user.id,
             full_name=user.full_name,
+            first_name=first_name,
+            last_name=last_name,
             login=user.login,
             role=user.role,
             restaurant=user.restaurant,
             phone=user.phone,
             is_active=user.is_active,
         )
-        for user in users
-    ]
+        if needle and needle not in _staff_search_blob(view):
+            continue
+        rows.append(view)
+    return rows
+
+
+def _staff_name_parts(full_name: str) -> tuple[str, str]:
+    """Разбирает «Фамилия Имя» в имя и фамилию для формы."""
+    parts = full_name.split()
+    if not parts:
+        return "", ""
+    if len(parts) == 1:
+        return parts[0], ""
+    return " ".join(parts[1:]), parts[0]
+
+
+def _staff_search_blob(view: StaffView) -> str:
+    """Строка для поиска по полям доступа."""
+    role = "hr" if view.role == Role.hr else "управляющий"
+    return " ".join(
+        part.casefold()
+        for part in (view.full_name, view.login, view.phone, view.restaurant, role)
+        if part
+    )
 
 
 def _history(

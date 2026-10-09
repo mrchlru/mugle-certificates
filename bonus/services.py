@@ -349,16 +349,67 @@ def _login_from_staff(last_name: str, phone: str) -> str:
     return base if base else "manager"
 
 
+def update_staff(
+    db: Session,
+    user: User,
+    *,
+    first_name: str,
+    last_name: str,
+    phone: str,
+    role: Role,
+    restaurant: str,
+    login: str,
+    password: str = "",
+) -> User:
+    """Меняет данные управляющего или HR, опционально задаёт новый пароль."""
+    if user.role == Role.employee:
+        raise BonusError("Сотрудник с сертификатом здесь не редактируется")
+    if role == Role.employee:
+        raise BonusError("Нельзя сделать этого пользователя обычным сотрудником")
+    first = " ".join(first_name.split())
+    last = " ".join(last_name.split())
+    if len(first) < 1 or len(last) < 1:
+        raise BonusError("Укажите имя и фамилию")
+    place = restaurant.strip()
+    if role == Role.manager and place == "":
+        raise BonusError("Укажите ресторан для управляющего")
+    if user.role == Role.hr and role != Role.hr:
+        _ensure_other_hr(db, user.id)
+    cleaned_login = _normalize_login(login)
+    twin = db.scalar(select(User.id).where(User.login == cleaned_login, User.id != user.id))
+    if twin is not None:
+        raise BonusError("Такой логин уже есть")
+    plain = password.strip()
+    if plain and len(plain) < 8:
+        raise BonusError("Пароль — минимум 8 символов")
+    user.full_name = _clean_name(f"{last} {first}")
+    user.login = cleaned_login
+    user.role = role
+    user.restaurant = place[:200]
+    user.phone = _clean_optional(phone, 40)
+    if plain:
+        user.password_hash = hash_password(plain)
+        user.must_change_password = True
+    db.commit()
+    db.refresh(user)
+    return user
+
+
 def set_user_active(db: Session, user: User, active: bool) -> None:
     """Отключает доступ, не стирая журнал. Последнего HR отключить нельзя."""
     if user.role == Role.hr and not active:
-        others = db.scalar(
-            select(User.id).where(User.role == Role.hr, User.is_active.is_(True), User.id != user.id)
-        )
-        if others is None:
-            raise BonusError("Нельзя отключить последнего сотрудника HR")
+        _ensure_other_hr(db, user.id)
     user.is_active = active
     db.commit()
+
+
+def _ensure_other_hr(db: Session, user_id: int) -> None:
+    """Проверяет, что в системе останется хотя бы один активный HR."""
+    others = db.scalar(
+        select(User.id).where(User.role == Role.hr, User.is_active.is_(True), User.id != user_id)
+    )
+    if others is None:
+        raise BonusError("Нельзя убрать последнего сотрудника HR")
 
 
 def find_certificate(db: Session, raw: str) -> Certificate | None:

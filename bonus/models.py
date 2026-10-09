@@ -93,6 +93,7 @@ class Segment(Base):
         default=AccrualPeriod.none,
     )
     requires_expiry: Mapped[bool] = mapped_column(default=False)
+    discount_percent: Mapped[int] = mapped_column(Integer, default=0)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(default=True)
 

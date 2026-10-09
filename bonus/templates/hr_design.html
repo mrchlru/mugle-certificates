@@ -15,7 +15,7 @@
 
       <form method="post" action="/hr/design/segments" class="design-create">
         <input type="hidden" name="csrf_token" value="{{ csrf }}">
-        <div class="design-form-row">
+        <div class="design-form-row design-form-row-3">
           <label class="field">Название
             <input name="name" placeholder="Новый сегмент" required autocomplete="off">
           </label>
@@ -25,6 +25,9 @@
               <option value="{{ value }}">{{ title }}</option>
               {% endfor %}
             </select>
+          </label>
+          <label class="field">Процент
+            <input name="discount_percent" inputmode="numeric" placeholder="30" maxlength="3">
           </label>
         </div>
         <label class="switch">
@@ -40,7 +43,7 @@
         <li class="design-card {% if not item.is_active %}is-off{% endif %}">
           <form method="post" action="/hr/design/segments/{{ item.id }}" class="design-card-form">
             <input type="hidden" name="csrf_token" value="{{ csrf }}">
-            <div class="design-form-row">
+            <div class="design-form-row design-form-row-3">
               <label class="field">Название
                 <input name="name" value="{{ item.name }}" required autocomplete="off">
               </label>
@@ -50,6 +53,9 @@
                   <option value="{{ value }}" {% if item.accrual_period.value == value %}selected{% endif %}>{{ title }}</option>
                   {% endfor %}
                 </select>
+              </label>
+              <label class="field">Процент
+                <input name="discount_percent" value="{{ item.discount_percent or '' }}" inputmode="numeric" maxlength="3" placeholder="0">
               </label>
             </div>
             <label class="switch">
@@ -61,7 +67,7 @@
               <span class="status-pill {% if item.is_active %}is-on{% else %}is-off{% endif %}">
                 {% if item.is_active %}Активен{% else %}Скрыт{% endif %}
               </span>
-              <span class="muted design-meta">{{ accrual_label(item.accrual_period) }}{% if item.requires_expiry %} · со сроком{% endif %}</span>
+              <span class="muted design-meta">{{ accrual_label(item.accrual_period) }}{% if item.requires_expiry %} · со сроком{% endif %}{% if item.discount_percent %} · {{ item.discount_percent }}%{% endif %}</span>
               <button class="btn ghost compact" type="submit">Сохранить</button>
             </div>
           </form>

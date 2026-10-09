@@ -156,6 +156,7 @@ def create_segment(
     accrual_period: AccrualPeriod = AccrualPeriod.none,
     *,
     requires_expiry: bool = False,
+    discount_percent: int = 0,
 ) -> Segment:
     """Добавляет новый сегмент."""
     cleaned = " ".join(name.split())
@@ -168,6 +169,7 @@ def create_segment(
         slug=_unique_slug(db, _slug(cleaned)),
         accrual_period=accrual_period,
         requires_expiry=requires_expiry,
+        discount_percent=normalize_discount(discount_percent),
         sort_order=1000 + int(db.scalar(select(Segment.id).order_by(Segment.id.desc()).limit(1)) or 0),
         is_active=True,
     )
@@ -184,8 +186,9 @@ def update_segment(
     name: str,
     accrual_period: AccrualPeriod,
     requires_expiry: bool,
+    discount_percent: int = 0,
 ) -> Segment:
-    """Меняет название, периодичность и признак срока действия."""
+    """Меняет название, периодичность, срок и процент на карточке."""
     cleaned = " ".join(name.split())
     if len(cleaned) < 2:
         raise BonusError("Укажите название сегмента")
@@ -195,6 +198,7 @@ def update_segment(
     segment.name = cleaned[:120]
     segment.accrual_period = accrual_period
     segment.requires_expiry = requires_expiry
+    segment.discount_percent = normalize_discount(discount_percent)
     db.commit()
     db.refresh(segment)
     return segment

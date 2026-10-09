@@ -1,71 +1,230 @@
 {% extends "base.html" %}
 {% block title %}Доступ{% endblock %}
 {% block content %}
-<div class="cert-layout">
-  <section class="stack">
-    <h1>Новый доступ</h1>
-    <p class="lede">Управляющий списывает бонусы в своём ресторане. Ресторан попадёт в журнал списаний.</p>
-    <form method="post" action="/hr/staff" class="stack">
-      <input type="hidden" name="csrf_token" value="{{ csrf }}">
-      <label class="field">Имя
-        <input name="first_name" required autocomplete="given-name">
-      </label>
-      <label class="field">Фамилия
-        <input name="last_name" required autocomplete="family-name">
-      </label>
-      <label class="field">Телефон
-        <input name="phone" maxlength="40" inputmode="tel" placeholder="+7 …">
-      </label>
-      <label class="field">Роль
-        <select name="role" id="staff-role">
-          <option value="manager">Управляющий</option>
-          <option value="hr">HR</option>
-        </select>
-      </label>
-      <label class="field">Ресторан
-        <input name="restaurant" id="staff-restaurant" placeholder="Хачапури Марико, Казань">
-      </label>
-      <label class="field">Пароль
-        <input name="password" autocomplete="new-password" placeholder="Если пусто — придумаем">
-      </label>
-      <button class="btn" type="submit">Создать</button>
-    </form>
-  </section>
-  <section>
-    <h2>Кто может входить</h2>
-    <ul class="people">
-      {% for person in staff %}
-      <li>
-        <div>
-          <p class="history-title">{{ person.full_name }}</p>
-          <p class="muted">
-            {{ 'HR' if person.role.value == 'hr' else 'Управляющий' }}
-            {% if person.restaurant %} · {{ person.restaurant }}{% endif %}
-            {% if person.phone %} · {{ person.phone }}{% endif %}
-            · {{ person.login }}
-            {% if not person.is_active %} · отключён{% endif %}
-          </p>
+<section class="staff-page">
+  <header class="staff-intro">
+    <h1>Доступ</h1>
+  </header>
+
+  <div class="staff-grid">
+    <section class="staff-panel">
+      <header class="staff-panel-head">
+        <h2>Новый доступ</h2>
+        <p class="muted">Управляющий списывает бонусы в своём ресторане. Ресторан попадёт в журнал.</p>
+      </header>
+      <form method="post" action="/hr/staff" class="staff-create">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <div class="staff-form-row">
+          <label class="field">Имя
+            <input name="first_name" required autocomplete="given-name">
+          </label>
+          <label class="field">Фамилия
+            <input name="last_name" required autocomplete="family-name">
+          </label>
         </div>
-        <form method="post" action="/hr/staff/{{ person.id }}/active">
-          <input type="hidden" name="csrf_token" value="{{ csrf }}">
-          <input type="hidden" name="active" value="{{ '0' if person.is_active else '1' }}">
-          <button class="text-link" type="submit">{{ 'Отключить' if person.is_active else 'Включить' }}</button>
-        </form>
-      </li>
-      {% endfor %}
-    </ul>
-  </section>
-</div>
+        <label class="field">Телефон
+          <input name="phone" maxlength="40" inputmode="tel" placeholder="+7 …">
+        </label>
+        <div class="staff-form-row">
+          <label class="field">Роль
+            <select name="role" id="staff-role">
+              <option value="manager">Управляющий</option>
+              <option value="hr">HR</option>
+            </select>
+          </label>
+          <label class="field">Ресторан
+            <input name="restaurant" id="staff-restaurant" placeholder="Хачапури Марико">
+          </label>
+        </div>
+        <label class="field">Пароль
+          <input name="password" autocomplete="new-password" placeholder="Если пусто — придумаем">
+        </label>
+        <button class="btn" type="submit">Создать</button>
+      </form>
+    </section>
+
+    <section class="staff-panel">
+      <header class="staff-panel-head staff-list-head">
+        <div>
+          <h2>Кто может входить</h2>
+          <p class="muted">Поиск, правка и включение доступа.</p>
+        </div>
+        <label class="staff-search">
+          <span class="staff-search-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <circle cx="11" cy="11" r="6.5"/>
+              <path d="M16 16l4 4"/>
+            </svg>
+          </span>
+          <input type="search" id="staff-search" value="{{ query or '' }}" placeholder="Имя, логин, ресторан…" autocomplete="off">
+        </label>
+      </header>
+
+      <ul class="staff-list" id="staff-list">
+        {% for person in staff %}
+        <li class="staff-card {% if not person.is_active %}is-off{% endif %} {% if edit_id == person.id %}is-editing{% endif %}"
+            data-search="{{ (person.full_name ~ ' ' ~ person.login ~ ' ' ~ person.phone ~ ' ' ~ person.restaurant ~ ' ' ~ ('hr' if person.role.value == 'hr' else 'управляющий'))|lower }}">
+          <div class="staff-row">
+            <div class="staff-info">
+              <p class="staff-name">{{ person.full_name }}</p>
+              <p class="muted staff-meta">
+                {{ 'HR' if person.role.value == 'hr' else 'Управляющий' }}
+                {% if person.restaurant %} · {{ person.restaurant }}{% endif %}
+                {% if person.phone %} · {{ person.phone }}{% endif %}
+                · {{ person.login }}
+                {% if not person.is_active %} · отключён{% endif %}
+              </p>
+            </div>
+            <div class="staff-actions">
+              <button type="button" class="icon-btn" data-edit-toggle="{{ person.id }}" aria-label="Изменить" aria-expanded="{{ 'true' if edit_id == person.id else 'false' }}">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 20h9"/>
+                  <path d="M16.45 3.9a2.1 2.1 0 0 1 3 3L8 18.35 4 19.5l1.15-4z"/>
+                </svg>
+              </button>
+              <form method="post" action="/hr/staff/{{ person.id }}/active" class="staff-active-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf }}">
+                <input type="hidden" name="q" value="{{ query or '' }}">
+                <input type="hidden" name="active" value="{{ '1' if person.is_active else '0' }}" data-active-value>
+                <label class="switch" title="{{ 'Отключить' if person.is_active else 'Включить' }}">
+                  <input type="checkbox" {% if person.is_active %}checked{% endif %} data-active-switch aria-label="{{ 'Доступ включён' if person.is_active else 'Доступ выключен' }}">
+                  <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+                </label>
+              </form>
+            </div>
+          </div>
+
+          <form method="post" action="/hr/staff/{{ person.id }}" class="staff-edit" data-edit-panel="{{ person.id }}" {% if edit_id != person.id %}hidden{% endif %}>
+            <input type="hidden" name="csrf_token" value="{{ csrf }}">
+            <input type="hidden" name="q" value="{{ query or '' }}">
+            <div class="staff-form-row">
+              <label class="field">Имя
+                <input name="first_name" value="{{ person.first_name }}" required>
+              </label>
+              <label class="field">Фамилия
+                <input name="last_name" value="{{ person.last_name }}" required>
+              </label>
+            </div>
+            <div class="staff-form-row">
+              <label class="field">Логин
+                <input name="login" value="{{ person.login }}" required autocomplete="username">
+              </label>
+              <label class="field">Телефон
+                <input name="phone" value="{{ person.phone }}" maxlength="40" inputmode="tel">
+              </label>
+            </div>
+            <div class="staff-form-row">
+              <label class="field">Роль
+                <select name="role" data-edit-role>
+                  <option value="manager" {% if person.role.value == 'manager' %}selected{% endif %}>Управляющий</option>
+                  <option value="hr" {% if person.role.value == 'hr' %}selected{% endif %}>HR</option>
+                </select>
+              </label>
+              <label class="field">Ресторан
+                <input name="restaurant" value="{{ person.restaurant }}" data-edit-restaurant placeholder="Хачапури Марико">
+              </label>
+            </div>
+            <label class="field">Новый пароль
+              <input name="password" autocomplete="new-password" placeholder="Оставьте пустым, если не менять">
+            </label>
+            <div class="staff-edit-actions">
+              <button class="btn compact" type="submit">Сохранить</button>
+              <button class="btn soft compact" type="button" data-edit-cancel="{{ person.id }}">Отмена</button>
+            </div>
+          </form>
+        </li>
+        {% endfor %}
+        {% if not staff %}
+        <li class="staff-empty muted">
+          {% if query %}Никого не нашли по этому запросу.{% else %}Пока никого нет — создайте первый доступ слева.{% endif %}
+        </li>
+        {% endif %}
+        <li class="staff-empty muted" id="staff-empty-search" hidden>Никого не нашли по этому запросу.</li>
+      </ul>
+    </section>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}
 <script>
 (function () {
-  var role = document.getElementById("staff-role");
-  var restaurant = document.getElementById("staff-restaurant");
-  if (!role || !restaurant) return;
-  function sync() {
-    restaurant.required = role.value === "manager";
+  var createRole = document.getElementById("staff-role");
+  var createRestaurant = document.getElementById("staff-restaurant");
+  function syncCreateRestaurant() {
+    if (!createRole || !createRestaurant) return;
+    createRestaurant.required = createRole.value === "manager";
   }
-  role.addEventListener("change", sync);
-  sync();
+  if (createRole) {
+    createRole.addEventListener("change", syncCreateRestaurant);
+    syncCreateRestaurant();
+  }
+
+  document.querySelectorAll("[data-edit-role]").forEach(function (role) {
+    var form = role.closest("form");
+    if (!form) return;
+    var restaurant = form.querySelector("[data-edit-restaurant]");
+    function sync() {
+      if (restaurant) restaurant.required = role.value === "manager";
+    }
+    role.addEventListener("change", sync);
+    sync();
+  });
+
+  document.querySelectorAll("[data-active-switch]").forEach(function (box) {
+    box.addEventListener("change", function () {
+      var form = box.closest("form");
+      if (!form) return;
+      var hidden = form.querySelector("[data-active-value]");
+      if (hidden) hidden.value = box.checked ? "1" : "0";
+      form.submit();
+    });
+  });
+
+  function setEditing(id, on) {
+    document.querySelectorAll(".staff-card").forEach(function (card) {
+      var panel = card.querySelector("[data-edit-panel]");
+      var button = card.querySelector("[data-edit-toggle]");
+      var open = on && panel && panel.getAttribute("data-edit-panel") === String(id);
+      card.classList.toggle("is-editing", Boolean(open));
+      if (panel) panel.hidden = !open;
+      if (button) button.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+  }
+
+  document.querySelectorAll("[data-edit-toggle]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      var id = button.getAttribute("data-edit-toggle");
+      var card = button.closest(".staff-card");
+      var open = card && card.classList.contains("is-editing");
+      setEditing(id, !open);
+    });
+  });
+
+  document.querySelectorAll("[data-edit-cancel]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      setEditing(button.getAttribute("data-edit-cancel"), false);
+    });
+  });
+
+  var search = document.getElementById("staff-search");
+  var list = document.getElementById("staff-list");
+  var emptySearch = document.getElementById("staff-empty-search");
+  function filterStaff() {
+    if (!search || !list) return;
+    var needle = search.value.trim().toLowerCase().replace(/\s+/g, " ");
+    var visible = 0;
+    list.querySelectorAll(".staff-card").forEach(function (card) {
+      var hay = card.getAttribute("data-search") || "";
+      var show = !needle || hay.indexOf(needle) !== -1;
+      card.hidden = !show;
+      if (show) visible += 1;
+    });
+    if (emptySearch) emptySearch.hidden = visible > 0 || !needle;
+  }
+  if (search) {
+    search.addEventListener("input", filterStaff);
+    filterStaff();
+  }
 })();
 </script>
 {% endblock %}

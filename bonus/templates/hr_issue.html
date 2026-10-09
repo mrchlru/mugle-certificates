@@ -72,9 +72,9 @@
       <p class="muted">Отдел, должность и телефон видны только в кабинете HR и участвуют в поиске.</p>
       <label class="field">Сегмент
         <select name="segment_id" id="segment-select" required>
-          <option value="" data-requires-expiry="0">Выберите сегмент</option>
+          <option value="" data-requires-expiry="0" data-discount="0" data-name="">Выберите сегмент</option>
           {% for segment in segments %}
-          <option value="{{ segment.id }}" data-requires-expiry="{{ '1' if segment.requires_expiry else '0' }}">{{ segment.name }}</option>
+          <option value="{{ segment.id }}" data-name="{{ segment.name }}" data-requires-expiry="{{ '1' if segment.requires_expiry else '0' }}" data-discount="{{ segment.discount_percent or 0 }}">{{ segment.name }}{% if segment.discount_percent %} · {{ segment.discount_percent }}%{% endif %}</option>
           {% endfor %}
         </select>
       </label>
@@ -110,7 +110,7 @@
       <label class="field">Процент на карточке
         <input name="discount_percent" id="discount-percent" inputmode="numeric" placeholder="например 30" maxlength="3">
       </label>
-      <p class="muted">На карточке покажется просто «30%», без слова «скидка». Можно подставить из шаблона.</p>
+      <p class="muted">На карточке покажется просто «30%», без слова «скидка». Подставляется из сегмента или шаблона.</p>
       <label class="field">Комментарий
         <input name="note" maxlength="500">
       </label>
@@ -168,7 +168,7 @@
     var name = (nameInput && nameInput.value.trim()) || "Имя сотрудника";
     var segment = "";
     if (select && select.selectedIndex > 0) {
-      segment = select.options[select.selectedIndex].textContent.trim().toLowerCase();
+      segment = (select.options[select.selectedIndex].getAttribute("data-name") || "").trim().toLowerCase();
     }
     holderEl.textContent = segment ? name + ", " + segment : name;
     amountEl.textContent = formatMoney(nominalInput ? nominalInput.value : "");
@@ -205,7 +205,19 @@
     }
   }
 
-  if (select) select.addEventListener("change", function () { syncExpiry(); syncPreview(); });
+  function applyDiscountFrom(option) {
+    if (!discount || !option) return;
+    var value = option.getAttribute("data-discount") || "0";
+    if (value && value !== "0") discount.value = value;
+  }
+
+  if (select) {
+    select.addEventListener("change", function () {
+      syncExpiry();
+      applyDiscountFrom(select.options[select.selectedIndex]);
+      syncPreview();
+    });
+  }
   if (expires) expires.addEventListener("change", syncPreview);
   if (expires) expires.addEventListener("input", syncPreview);
   if (nameInput) nameInput.addEventListener("input", syncPreview);
@@ -216,9 +228,7 @@
   });
   if (templates && discount) {
     templates.addEventListener("change", function () {
-      var option = templates.options[templates.selectedIndex];
-      var value = option ? option.getAttribute("data-discount") : "0";
-      if (value && value !== "0") discount.value = value;
+      applyDiscountFrom(templates.options[templates.selectedIndex]);
       syncPreview();
     });
   }

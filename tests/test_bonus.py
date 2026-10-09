@@ -75,17 +75,26 @@ def test_segment_edit_and_accrual_period() -> None:
     assert barter.requires_expiry is True
     birthday = next(item for item in list_segments(db) if item.name == "День рождения")
     assert birthday.requires_expiry is True
-    segment = create_segment(db, "Временный", AccrualPeriod.none, requires_expiry=True)
+    segment = create_segment(
+        db,
+        "Временный",
+        AccrualPeriod.none,
+        requires_expiry=True,
+        discount_percent=30,
+    )
+    assert segment.discount_percent == 30
     updated = update_segment(
         db,
         segment,
         name="Премия",
         accrual_period=AccrualPeriod.monthly,
         requires_expiry=False,
+        discount_percent=15,
     )
     assert updated.name == "Премия"
     assert updated.accrual_period == AccrualPeriod.monthly
     assert updated.requires_expiry is False
+    assert updated.discount_percent == 15
 
 
 def test_issue_with_segment_color_and_template() -> None:

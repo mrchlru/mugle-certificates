@@ -42,6 +42,7 @@ from bonus.services import (
     set_certificate_expiry,
     set_user_active,
     update_holder_profile,
+    update_staff,
 )
 from bonus.values import MoneyError, format_money, parse_date
 
@@ -114,6 +115,8 @@ def issue_submit(
         if segment.requires_expiry and expires is None:
             raise BonusError("Укажите срок действия для этого сегмента")
         discount = _discount(discount_percent)
+        if discount == 0 and segment.discount_percent:
+            discount = segment.discount_percent
         if discount == 0 and template is not None and template.discount_percent:
             discount = template.discount_percent
         issued = issue_certificate(
@@ -165,6 +168,7 @@ def segment_create(
     name: str = Form(""),
     accrual_period: str = Form("none"),
     requires_expiry: str = Form("0"),
+    discount_percent: str = Form(""),
     csrf_token: str = Form(""),
 ):
     """Добавляет свой сегмент с периодичностью начисления."""
@@ -175,6 +179,7 @@ def segment_create(
             name,
             parse_accrual_period(accrual_period),
             requires_expiry=requires_expiry == "1",
+            discount_percent=_discount(discount_percent),
         )
     except BonusError as exc:
         flash(request, exc.message, "bad")
@@ -192,9 +197,10 @@ def segment_update(
     name: str = Form(""),
     accrual_period: str = Form("none"),
     requires_expiry: str = Form("0"),
+    discount_percent: str = Form(""),
     csrf_token: str = Form(""),
 ):
-    """Редактирует название, периодичность и срок действия сегмента."""
+    """Редактирует название, периодичность, срок и процент сегмента."""
     segment = db.get(Segment, segment_id)
     try:
         guard_csrf(request, csrf_token)
@@ -206,6 +212,7 @@ def segment_update(
             name=name,
             accrual_period=parse_accrual_period(accrual_period),
             requires_expiry=requires_expiry == "1",
+            discount_percent=_discount(discount_percent),
         )
     except BonusError as exc:
         flash(request, exc.message, "bad")
@@ -525,9 +532,22 @@ def sample_csv(user: User = Depends(require(Role.hr))) -> Response:
 
 
 @router.get("/hr/staff")
-def staff_page(request: Request, db: Session = Depends(get_db), user: User = Depends(require(Role.hr))):
+def staff_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.hr)),
+    q: str = "",
+    edit: int = 0,
+):
     """Управляющие и сотрудники HR."""
-    return render(request, "hr_staff.html", section="staff", staff=list_staff(db))
+    return render(
+        request,
+        "hr_staff.html",
+        section="staff",
+        staff=list_staff(db, q),
+        query=q,
+        edit_id=edit,
+    )
 
 
 @router.post("/hr/staff")
@@ -563,6 +583,48 @@ def staff_submit(
     return RedirectResponse("/hr/staff", status_code=303)
 
 
+@router.post("/hr/staff/{user_id}")
+def staff_update(
+    user_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require(Role.hr)),
+    first_name: str = Form(""),
+    last_name: str = Form(""),
+    phone: str = Form(""),
+    password: str = Form(""),
+    role: str = Form("manager"),
+    restaurant: str = Form(""),
+    login: str = Form(""),
+    q: str = Form(""),
+    csrf_token: str = Form(""),
+):
+    """Сохраняет изменения доступа."""
+    person = db.get(User, user_id)
+    try:
+        guard_csrf(request, csrf_token)
+        if person is None or person.role == Role.employee:
+            raise BonusError("Пользователь не найден")
+        update_staff(
+            db,
+            person,
+            first_name=first_name,
+            last_name=last_name,
+            phone=phone,
+            role=Role.hr if role == "hr" else Role.manager,
+            restaurant=restaurant,
+            login=login,
+            password=password,
+        )
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+        return RedirectResponse(_staff_redirect(q, user_id), status_code=303)
+    flash(request, "Данные доступа сохранены")
+    if password.strip():
+        flash(request, password.strip(), "secret")
+    return RedirectResponse(_staff_redirect(q), status_code=303)
+
+
 @router.post("/hr/staff/{user_id}/active")
 def staff_active(
     user_id: int,
@@ -570,6 +632,7 @@ def staff_active(
     db: Session = Depends(get_db),
     actor: User = Depends(require(Role.hr)),
     active: str = Form("0"),
+    q: str = Form(""),
     csrf_token: str = Form(""),
 ):
     """Включает или отключает вход."""
@@ -583,7 +646,22 @@ def staff_active(
         flash(request, exc.message, "bad")
     else:
         flash(request, "Доступ обновлён")
-    return RedirectResponse("/hr/staff", status_code=303)
+    return RedirectResponse(_staff_redirect(q), status_code=303)
+
+
+def _staff_redirect(query: str = "", edit_id: int = 0) -> str:
+    """Возвращает на список доступа с поиском и открытой карточкой правки."""
+    from urllib.parse import urlencode
+
+    params: dict[str, str] = {}
+    cleaned = query.strip()
+    if cleaned:
+        params["q"] = cleaned
+    if edit_id > 0:
+        params["edit"] = str(edit_id)
+    if not params:
+        return "/hr/staff"
+    return f"/hr/staff?{urlencode(params)}"
 
 
 def _certificate_or_redirect(db: Session, request: Request, certificate_id: int):
@@ -624,10 +702,17 @@ def _import_row(
     if row.draft is None:
         return ImportRowResult(row_number=row.row_number, ok=False, message=row.error)
     try:
+        segment_id = _segment_id_by_name(db, row.draft.segment_name)
+        discount = row.draft.discount_percent
+        if discount == 0 and segment_id is not None:
+            segment = db.get(Segment, segment_id)
+            if segment is not None and segment.discount_percent:
+                discount = segment.discount_percent
         draft = replace(
             row.draft,
-            segment_id=_segment_id_by_name(db, row.draft.segment_name),
+            segment_id=segment_id,
             template_id=template_id,
+            discount_percent=discount,
         )
         issued = issue_certificate(db, draft, actor)
     except BonusError as exc:
