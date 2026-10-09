@@ -23,6 +23,10 @@ def ensure_schema(engine: Engine) -> None:
             statements.append(
                 "ALTER TABLE segments ADD COLUMN accrual_period VARCHAR(16) DEFAULT 'none'"
             )
+        if "requires_expiry" not in columns:
+            statements.append(
+                "ALTER TABLE segments ADD COLUMN requires_expiry BOOLEAN DEFAULT 0"
+            )
     if not statements:
         return
     with engine.begin() as connection:

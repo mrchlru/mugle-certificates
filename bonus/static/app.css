@@ -500,16 +500,37 @@ body:has(.wallet-wrap) .flash {
 .wallet-body { padding: 18px; }
 
 .wallet-holder {
-  margin: 6px 0 18px;
+  margin: 6px 0 0;
   font-size: 22px;
   font-weight: 700;
   line-height: 1.2;
 }
 
+.wallet-expiry {
+  margin: 6px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  opacity: 0.9;
+}
+
+.field-hint {
+  display: block;
+  margin-top: 6px;
+  font-size: 13px;
+}
+
+.check {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 14px;
+}
+
 .wallet-code {
   width: fit-content;
   max-width: 100%;
-  margin-inline: auto;
+  margin: 18px auto 0;
   padding: 8px 8px 6px;
   border-radius: 12px;
   background: white;

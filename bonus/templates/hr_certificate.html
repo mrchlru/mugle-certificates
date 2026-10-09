@@ -16,6 +16,14 @@
       <input name="full_name" value="{{ card.holder_name }}" required>
       <button class="btn ghost" type="submit">Имя</button>
     </form>
+    <form method="post" action="/hr/c/{{ card.id }}/expires" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <p class="eyebrow">Срок действия</p>
+      <label class="field">Действует до
+        <input type="date" name="expires_on" value="{{ card.expires_on.isoformat() if card.expires_on else '' }}">
+      </label>
+      <button class="btn ghost" type="submit">Сохранить срок</button>
+    </form>
     <form method="post" action="/hr/c/{{ card.id }}/credit" class="stack">
       <input type="hidden" name="csrf_token" value="{{ csrf }}">
       <p class="eyebrow">Начислить бонусы</p>

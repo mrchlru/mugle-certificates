@@ -88,6 +88,7 @@ class Segment(Base):
         Enum(AccrualPeriod, native_enum=False, length=16),
         default=AccrualPeriod.none,
     )
+    requires_expiry: Mapped[bool] = mapped_column(default=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(default=True)
 

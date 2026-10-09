@@ -89,6 +89,13 @@ def format_dt(value: datetime) -> str:
     return local.strftime("%d.%m.%Y %H:%M")
 
 
+def format_date(value: date | None) -> str:
+    """Показывает календарную дату для карточки и админки."""
+    if value is None:
+        return ""
+    return value.strftime("%d.%m.%Y")
+
+
 def format_short_code(code: str) -> str:
     """Показывает короткий код группами: K7M-2QP."""
     raw = code.replace("-", "").replace(" ", "").upper()

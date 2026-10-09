@@ -21,9 +21,10 @@ from bonus.services import (
     find_certificate,
     issue_certificate,
     set_blocked,
+    set_certificate_expiry,
     undo_debit,
 )
-from bonus.values import parse_money
+from bonus.values import format_date, parse_money
 
 
 @pytest.fixture(autouse=True)
@@ -59,10 +60,22 @@ def test_segment_edit_and_accrual_period() -> None:
     ensure_default_segments(db)
     lunch = next(item for item in list_segments(db) if item.name == "Ланч")
     assert lunch.accrual_period == AccrualPeriod.daily
-    segment = create_segment(db, "Временный", AccrualPeriod.none)
-    updated = update_segment(db, segment, name="Премия", accrual_period=AccrualPeriod.monthly)
+    assert lunch.requires_expiry is False
+    barter = next(item for item in list_segments(db) if item.name.startswith("Бартер"))
+    assert barter.requires_expiry is True
+    birthday = next(item for item in list_segments(db) if item.name == "День рождения")
+    assert birthday.requires_expiry is True
+    segment = create_segment(db, "Временный", AccrualPeriod.none, requires_expiry=True)
+    updated = update_segment(
+        db,
+        segment,
+        name="Премия",
+        accrual_period=AccrualPeriod.monthly,
+        requires_expiry=False,
+    )
     assert updated.name == "Премия"
     assert updated.accrual_period == AccrualPeriod.monthly
+    assert updated.requires_expiry is False
 
 
 def test_issue_with_segment_color_and_template() -> None:
@@ -100,6 +113,31 @@ def test_issue_with_segment_color_and_template() -> None:
     stored = get_settings().data_path() / "uploads" / Path(template.image_path).name
     assert stored.is_file()
     assert stored.read_bytes()[:4] == b"RIFF"
+
+
+def test_media_url_uses_s3_public_base(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("S3_BUCKET", "covers")
+    monkeypatch.setenv("S3_ACCESS_KEY", "key")
+    monkeypatch.setenv("S3_SECRET_KEY", "secret")
+    monkeypatch.setenv("S3_PUBLIC_BASE_URL", "https://cdn.example/covers")
+    monkeypatch.setenv("S3_PREFIX", "templates")
+    from bonus.config import get_settings
+    from bonus.storage import public_media_url
+
+    get_settings.cache_clear()
+    try:
+        assert public_media_url("templates/a.webp") == "https://cdn.example/covers/templates/a.webp"
+    finally:
+        get_settings.cache_clear()
+
+
+def test_certificate_expiry_can_be_set() -> None:
+    db = _db()
+    hr = _person(db, "hr", Role.hr)
+    issued = issue_certificate(db, _draft(500_000), hr)
+    set_certificate_expiry(db, issued.certificate, date(2026, 12, 31))
+    assert issued.certificate.expires_on == date(2026, 12, 31)
+    assert format_date(issued.certificate.expires_on) == "31.12.2026"
 
 
 def test_credit_adds_bonuses_to_balance() -> None:

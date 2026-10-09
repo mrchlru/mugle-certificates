@@ -34,6 +34,7 @@ from bonus.services import (
     issue_certificate,
     rename_holder,
     set_blocked,
+    set_certificate_expiry,
     set_user_active,
 )
 from bonus.values import MoneyError, format_money, parse_date
@@ -99,6 +100,9 @@ def issue_submit(
             raise BonusError("Укажите номинал")
         segment = resolve_segment(db, segment_id)
         template = resolve_template(db, template_id)
+        expires = _expires(expires_on)
+        if segment.requires_expiry and expires is None:
+            raise BonusError("Укажите срок действия для этого сегмента")
         issued = issue_certificate(
             db,
             IssueDraft(
@@ -108,7 +112,7 @@ def issue_submit(
                 nominal=nominal_value,
                 balance=None,
                 note=note,
-                expires_on=_expires(expires_on),
+                expires_on=expires,
                 segment_id=segment.id,
                 template_id=None if template is None else template.id,
                 color=normalize_color(color),
@@ -143,12 +147,18 @@ def segment_create(
     user: User = Depends(require(Role.hr)),
     name: str = Form(""),
     accrual_period: str = Form("none"),
+    requires_expiry: str = Form("0"),
     csrf_token: str = Form(""),
 ):
     """Добавляет свой сегмент с периодичностью начисления."""
     try:
         guard_csrf(request, csrf_token)
-        create_segment(db, name, parse_accrual_period(accrual_period))
+        create_segment(
+            db,
+            name,
+            parse_accrual_period(accrual_period),
+            requires_expiry=requires_expiry == "1",
+        )
     except BonusError as exc:
         flash(request, exc.message, "bad")
     else:
@@ -164,9 +174,10 @@ def segment_update(
     user: User = Depends(require(Role.hr)),
     name: str = Form(""),
     accrual_period: str = Form("none"),
+    requires_expiry: str = Form("0"),
     csrf_token: str = Form(""),
 ):
-    """Редактирует название и периодичность сегмента."""
+    """Редактирует название, периодичность и срок действия сегмента."""
     segment = db.get(Segment, segment_id)
     try:
         guard_csrf(request, csrf_token)
@@ -177,6 +188,7 @@ def segment_update(
             segment,
             name=name,
             accrual_period=parse_accrual_period(accrual_period),
+            requires_expiry=requires_expiry == "1",
         )
     except BonusError as exc:
         flash(request, exc.message, "bad")
@@ -345,6 +357,33 @@ def name_submit(
         flash(request, exc.message, "bad")
     else:
         flash(request, "Имя обновлено")
+    return RedirectResponse(f"/hr/c/{certificate_id}", status_code=303)
+
+
+@router.post("/hr/c/{certificate_id}/expires")
+def expires_submit(
+    certificate_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.hr)),
+    expires_on: str = Form(""),
+    csrf_token: str = Form(""),
+):
+    """Задаёт срок действия сертификата."""
+    certificate = _certificate_or_redirect(db, request, certificate_id)
+    if certificate is None:
+        return RedirectResponse("/hr", status_code=303)
+    try:
+        guard_csrf(request, csrf_token)
+        expires = _expires(expires_on)
+        segment = db.get(Segment, certificate.segment_id) if certificate.segment_id else None
+        if segment is not None and segment.requires_expiry and expires is None:
+            raise BonusError("Укажите срок действия для этого сегмента")
+        set_certificate_expiry(db, certificate, expires)
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+    else:
+        flash(request, "Срок действия сохранён")
     return RedirectResponse(f"/hr/c/{certificate_id}", status_code=303)
 
 

@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     manager_password: str = "mugle-desk"
     manager_name: str = "Управляющий"
     manager_restaurant: str = "Хачапури Марико"
+    s3_endpoint_url: str = ""
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+    s3_bucket: str = ""
+    s3_region: str = "ru-1"
+    s3_public_base_url: str = ""
+    s3_prefix: str = "templates"
 
     def normalized_database_url(self) -> str:
         """Возвращает URL базы в формате SQLAlchemy."""

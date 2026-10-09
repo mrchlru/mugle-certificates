@@ -13,15 +13,26 @@ from bonus.models import Role, User
 from bonus.security import csrf_ok, ensure_csrf, home_for, login_redirect, pop_flashes
 from bonus.services import BonusError
 from bonus.catalog import accrual_label
-from bonus.values import MoneyError, format_dt, format_money, format_short_code, parse_money, status_label, tx_label
+from bonus.values import (
+    MoneyError,
+    format_date,
+    format_dt,
+    format_money,
+    format_short_code,
+    parse_money,
+    status_label,
+    tx_label,
+)
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(PACKAGE_DIR / "templates"))
 templates.env.filters["money"] = format_money
 templates.env.filters["when"] = format_dt
+templates.env.filters["day"] = format_date
 templates.env.globals["status_label"] = status_label
 templates.env.globals["tx_label"] = tx_label
 templates.env.globals["format_short_code"] = format_short_code
+templates.env.globals["format_date"] = format_date
 templates.env.globals["accrual_label"] = accrual_label
 
 

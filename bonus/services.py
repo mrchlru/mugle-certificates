@@ -209,6 +209,12 @@ def rename_holder(db: Session, user: User, full_name: str) -> None:
     db.commit()
 
 
+def set_certificate_expiry(db: Session, certificate: Certificate, expires_on: date | None) -> None:
+    """Задаёт или снимает срок действия сертификата."""
+    certificate.expires_on = expires_on
+    db.commit()
+
+
 def change_password(db: Session, user: User, current: str, new_password: str) -> None:
     """Меняет свой пароль, если текущий введён верно."""
     from bonus.security import verify_password

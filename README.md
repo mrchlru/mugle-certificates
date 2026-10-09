@@ -44,4 +44,4 @@ bonus/routes_*.py      страницы трёх разделов
 bonus/templates        карточка, касса, кабинет HR
 ```
 
-База по умолчанию — файл `data/bonus.db`. На Timeweb лучше PostgreSQL: см. `TIMEWEB.md`.
+База по умолчанию — файл `data/bonus.db`. На Timeweb лучше PostgreSQL: см. `TIMEWEB.md`. Обложки карточек можно хранить в S3-совместимом Object Storage (`S3_*` в `.env` / `TIMEWEB.md`) — тогда картинки переживают деплой и отдаются с публичного URL/CDN.

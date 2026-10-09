@@ -12,33 +12,41 @@ from sqlalchemy.orm import Session
 from bonus.config import get_settings
 from bonus.models import AccrualPeriod, CardTemplate, Segment
 from bonus.services import BonusError
+from bonus.storage import (
+    delete_local_template,
+    public_media_url,
+    read_template_bytes,
+    s3_enabled,
+    store_template_bytes,
+)
 
 _BANNER_SIZE = (720, 264)
 _WEBP_QUALITY = 78
 _MAX_UPLOAD_BYTES = 8_000_000
 
-DEFAULT_SEGMENTS: tuple[tuple[str, AccrualPeriod], ...] = (
-    ("Ланч", AccrualPeriod.daily),
-    ("Ежемесячные бонусы", AccrualPeriod.monthly),
-    ("Бартер на все рестораны", AccrualPeriod.none),
-    ("Бартер Москва-Стамбул", AccrualPeriod.none),
-    ("Бартер Сибирские Огни", AccrualPeriod.none),
-    ("Бартер Пинчи", AccrualPeriod.none),
-    ("Бартер Си мама", AccrualPeriod.none),
-    ("День рождения", AccrualPeriod.yearly),
+# name, начисление, нужен ли срок действия на карточке
+DEFAULT_SEGMENTS: tuple[tuple[str, AccrualPeriod, bool], ...] = (
+    ("Ланч", AccrualPeriod.daily, False),
+    ("Ежемесячные бонусы", AccrualPeriod.monthly, False),
+    ("Бартер на все рестораны", AccrualPeriod.none, True),
+    ("Бартер Москва-Стамбул", AccrualPeriod.none, True),
+    ("Бартер Сибирские Огни", AccrualPeriod.none, True),
+    ("Бартер Пинчи", AccrualPeriod.none, True),
+    ("Бартер Си мама", AccrualPeriod.none, True),
+    ("День рождения", AccrualPeriod.yearly, True),
 )
 
 # Старые названия из первого сида — подтягиваем периодичность и, где нужно, имя.
-_LEGACY_SEGMENTS: dict[str, tuple[str, AccrualPeriod]] = {
-    "ланч (ежедневное начисление)": ("Ланч", AccrualPeriod.daily),
-    "ланч": ("Ланч", AccrualPeriod.daily),
-    "ежемесячные бонусы": ("Ежемесячные бонусы", AccrualPeriod.monthly),
-    "бартер на все рестораны": ("Бартер на все рестораны", AccrualPeriod.none),
-    "бартер москва-стамбул": ("Бартер Москва-Стамбул", AccrualPeriod.none),
-    "бартер сибирские огни": ("Бартер Сибирские Огни", AccrualPeriod.none),
-    "бартер пинчи": ("Бартер Пинчи", AccrualPeriod.none),
-    "бартер си мама": ("Бартер Си мама", AccrualPeriod.none),
-    "день рождения": ("День рождения", AccrualPeriod.yearly),
+_LEGACY_SEGMENTS: dict[str, tuple[str, AccrualPeriod, bool]] = {
+    "ланч (ежедневное начисление)": ("Ланч", AccrualPeriod.daily, False),
+    "ланч": ("Ланч", AccrualPeriod.daily, False),
+    "ежемесячные бонусы": ("Ежемесячные бонусы", AccrualPeriod.monthly, False),
+    "бартер на все рестораны": ("Бартер на все рестораны", AccrualPeriod.none, True),
+    "бартер москва-стамбул": ("Бартер Москва-Стамбул", AccrualPeriod.none, True),
+    "бартер сибирские огни": ("Бартер Сибирские Огни", AccrualPeriod.none, True),
+    "бартер пинчи": ("Бартер Пинчи", AccrualPeriod.none, True),
+    "бартер си мама": ("Бартер Си мама", AccrualPeriod.none, True),
+    "день рождения": ("День рождения", AccrualPeriod.yearly, True),
 }
 
 CARD_COLORS: tuple[tuple[str, str], ...] = (
@@ -74,11 +82,10 @@ def ensure_default_segments(db: Session) -> None:
         legacy = _LEGACY_SEGMENTS.get(segment.name.casefold())
         if legacy is None:
             continue
-        new_name, period = legacy
+        new_name, period, needs_expiry = legacy
         target_key = new_name.casefold()
         if segment.name == new_name:
-            if segment.accrual_period != period:
-                segment.accrual_period = period
+            if _sync_segment_defaults(segment, period, needs_expiry):
                 changed = True
             continue
         existing_target = by_name.get(target_key)
@@ -87,22 +94,21 @@ def ensure_default_segments(db: Session) -> None:
             segment.name = new_name
             by_name[target_key] = segment
             changed = True
-            if segment.accrual_period != period:
-                segment.accrual_period = period
+            _sync_segment_defaults(segment, period, needs_expiry)
             continue
-        if existing_target.accrual_period != period:
-            existing_target.accrual_period = period
+        if _sync_segment_defaults(existing_target, period, needs_expiry):
             changed = True
         if segment.is_active:
             segment.is_active = False
             changed = True
-    for index, (name, period) in enumerate(DEFAULT_SEGMENTS):
+    for index, (name, period, needs_expiry) in enumerate(DEFAULT_SEGMENTS):
         found = by_name.get(name.casefold())
         if found is None:
             created = Segment(
                 name=name,
                 slug=_unique_slug(db, _slug(name)),
                 accrual_period=period,
+                requires_expiry=needs_expiry,
                 sort_order=index,
                 is_active=True,
             )
@@ -110,9 +116,11 @@ def ensure_default_segments(db: Session) -> None:
             by_name[name.casefold()] = created
             changed = True
             continue
-        if found.accrual_period != period or found.sort_order != index:
-            found.accrual_period = period
+        touched = _sync_segment_defaults(found, period, needs_expiry)
+        if found.sort_order != index:
             found.sort_order = index
+            touched = True
+        if touched:
             changed = True
     if changed:
         db.commit()
@@ -142,7 +150,13 @@ def parse_accrual_period(raw: str) -> AccrualPeriod:
         raise BonusError("Неизвестная периодичность начисления") from exc
 
 
-def create_segment(db: Session, name: str, accrual_period: AccrualPeriod = AccrualPeriod.none) -> Segment:
+def create_segment(
+    db: Session,
+    name: str,
+    accrual_period: AccrualPeriod = AccrualPeriod.none,
+    *,
+    requires_expiry: bool = False,
+) -> Segment:
     """Добавляет новый сегмент."""
     cleaned = " ".join(name.split())
     if len(cleaned) < 2:
@@ -153,6 +167,7 @@ def create_segment(db: Session, name: str, accrual_period: AccrualPeriod = Accru
         name=cleaned[:120],
         slug=_unique_slug(db, _slug(cleaned)),
         accrual_period=accrual_period,
+        requires_expiry=requires_expiry,
         sort_order=1000 + int(db.scalar(select(Segment.id).order_by(Segment.id.desc()).limit(1)) or 0),
         is_active=True,
     )
@@ -168,8 +183,9 @@ def update_segment(
     *,
     name: str,
     accrual_period: AccrualPeriod,
+    requires_expiry: bool,
 ) -> Segment:
-    """Меняет название и периодичность начисления."""
+    """Меняет название, периодичность и признак срока действия."""
     cleaned = " ".join(name.split())
     if len(cleaned) < 2:
         raise BonusError("Укажите название сегмента")
@@ -178,6 +194,7 @@ def update_segment(
         raise BonusError("Сегмент с таким названием уже есть")
     segment.name = cleaned[:120]
     segment.accrual_period = accrual_period
+    segment.requires_expiry = requires_expiry
     db.commit()
     db.refresh(segment)
     return segment
@@ -190,17 +207,14 @@ def set_segment_active(db: Session, segment: Segment, active: bool) -> None:
 
 
 def save_template(db: Session, *, name: str, filename: str, payload: bytes, content_type: str) -> CardTemplate:
-    """Сохраняет картинку шаблона на диск и в базу."""
+    """Сохраняет картинку шаблона на диск или в S3 и пишет путь в базу."""
     cleaned = " ".join(name.split()) or Path(filename).stem or "Шаблон"
     if content_type not in _IMAGE_TYPES:
         raise BonusError("Нужен JPEG, PNG или WebP")
     if len(payload) > _MAX_UPLOAD_BYTES:
         raise BonusError("Картинка больше 8 МБ")
     optimized = _optimize_template_image(payload)
-    folder = _uploads_dir()
-    folder.mkdir(parents=True, exist_ok=True)
-    stored = f"{secrets.token_hex(12)}.webp"
-    (folder / stored).write_bytes(optimized)
+    stored = store_template_bytes(optimized, f"{secrets.token_hex(12)}.webp")
     template = CardTemplate(name=cleaned[:120], image_path=stored, is_active=True)
     db.add(template)
     db.commit()
@@ -215,26 +229,29 @@ def set_template_active(db: Session, template: CardTemplate, active: bool) -> No
 
 
 def optimize_existing_templates(db: Session) -> None:
-    """Пережимает уже загруженные баннеры в лёгкий WebP."""
-    folder = _uploads_dir()
+    """Пережимает локальные баннеры и при необходимости выгружает в S3."""
     changed = False
+    use_s3 = s3_enabled()
     for template in db.scalars(select(CardTemplate)).all():
-        source = folder / Path(template.image_path).name
-        if not source.is_file():
+        if template.image_path.startswith(("http://", "https://")):
             continue
-        if template.image_path.endswith(".webp") and source.stat().st_size <= 120_000:
+        raw = read_template_bytes(template.image_path)
+        if raw is None:
+            continue
+        needs_recompress = not (template.image_path.endswith(".webp") and len(raw) <= 120_000)
+        needs_s3_upload = use_s3
+        if not needs_recompress and not needs_s3_upload:
             continue
         try:
-            optimized = _optimize_template_image(source.read_bytes())
+            optimized = _optimize_template_image(raw) if needs_recompress else raw
         except BonusError:
             continue
-        stored = f"{secrets.token_hex(12)}.webp"
-        (folder / stored).write_bytes(optimized)
         old_name = template.image_path
+        stored = store_template_bytes(optimized, f"{secrets.token_hex(12)}.webp")
         template.image_path = stored
         changed = True
         if old_name != stored:
-            _safe_unlink(folder / Path(old_name).name)
+            delete_local_template(old_name)
     if changed:
         db.commit()
 
@@ -266,8 +283,8 @@ def resolve_template(db: Session, template_id: int | None) -> CardTemplate | Non
 
 
 def media_url(image_path: str) -> str:
-    """Адрес загруженной картинки шаблона."""
-    return f"/media/{image_path}"
+    """Адрес загруженной картинки шаблона (локально или CDN/S3)."""
+    return public_media_url(image_path)
 
 
 def accrual_label(period: AccrualPeriod | str) -> str:
@@ -279,8 +296,16 @@ def accrual_label(period: AccrualPeriod | str) -> str:
     return key
 
 
-def _uploads_dir() -> Path:
-    return get_settings().data_path() / "uploads"
+def _sync_segment_defaults(segment: Segment, period: AccrualPeriod, requires_expiry: bool) -> bool:
+    """Обновляет период и признак срока у сегмента из каталога по умолчанию."""
+    changed = False
+    if segment.accrual_period != period:
+        segment.accrual_period = period
+        changed = True
+    if segment.requires_expiry != requires_expiry:
+        segment.requires_expiry = requires_expiry
+        changed = True
+    return changed
 
 
 def _optimize_template_image(payload: bytes) -> bytes:
@@ -309,13 +334,6 @@ def _optimize_template_image(payload: bytes) -> bytes:
     if not data:
         raise BonusError("Не удалось обработать картинку")
     return data
-
-
-def _safe_unlink(path: Path) -> None:
-    try:
-        path.unlink(missing_ok=True)
-    except OSError:
-        return
 
 
 def _slug(name: str) -> str:

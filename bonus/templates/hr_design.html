@@ -17,6 +17,10 @@
           {% endfor %}
         </select>
       </label>
+      <label class="check">
+        <input type="checkbox" name="requires_expiry" value="1">
+        Нужен срок действия на карточке
+      </label>
       <button class="btn" type="submit">Добавить</button>
     </form>
     <ul class="segment-list">
@@ -34,9 +38,13 @@
               {% endfor %}
             </select>
           </label>
+          <label class="check">
+            <input type="checkbox" name="requires_expiry" value="1" {% if item.requires_expiry %}checked{% endif %}>
+            Нужен срок действия на карточке
+          </label>
           <div class="row-actions">
             <button class="btn ghost" type="submit">Сохранить</button>
-            <p class="muted">{% if item.is_active %}активен{% else %}скрыт{% endif %} · {{ accrual_label(item.accrual_period) }}</p>
+            <p class="muted">{% if item.is_active %}активен{% else %}скрыт{% endif %} · {{ accrual_label(item.accrual_period) }}{% if item.requires_expiry %} · со сроком{% endif %}</p>
           </div>
         </form>
         <form method="post" action="/hr/design/segments/{{ item.id }}/active">

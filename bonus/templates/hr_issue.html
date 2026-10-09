@@ -15,12 +15,16 @@
       <input name="login" autocomplete="off" required>
     </label>
     <label class="field">Сегмент
-      <select name="segment_id" required>
-        <option value="">Выберите сегмент</option>
+      <select name="segment_id" id="segment-select" required>
+        <option value="" data-requires-expiry="0">Выберите сегмент</option>
         {% for segment in segments %}
-        <option value="{{ segment.id }}">{{ segment.name }}</option>
+        <option value="{{ segment.id }}" data-requires-expiry="{{ '1' if segment.requires_expiry else '0' }}">{{ segment.name }}</option>
         {% endfor %}
       </select>
+    </label>
+    <label class="field" id="expires-field">Срок действия
+      <input type="date" name="expires_on" id="expires-on">
+      <span class="muted field-hint" id="expires-hint">Для бартера и дня рождения обязателен</span>
     </label>
     <label class="field">Номинал, ₽
       <input name="nominal" inputmode="decimal" required placeholder="10000">
@@ -50,10 +54,23 @@
     <label class="field">Комментарий
       <input name="note" maxlength="500">
     </label>
-    <label class="field">Действует до
-      <input name="expires_on" placeholder="ДД.ММ.ГГГГ">
-    </label>
     <button class="btn wide" type="submit">Выписать сертификат</button>
   </form>
 </section>
+<script>
+(function () {
+  var select = document.getElementById("segment-select");
+  var input = document.getElementById("expires-on");
+  var hint = document.getElementById("expires-hint");
+  if (!select || !input) return;
+  function sync() {
+    var option = select.options[select.selectedIndex];
+    var needed = option && option.getAttribute("data-requires-expiry") === "1";
+    input.required = needed;
+    if (hint) hint.hidden = !needed;
+  }
+  select.addEventListener("change", sync);
+  sync();
+})();
+</script>
 {% endblock %}

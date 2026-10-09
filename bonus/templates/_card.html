@@ -20,6 +20,9 @@
     <p class="wallet-holder">
       {{ card.holder_name }}{% if card.segment_name %}, {{ card.segment_name|lower }}{% endif %}
     </p>
+    {% if card.expires_on %}
+    <p class="wallet-expiry">Действует до {{ card.expires_on|day }}</p>
+    {% endif %}
     <div class="wallet-code">
       {% if card.qr_svg %}
       <div class="wallet-qr">{{ card.qr_svg|safe }}</div>
