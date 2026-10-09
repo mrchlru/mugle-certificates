@@ -1,110 +1,176 @@
 {% extends "base.html" %}
 {% block title %}Оформление{% endblock %}
 {% block content %}
-<div class="cert-layout">
-  <section class="stack">
-    <h1>Сегменты</h1>
-    <p class="lede">Ими фильтруют сертификаты и подписывают владельца на карточке. Периодичность нужна, если бонусы начисляются регулярно.</p>
-    <form method="post" action="/hr/design/segments" class="stack segment-create">
-      <input type="hidden" name="csrf_token" value="{{ csrf }}">
-      <label class="field">Название
-        <input name="name" placeholder="Новый сегмент" required>
-      </label>
-      <label class="field">Начисление
-        <select name="accrual_period">
-          {% for value, title in accrual_choices %}
-          <option value="{{ value }}">{{ title }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <label class="check">
-        <input type="checkbox" name="requires_expiry" value="1">
-        Нужен срок действия на карточке
-      </label>
-      <button class="btn" type="submit">Добавить</button>
-    </form>
-    <ul class="segment-list">
-      {% for item in segments %}
-      <li>
-        <form method="post" action="/hr/design/segments/{{ item.id }}" class="stack segment-edit">
-          <input type="hidden" name="csrf_token" value="{{ csrf }}">
+<section class="design-page">
+  <header class="design-intro">
+    <p class="eyebrow">Кабинет HR</p>
+    <h1>Оформление</h1>
+    <p class="lede">Сегменты для фильтра и подписи на карточке. Шаблоны — общая картинка баннера при выпуске и импорте.</p>
+  </header>
+
+  <div class="design-grid">
+    <section class="design-panel">
+      <header class="design-panel-head">
+        <h2>Сегменты</h2>
+        <p class="muted">Периодичность — если бонусы начисляются регулярно. Срок — если на карточке нужен «годен до».</p>
+      </header>
+
+      <form method="post" action="/hr/design/segments" class="design-create">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <div class="design-form-row">
           <label class="field">Название
-            <input name="name" value="{{ item.name }}" required>
+            <input name="name" placeholder="Новый сегмент" required autocomplete="off">
           </label>
           <label class="field">Начисление
             <select name="accrual_period">
               {% for value, title in accrual_choices %}
-              <option value="{{ value }}" {% if item.accrual_period.value == value %}selected{% endif %}>{{ title }}</option>
+              <option value="{{ value }}">{{ title }}</option>
               {% endfor %}
             </select>
           </label>
-          <label class="check">
-            <input type="checkbox" name="requires_expiry" value="1" {% if item.requires_expiry %}checked{% endif %}>
-            Нужен срок действия на карточке
-          </label>
-          <div class="row-actions">
-            <button class="btn ghost" type="submit">Сохранить</button>
-            <p class="muted">{% if item.is_active %}активен{% else %}скрыт{% endif %} · {{ accrual_label(item.accrual_period) }}{% if item.requires_expiry %} · со сроком{% endif %}</p>
-          </div>
-        </form>
-        <form method="post" action="/hr/design/segments/{{ item.id }}/active">
-          <input type="hidden" name="csrf_token" value="{{ csrf }}">
-          <input type="hidden" name="active" value="{{ '0' if item.is_active else '1' }}">
-          <button class="text-link" type="submit">{{ 'Скрыть' if item.is_active else 'Показать' }}</button>
-        </form>
-      </li>
-      {% endfor %}
-    </ul>
-  </section>
-  <section class="stack">
-    <h1>Шаблоны</h1>
-    <p class="lede">Картинка попадает в середину карточки, как в старом Statix.</p>
-    <form method="post" action="/hr/design/templates" enctype="multipart/form-data" class="stack">
-      <input type="hidden" name="csrf_token" value="{{ csrf }}">
-      <label class="field">Название
-        <input name="name" placeholder="Ланч, бартер…">
-      </label>
-      <label class="field">Процент на карточке
-        <input name="discount_percent" inputmode="numeric" placeholder="например 30" maxlength="3">
-      </label>
-      <label class="field">Картинка
-        <input type="file" name="image" accept="image/jpeg,image/png,image/webp" required>
-      </label>
-      <button class="btn" type="submit">Загрузить</button>
-    </form>
-    <ul class="template-list">
-      {% for item in templates %}
-      <li>
-        <img src="{{ media_url(item.image_path) }}" alt="{{ item.name }}" width="120" height="72" loading="lazy" decoding="async">
-        <div class="stack template-edit">
-          <form method="post" action="/hr/design/templates/{{ item.id }}" enctype="multipart/form-data" class="stack">
+        </div>
+        <label class="switch">
+          <input type="checkbox" name="requires_expiry" value="1">
+          <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+          <span class="switch-copy">Нужен срок действия на карточке</span>
+        </label>
+        <button class="btn" type="submit">Добавить сегмент</button>
+      </form>
+
+      <ul class="design-list">
+        {% for item in segments %}
+        <li class="design-card {% if not item.is_active %}is-off{% endif %}">
+          <form method="post" action="/hr/design/segments/{{ item.id }}" class="design-card-form">
             <input type="hidden" name="csrf_token" value="{{ csrf }}">
-            <label class="field">Название
-              <input name="name" value="{{ item.name }}" required>
+            <div class="design-form-row">
+              <label class="field">Название
+                <input name="name" value="{{ item.name }}" required autocomplete="off">
+              </label>
+              <label class="field">Начисление
+                <select name="accrual_period">
+                  {% for value, title in accrual_choices %}
+                  <option value="{{ value }}" {% if item.accrual_period.value == value %}selected{% endif %}>{{ title }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+            </div>
+            <label class="switch">
+              <input type="checkbox" name="requires_expiry" value="1" {% if item.requires_expiry %}checked{% endif %}>
+              <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+              <span class="switch-copy">Нужен срок действия на карточке</span>
             </label>
-            <label class="field">Процент на карточке
-              <input name="discount_percent" value="{{ item.discount_percent or '' }}" inputmode="numeric" maxlength="3" placeholder="0">
-            </label>
-            <label class="field">Новая картинка
-              <input type="file" name="image" accept="image/jpeg,image/png,image/webp">
-            </label>
-            <p class="muted">Если выбрать файл, старая картинка удалится.</p>
-            <div class="row-actions">
-              <button class="btn ghost" type="submit">Сохранить</button>
-              <p class="muted">{% if item.is_active %}активен{% else %}скрыт{% endif %}{% if item.discount_percent %} · {{ item.discount_percent }}%{% endif %}</p>
+            <div class="design-card-foot">
+              <span class="status-pill {% if item.is_active %}is-on{% else %}is-off{% endif %}">
+                {% if item.is_active %}Активен{% else %}Скрыт{% endif %}
+              </span>
+              <span class="muted design-meta">{{ accrual_label(item.accrual_period) }}{% if item.requires_expiry %} · со сроком{% endif %}</span>
+              <button class="btn ghost compact" type="submit">Сохранить</button>
             </div>
           </form>
-          <form method="post" action="/hr/design/templates/{{ item.id }}/active">
+          <form method="post" action="/hr/design/segments/{{ item.id }}/active" class="design-side-action">
             <input type="hidden" name="csrf_token" value="{{ csrf }}">
             <input type="hidden" name="active" value="{{ '0' if item.is_active else '1' }}">
-            <button class="text-link" type="submit">{{ 'Отключить' if item.is_active else 'Включить' }}</button>
+            <button class="btn soft compact" type="submit">{{ 'Скрыть' if item.is_active else 'Показать' }}</button>
           </form>
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+
+    <section class="design-panel">
+      <header class="design-panel-head">
+        <h2>Шаблоны</h2>
+        <p class="muted">Картинка попадает в середину карточки. Один шаблон можно выбрать при импорте для всех строк.</p>
+      </header>
+
+      <form method="post" action="/hr/design/templates" enctype="multipart/form-data" class="design-create">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <div class="design-form-row">
+          <label class="field">Название
+            <input name="name" placeholder="Ланч, бартер…">
+          </label>
+          <label class="field">Процент
+            <input name="discount_percent" inputmode="numeric" placeholder="30" maxlength="3">
+          </label>
         </div>
-      </li>
-      {% else %}
-      <li class="muted">Шаблонов пока нет.</li>
-      {% endfor %}
-    </ul>
-  </section>
-</div>
+        <label class="field">Картинка
+          <span class="file-pick">
+            <input type="file" name="image" accept="image/jpeg,image/png,image/webp" required data-file-pick>
+            <span class="file-pick-btn">Выбрать файл</span>
+            <span class="file-pick-name" data-empty="Файл не выбран">Файл не выбран</span>
+          </span>
+        </label>
+        <button class="btn" type="submit">Загрузить шаблон</button>
+      </form>
+
+      <ul class="design-list">
+        {% for item in templates %}
+        <li class="design-card design-card-template {% if not item.is_active %}is-off{% endif %}">
+          <div class="design-thumb">
+            <img src="{{ media_url(item.image_path) }}" alt="{{ item.name }}" width="160" height="96" loading="lazy" decoding="async">
+          </div>
+          <div class="design-card-body">
+            <form method="post" action="/hr/design/templates/{{ item.id }}" enctype="multipart/form-data" class="design-card-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf }}">
+              <div class="design-form-row">
+                <label class="field">Название
+                  <input name="name" value="{{ item.name }}" required>
+                </label>
+                <label class="field">Процент
+                  <input name="discount_percent" value="{{ item.discount_percent or '' }}" inputmode="numeric" maxlength="3" placeholder="0">
+                </label>
+              </div>
+              <label class="field">Заменить картинку
+                <span class="file-pick">
+                  <input type="file" name="image" accept="image/jpeg,image/png,image/webp" data-file-pick>
+                  <span class="file-pick-btn">Выбрать файл</span>
+                  <span class="file-pick-name" data-empty="Оставить текущую">Оставить текущую</span>
+                </span>
+              </label>
+              <p class="muted design-hint">Новый файл заменит старую картинку.</p>
+              <div class="design-card-foot">
+                <span class="status-pill {% if item.is_active %}is-on{% else %}is-off{% endif %}">
+                  {% if item.is_active %}Активен{% else %}Скрыт{% endif %}
+                </span>
+                {% if item.discount_percent %}
+                <span class="muted design-meta">{{ item.discount_percent }}%</span>
+                {% endif %}
+                <button class="btn ghost compact" type="submit">Сохранить</button>
+              </div>
+            </form>
+            <form method="post" action="/hr/design/templates/{{ item.id }}/active" class="design-side-action">
+              <input type="hidden" name="csrf_token" value="{{ csrf }}">
+              <input type="hidden" name="active" value="{{ '0' if item.is_active else '1' }}">
+              <button class="btn soft compact" type="submit">{{ 'Отключить' if item.is_active else 'Включить' }}</button>
+            </form>
+          </div>
+        </li>
+        {% else %}
+        <li class="design-empty muted">Шаблонов пока нет — загрузите первую картинку выше.</li>
+        {% endfor %}
+      </ul>
+    </section>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  function bindFilePick(input) {
+    var root = input.closest(".file-pick");
+    if (!root) return;
+    var name = root.querySelector(".file-pick-name");
+    if (!name) return;
+    var empty = name.getAttribute("data-empty") || "Файл не выбран";
+    function sync() {
+      var file = input.files && input.files[0];
+      name.textContent = file ? file.name : empty;
+      root.classList.toggle("has-file", Boolean(file));
+    }
+    input.addEventListener("change", sync);
+    sync();
+  }
+  document.querySelectorAll("[data-file-pick]").forEach(bindFilePick);
+})();
+</script>
 {% endblock %}
