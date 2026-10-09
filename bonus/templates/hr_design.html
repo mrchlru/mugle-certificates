@@ -64,7 +64,7 @@
     <ul class="template-list">
       {% for item in templates %}
       <li>
-        <img src="{{ media_url(item.image_path) }}" alt="{{ item.name }}">
+        <img src="{{ media_url(item.image_path) }}" alt="{{ item.name }}" width="120" height="72" loading="lazy" decoding="async">
         <div>
           <p class="history-title">{{ item.name }}</p>
           <p class="muted">{% if item.is_active %}активен{% else %}скрыт{% endif %}</p>

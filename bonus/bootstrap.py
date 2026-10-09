@@ -4,7 +4,7 @@ from pathlib import Path
 
 from sqlalchemy import select
 
-from bonus.catalog import ensure_default_segments, list_segments
+from bonus.catalog import ensure_default_segments, list_segments, optimize_existing_templates
 from bonus.config import Settings
 from bonus.db import open_session
 from bonus.models import Role, User
@@ -19,6 +19,7 @@ def bootstrap(settings: Settings) -> None:
     db = open_session()
     try:
         ensure_default_segments(db)
+        optimize_existing_templates(db)
         exists = db.scalar(select(User.id).limit(1))
         if exists is not None:
             return

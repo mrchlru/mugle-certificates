@@ -2,12 +2,14 @@
 
 import re
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 from sqlalchemy.orm import Session
 
 import bonus.db as database
 from bonus.catalog import create_segment, ensure_default_segments, list_segments, save_template, update_segment
+from bonus.config import get_settings
 from bonus.importer import parse_table
 from bonus.models import AccrualPeriod, Base, Role, User
 from bonus.security import hash_password
@@ -94,6 +96,10 @@ def test_issue_with_segment_color_and_template() -> None:
     assert issued.certificate.color == "#FF5A00"
     assert issued.certificate.segment_id == segment.id
     assert issued.certificate.template_id == template.id
+    assert template.image_path.endswith(".webp")
+    stored = get_settings().data_path() / "uploads" / Path(template.image_path).name
+    assert stored.is_file()
+    assert stored.read_bytes()[:4] == b"RIFF"
 
 
 def test_credit_adds_bonuses_to_balance() -> None:

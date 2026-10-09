@@ -1,12 +1,15 @@
 """Точка входа: один процесс для карточки, кассы и HR."""
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.responses import Response
+from starlette.types import Scope
 
 from bonus import __version__
 from bonus.bootstrap import bootstrap
@@ -44,7 +47,7 @@ def create_app() -> FastAPI:
         https_only=settings.https_only,
     )
     app.mount("/static", StaticFiles(directory=str(PACKAGE_DIR / "static")), name="static")
-    app.mount("/media", StaticFiles(directory=str(uploads)), name="media")
+    app.mount("/media", CachedStaticFiles(directory=str(uploads)), name="media")
     app.include_router(auth_router)
     app.include_router(card_router)
     app.include_router(desk_router)
@@ -76,6 +79,22 @@ def live() -> dict[str, str]:
 def _redirect(_request: Request, exc: Exception) -> RedirectResponse:
     page = exc if isinstance(exc, Redirect) else Redirect("/")
     return RedirectResponse(page.url, status_code=page.status_code)
+
+
+class CachedStaticFiles(StaticFiles):
+    """Отдаёт медиа с долгим кэшем в браузере."""
+
+    def file_response(
+        self,
+        full_path: Path | str,
+        stat_result: object,
+        scope: Scope,
+        status_code: int = 200,
+    ) -> Response:
+        """Добавляет Cache-Control к ответу со статикой."""
+        response = super().file_response(full_path, stat_result, scope, status_code=status_code)
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
 
 
 app = create_app()

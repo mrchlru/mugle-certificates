@@ -2,14 +2,20 @@
 
 import re
 import secrets
+from io import BytesIO
 from pathlib import Path
 
+from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from bonus.config import get_settings
 from bonus.models import AccrualPeriod, CardTemplate, Segment
 from bonus.services import BonusError
+
+_BANNER_SIZE = (720, 264)
+_WEBP_QUALITY = 78
+_MAX_UPLOAD_BYTES = 8_000_000
 
 DEFAULT_SEGMENTS: tuple[tuple[str, AccrualPeriod], ...] = (
     ("Ланч", AccrualPeriod.daily),
@@ -186,15 +192,15 @@ def set_segment_active(db: Session, segment: Segment, active: bool) -> None:
 def save_template(db: Session, *, name: str, filename: str, payload: bytes, content_type: str) -> CardTemplate:
     """Сохраняет картинку шаблона на диск и в базу."""
     cleaned = " ".join(name.split()) or Path(filename).stem or "Шаблон"
-    extension = _IMAGE_TYPES.get(content_type)
-    if extension is None:
+    if content_type not in _IMAGE_TYPES:
         raise BonusError("Нужен JPEG, PNG или WebP")
-    if len(payload) > 3_000_000:
-        raise BonusError("Картинка больше 3 МБ")
+    if len(payload) > _MAX_UPLOAD_BYTES:
+        raise BonusError("Картинка больше 8 МБ")
+    optimized = _optimize_template_image(payload)
     folder = _uploads_dir()
     folder.mkdir(parents=True, exist_ok=True)
-    stored = f"{secrets.token_hex(12)}{extension}"
-    (folder / stored).write_bytes(payload)
+    stored = f"{secrets.token_hex(12)}.webp"
+    (folder / stored).write_bytes(optimized)
     template = CardTemplate(name=cleaned[:120], image_path=stored, is_active=True)
     db.add(template)
     db.commit()
@@ -206,6 +212,31 @@ def set_template_active(db: Session, template: CardTemplate, active: bool) -> No
     """Отключает шаблон без удаления файла."""
     template.is_active = active
     db.commit()
+
+
+def optimize_existing_templates(db: Session) -> None:
+    """Пережимает уже загруженные баннеры в лёгкий WebP."""
+    folder = _uploads_dir()
+    changed = False
+    for template in db.scalars(select(CardTemplate)).all():
+        source = folder / Path(template.image_path).name
+        if not source.is_file():
+            continue
+        if template.image_path.endswith(".webp") and source.stat().st_size <= 120_000:
+            continue
+        try:
+            optimized = _optimize_template_image(source.read_bytes())
+        except BonusError:
+            continue
+        stored = f"{secrets.token_hex(12)}.webp"
+        (folder / stored).write_bytes(optimized)
+        old_name = template.image_path
+        template.image_path = stored
+        changed = True
+        if old_name != stored:
+            _safe_unlink(folder / Path(old_name).name)
+    if changed:
+        db.commit()
 
 
 def normalize_color(value: str) -> str:
@@ -250,6 +281,41 @@ def accrual_label(period: AccrualPeriod | str) -> str:
 
 def _uploads_dir() -> Path:
     return get_settings().data_path() / "uploads"
+
+
+def _optimize_template_image(payload: bytes) -> bytes:
+    """Режет баннер под карточку и сжимает в WebP."""
+    try:
+        with Image.open(BytesIO(payload)) as image:
+            framed = ImageOps.exif_transpose(image)
+            rgb = framed.convert("RGB")
+            fitted = ImageOps.fit(
+                rgb,
+                _BANNER_SIZE,
+                method=Image.Resampling.LANCZOS,
+            )
+            buffer = BytesIO()
+            fitted.save(
+                buffer,
+                format="WEBP",
+                quality=_WEBP_QUALITY,
+                method=6,
+            )
+    except UnidentifiedImageError as exc:
+        raise BonusError("Файл не похож на картинку") from exc
+    except OSError as exc:
+        raise BonusError("Не удалось обработать картинку") from exc
+    data = buffer.getvalue()
+    if not data:
+        raise BonusError("Не удалось обработать картинку")
+    return data
+
+
+def _safe_unlink(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        return
 
 
 def _slug(name: str) -> str:
