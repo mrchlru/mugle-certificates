@@ -507,15 +507,18 @@ body:has(.wallet-wrap) .flash {
 }
 
 .wallet-code {
-  padding: 14px;
-  border-radius: 8px;
+  width: fit-content;
+  max-width: 100%;
+  margin-inline: auto;
+  padding: 8px 8px 6px;
+  border-radius: 12px;
   background: white;
   color: #111;
   text-align: center;
 }
 
 .wallet-qr {
-  width: min(180px, 100%);
+  width: 148px;
   margin: 0 auto;
 }
 
@@ -526,8 +529,8 @@ body:has(.wallet-wrap) .flash {
 }
 
 .wallet-code-number {
-  margin: 8px 0 0;
-  font-size: 16px;
+  margin: 4px 0 0;
+  font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.16em;
 }
