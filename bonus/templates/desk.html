@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Списание{% endblock %}
+{% block main_class %}narrow{% endblock %}
+{% block content %}
+<section class="stack">
+  <p class="eyebrow">Касса</p>
+  <h1>Списать бонусы</h1>
+  <p class="lede">Наведите камеру телефона на QR с карточки гостя или введите код под ним.</p>
+  <form method="get" action="/desk" class="stack">
+    <label class="field">Код
+      <input name="code" autocomplete="off" autofocus placeholder="K7M-2QP" enterkeyhint="go">
+    </label>
+    <button class="btn wide" type="submit">Открыть сертификат</button>
+  </form>
+  <button class="btn ghost wide" type="button" id="open-camera">Открыть камеру</button>
+  <div id="camera-box" class="camera" hidden>
+    <video id="camera" playsinline></video>
+  </div>
+  <p id="camera-note" class="muted" hidden></p>
+</section>
+{% set history_title = "Последние списания" %}
+{% set next_path = '/desk' %}
+{% set show_holder = true %}
+{% with items=recent %}
+  {% include "_history.html" %}
+{% endwith %}
+{% endblock %}
+{% block scripts %}
+<script src="/static/jsQR.min.js"></script>
+{% endblock %}

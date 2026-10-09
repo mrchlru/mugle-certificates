@@ -1,0 +1,82 @@
+"""Первый запуск: пустая база получает HR, управляющего и демо-сертификат."""
+
+from pathlib import Path
+
+from sqlalchemy import select
+
+from bonus.config import Settings
+from bonus.db import open_session
+from bonus.models import Role, User
+from bonus.security import hash_password
+from bonus.services import IssueDraft, debit_certificate, issue_certificate
+
+
+def bootstrap(settings: Settings) -> None:
+    """Создаёт каталог данных и стартовые входы, если пользователей ещё нет."""
+    settings.data_path().mkdir(parents=True, exist_ok=True)
+    db = open_session()
+    try:
+        exists = db.scalar(select(User.id).limit(1))
+        if exists is not None:
+            return
+        hr = _staff(
+            settings.hr_name,
+            settings.hr_login,
+            settings.hr_password,
+            Role.hr,
+            "",
+        )
+        manager = _staff(
+            settings.manager_name,
+            settings.manager_login,
+            settings.manager_password,
+            Role.manager,
+            settings.manager_restaurant,
+        )
+        db.add_all([hr, manager])
+        db.commit()
+        db.refresh(hr)
+        db.refresh(manager)
+        lines = [
+            "Mugle Rest — сертификаты",
+            f"HR: {hr.login} / {settings.hr_password}",
+            f"Управляющий: {manager.login} / {settings.manager_password}",
+        ]
+        if settings.seed_demo:
+            issued = issue_certificate(
+                db,
+                IssueDraft(
+                    full_name="Мария Соколова",
+                    login="sokolova",
+                    password="",
+                    nominal=2_000_000,
+                    balance=None,
+                    note="Демонстрационный сертификат",
+                    expires_on=None,
+                ),
+                hr,
+            )
+            debit_certificate(db, issued.certificate, manager, 350_000, "Обед, стол 4")
+            lines.append(f"Демо-сертификат Марии Соколовой: /c/{issued.certificate.token}")
+        _write_credentials(settings.data_path() / "CREDENTIALS.txt", lines)
+    finally:
+        db.close()
+
+
+def _staff(full_name: str, login: str, password: str, role: Role, restaurant: str) -> User:
+    return User(
+        full_name=full_name,
+        login=login.strip().casefold(),
+        password_hash=hash_password(password),
+        role=role,
+        restaurant=restaurant,
+        is_active=True,
+        must_change_password=True,
+    )
+
+
+def _write_credentials(path: Path, lines: list[str]) -> None:
+    if path.exists():
+        return
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"Mugle Bonus: первые входы записаны в {path}", flush=True)

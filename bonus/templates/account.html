@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Пароль{% endblock %}
+{% block main_class %}narrow{% endblock %}
+{% block content %}
+<section class="stack">
+  <p class="eyebrow">Аккаунт</p>
+  <h1>Новый пароль</h1>
+  <form method="post" action="/account" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <label class="field">Текущий пароль
+      <input name="current_password" type="password" autocomplete="current-password" required>
+    </label>
+    <label class="field">Новый пароль
+      <input name="new_password" type="password" autocomplete="new-password" minlength="8" required>
+    </label>
+    <button class="btn wide" type="submit">Сохранить</button>
+  </form>
+</section>
+{% endblock %}

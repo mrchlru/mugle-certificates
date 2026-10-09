@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}{{ card.public_number }}{% endblock %}
+{% block header %}
+<header class="site-header">
+  <a class="brand" href="/">
+    <img src="/static/logo.svg" alt="Mugle Rest" width="64" height="52">
+  </a>
+</header>
+{% endblock %}
+{% block main_class %}narrow{% endblock %}
+{% block content %}
+<p class="lede">Покажите QR управляющему в ресторане.</p>
+{% include "_card.html" %}
+{% set show_holder = false %}
+{% set next_path = '' %}
+{% with items=card.history %}
+  {% include "_history.html" %}
+{% endwith %}
+{% endblock %}

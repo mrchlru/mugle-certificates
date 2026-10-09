@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Мой сертификат{% endblock %}
+{% block main_class %}narrow{% endblock %}
+{% block content %}
+{% if cards %}
+  {% for card in cards %}
+    {% include "_card.html" %}
+    {% set next_path = '/card' %}
+    {% set show_holder = false %}
+    {% with items=card.history %}
+      {% include "_history.html" %}
+    {% endwith %}
+  {% endfor %}
+{% else %}
+  <section class="empty">
+    <h1>Сертификата пока нет</h1>
+    <p class="lede">Когда HR выпишет сертификат на этот логин, карточка появится здесь.</p>
+  </section>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Вход{% endblock %}
+{% block header %}{% endblock %}
+{% block main_class %}login-wrap{% endblock %}
+{% block content %}
+<section class="login">
+  <img src="/static/logo.svg" alt="Mugle Rest" width="92" height="75">
+  <h1>Сертификаты</h1>
+  <p class="lede">Вход для управляющего и HR. Сотруднику достаточно ссылки на сертификат.</p>
+  {% if error %}<p class="flash bad">{{ error }}</p>{% endif %}
+  <form method="post" action="/login" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <input type="hidden" name="next" value="{{ next_path }}">
+    <label class="field">Логин
+      <input name="login" autocomplete="username" required value="{{ login or '' }}">
+    </label>
+    <label class="field">Пароль
+      <input name="password" type="password" autocomplete="current-password" required>
+    </label>
+    <button class="btn wide" type="submit">Войти</button>
+  </form>
+</section>
+{% endblock %}

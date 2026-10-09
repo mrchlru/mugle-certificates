@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Выписать{% endblock %}
+{% block main_class %}narrow{% endblock %}
+{% block content %}
+<section class="stack">
+  <p class="eyebrow">Новый сертификат</p>
+  <h1>Выписать</h1>
+  <p class="lede">После выпуска появится ссылка. Её нужно отправить сотруднику — это и есть его сертификат.</p>
+  <form method="post" action="/hr/new" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <label class="field">ФИО
+      <input name="full_name" required>
+    </label>
+    <label class="field">Логин
+      <input name="login" autocomplete="off" required>
+    </label>
+    <label class="field">Номинал, ₽
+      <input name="nominal" inputmode="decimal" required placeholder="10000">
+    </label>
+    <label class="field">Комментарий
+      <input name="note" maxlength="500">
+    </label>
+    <label class="field">Действует до
+      <input name="expires_on" placeholder="ДД.ММ.ГГГГ">
+    </label>
+    <button class="btn wide" type="submit">Выписать сертификат</button>
+  </form>
+</section>
+{% endblock %}

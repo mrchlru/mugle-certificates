@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Доступ{% endblock %}
+{% block content %}
+<div class="cert-layout">
+  <section class="stack">
+    <h1>Новый доступ</h1>
+    <form method="post" action="/hr/staff" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <label class="field">Имя
+        <input name="full_name" required>
+      </label>
+      <label class="field">Логин
+        <input name="login" required autocomplete="off">
+      </label>
+      <label class="field">Пароль
+        <input name="password" autocomplete="off" placeholder="Если пусто — придумаем">
+      </label>
+      <label class="field">Роль
+        <select name="role">
+          <option value="manager">Управляющий</option>
+          <option value="hr">HR</option>
+        </select>
+      </label>
+      <label class="field">Ресторан
+        <input name="restaurant" placeholder="Хачапури Марико, Казань">
+      </label>
+      <button class="btn" type="submit">Создать</button>
+    </form>
+  </section>
+  <section>
+    <h2>Кто может входить</h2>
+    <ul class="people">
+      {% for person in staff %}
+      <li>
+        <div>
+          <p class="history-title">{{ person.full_name }}</p>
+          <p class="muted">{{ person.login }} · {{ 'HR' if person.role.value == 'hr' else 'Управляющий' }}{% if person.restaurant %} · {{ person.restaurant }}{% endif %}{% if not person.is_active %} · отключён{% endif %}</p>
+        </div>
+        <form method="post" action="/hr/staff/{{ person.id }}/active">
+          <input type="hidden" name="csrf_token" value="{{ csrf }}">
+          <input type="hidden" name="active" value="{{ '0' if person.is_active else '1' }}">
+          <button class="text-link" type="submit">{{ 'Отключить' if person.is_active else 'Включить' }}</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+</div>
+{% endblock %}

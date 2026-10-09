@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}{{ card.public_number }}{% endblock %}
+{% block content %}
+<div class="cert-layout">
+  {% include "_card.html" %}
+  <section class="stack">
+    <h1>{{ card.holder_name }}</h1>
+    <p class="muted">Логин {{ card.holder_login }}</p>
+    <div class="flash secret">
+      <p class="eyebrow">Ссылка сотруднику</p>
+      <p class="share">{{ share_url }}</p>
+      <button class="text-link" type="button" data-copy="{{ share_url }}">Скопировать</button>
+    </div>
+    <form method="post" action="/hr/c/{{ card.id }}/name" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <input name="full_name" value="{{ card.holder_name }}" required>
+      <button class="btn ghost" type="submit">Имя</button>
+    </form>
+    <form method="post" action="/hr/c/{{ card.id }}/credit" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <p class="eyebrow">Начислить бонусы</p>
+      <label class="field">Сумма, ₽
+        <input name="amount" inputmode="decimal" required placeholder="1000">
+      </label>
+      <label class="field">Комментарий
+        <input name="comment" maxlength="300" placeholder="Премия, доначисление">
+      </label>
+      <button class="btn" type="submit">Начислить</button>
+    </form>
+    <div class="row-actions">
+      <form method="post" action="/hr/c/{{ card.id }}/block">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <input type="hidden" name="blocked" value="{{ '0' if card.status.value == 'blocked' else '1' }}">
+        <button class="btn ghost" type="submit">{{ 'Разблокировать' if card.status.value == 'blocked' else 'Заблокировать' }}</button>
+      </form>
+    </div>
+  </section>
+</div>
+{% set next_path = '/hr/c/' ~ card.id %}
+{% set show_holder = false %}
+{% with items=card.history %}
+  {% include "_history.html" %}
+{% endwith %}
+{% endblock %}

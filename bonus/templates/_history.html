@@ -1,0 +1,35 @@
+<section class="history">
+  <h2>{{ history_title|default("Операции") }}</h2>
+  {% if items %}
+  <ul>
+    {% for item in items %}
+    <li class="{% if item.undone %}is-undone{% endif %}">
+      <div>
+        <p class="history-title">{{ tx_label(item.tx_type, item.reversal_of_id) }}
+          {% if item.holder_name and show_holder %} · {{ item.holder_name }}{% endif %}
+        </p>
+        <p class="muted">{{ item.created_at|when }}{% if item.actor_name %} · {{ item.actor_name }}{% endif %}{% if item.comment %} · {{ item.comment }}{% endif %}</p>
+      </div>
+      <div class="history-side">
+        {% if item.tx_type not in ['block', 'unblock'] %}
+        <p class="{% if item.tx_type == 'debit' or item.tx_type == 'migrate' %}minus{% else %}plus{% endif %}">
+          {% if item.tx_type == 'debit' or item.tx_type == 'migrate' %}−{% endif %}{{ item.amount|money }}
+        </p>
+        {% endif %}
+        {% if item.can_undo %}
+        <form method="post" action="/tx/{{ item.id }}/undo">
+          <input type="hidden" name="csrf_token" value="{{ csrf }}">
+          <input type="hidden" name="next" value="{{ next_path }}">
+          <button class="text-link" type="submit">Отменить</button>
+        </form>
+        {% elif item.undone %}
+        <p class="muted">отменено</p>
+        {% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">Операций пока нет.</p>
+  {% endif %}
+</section>

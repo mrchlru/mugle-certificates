@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Журнал{% endblock %}
+{% block content %}
+<h1>Журнал</h1>
+{% set next_path = '/hr/ledger' %}
+{% set show_holder = true %}
+{% with items=rows %}
+  {% include "_history.html" %}
+{% endwith %}
+{% endblock %}

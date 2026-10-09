@@ -1,0 +1,206 @@
+"""Проверки выпуска, списания и разбора таблицы."""
+
+import re
+from datetime import date, datetime, timedelta, timezone
+
+import pytest
+from sqlalchemy.orm import Session
+
+import bonus.db as database
+from bonus.importer import parse_table
+from bonus.models import Base, Role, User
+from bonus.security import hash_password
+from bonus.services import (
+    BonusError,
+    IssueDraft,
+    credit_certificate,
+    debit_certificate,
+    find_certificate,
+    issue_certificate,
+    set_blocked,
+    undo_debit,
+)
+from bonus.values import parse_money
+
+
+@pytest.fixture(autouse=True)
+def fresh_db() -> None:
+    database.configure_database("sqlite://")
+    assert database.engine is not None
+    Base.metadata.drop_all(database.engine)
+    Base.metadata.create_all(database.engine)
+
+
+def test_parse_money_reads_restaurant_amounts() -> None:
+    assert parse_money("1 500") == 150_000
+    assert parse_money("1500,50") == 150_050
+    assert parse_money("10.000") == 1_000_000
+    assert parse_money(10000) == 1_000_000
+    assert parse_money("", blank_as_none=True) is None
+
+
+def test_debit_stops_at_zero() -> None:
+    db = _db()
+    hr = _person(db, "hr", Role.hr)
+    manager = _person(db, "manager", Role.manager)
+    issued = issue_certificate(db, _draft(1_000_000), hr)
+    debit_certificate(db, issued.certificate, manager, 400_000, "обед")
+    assert issued.certificate.balance == 600_000
+    with pytest.raises(BonusError):
+        debit_certificate(db, issued.certificate, manager, 700_000, "ещё")
+    assert issued.certificate.balance == 600_000
+
+
+def test_credit_adds_bonuses_to_balance() -> None:
+    db = _db()
+    hr = _person(db, "hr", Role.hr)
+    manager = _person(db, "manager", Role.manager)
+    issued = issue_certificate(db, _draft(1_000_000), hr)
+    debit_certificate(db, issued.certificate, manager, 400_000, "обед")
+    credit_certificate(db, issued.certificate, hr, 250_000, "премия")
+    assert issued.certificate.balance == 850_000
+    assert issued.certificate.nominal == 1_250_000
+
+
+def test_blocked_and_expired_cannot_be_spent() -> None:
+    db = _db()
+    hr = _person(db, "hr", Role.hr)
+    manager = _person(db, "manager", Role.manager)
+    issued = issue_certificate(db, _draft(500_000), hr)
+    set_blocked(db, issued.certificate, hr, True)
+    with pytest.raises(BonusError):
+        debit_certificate(db, issued.certificate, manager, 100, "нет")
+    set_blocked(db, issued.certificate, hr, False)
+    issued.certificate.expires_on = date(2020, 1, 1)
+    db.commit()
+    with pytest.raises(BonusError):
+        debit_certificate(db, issued.certificate, manager, 100, "нет")
+
+
+def test_manager_undo_expires_and_hr_can_still_undo() -> None:
+    db = _db()
+    hr = _person(db, "hr", Role.hr)
+    manager = _person(db, "manager", Role.manager)
+    issued = issue_certificate(db, _draft(500_000), hr)
+    tx = debit_certificate(db, issued.certificate, manager, 100_000, "стол")
+    tx.created_at = datetime.now(timezone.utc) - timedelta(minutes=20)
+    db.commit()
+    with pytest.raises(BonusError):
+        undo_debit(db, tx.id, manager, "поздно")
+    undo_debit(db, tx.id, hr, "ошибка")
+    assert issued.certificate.balance == 500_000
+    with pytest.raises(BonusError):
+        undo_debit(db, tx.id, hr, "ещё раз")
+
+
+def test_import_keeps_spent_balance_and_skips_bad_row() -> None:
+    payload = (
+        "ФИО;Логин;Пароль;Номинал;Остаток\n"
+        "Иванов Иван;ivanov;;10000;7500\n"
+        "Битая строка;;;не-число;\n"
+    ).encode()
+    rows = parse_table("people.csv", payload)
+    assert rows[0].draft is not None
+    assert rows[0].draft.nominal == 1_000_000
+    assert rows[0].draft.balance == 750_000
+    assert rows[1].draft is None
+    db = _db()
+    hr = _person(db, "hr", Role.hr)
+    issued = issue_certificate(db, rows[0].draft, hr)
+    assert issued.certificate.balance == 750_000
+    assert issued.certificate.nominal == 1_000_000
+    found = find_certificate(db, f"https://bonus.example/c/{issued.certificate.token}")
+    assert found is not None
+    assert found.id == issued.certificate.id
+    by_short = find_certificate(db, issued.certificate.short_code)
+    assert by_short is not None
+
+
+def test_login_card_and_debit(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'bonus.db'}")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key")
+    monkeypatch.setenv("SEED_DEMO", "true")
+    from bonus.config import get_settings
+
+    get_settings.cache_clear()
+    import bonus.main as main
+
+    from fastapi.testclient import TestClient
+
+    with TestClient(main.app) as client:
+        hr = _login(client, "hr", "mugle-hr")
+        issued = client.get("/hr/c/1")
+        link = re.search(r'class="share">([^<]+)', issued.text)
+        assert link is not None
+        card = client.get(link.group(1).strip())
+        assert card.status_code == 200
+        assert "Мария Соколова" in card.text
+        assert "<svg" in card.text
+        short = re.search(r'class="short">([^<]+)', card.text)
+        assert short is not None
+        _logout(client, hr.text)
+        _login(client, "manager", "mugle-desk")
+        opened = client.get("/desk", params={"code": short.group(1)}, follow_redirects=True)
+        assert "Списать" in opened.text
+        token = _csrf(opened.text)
+        spent = client.post(
+            opened.url.path,
+            data={"csrf_token": token, "amount": "500", "comment": "ужин"},
+            follow_redirects=True,
+        )
+        assert "Списано" in spent.text
+        assert "16 000" in spent.text or "16000" in spent.text
+
+
+def _login(client, login: str, password: str):
+    page = client.get("/login")
+    response = client.post(
+        "/login",
+        data={"login": login, "password": password, "csrf_token": _csrf(page.text), "next": "/"},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    return response
+
+
+def _logout(client, html: str) -> None:
+    client.post("/logout", data={"csrf_token": _csrf(html)})
+
+
+def _csrf(html: str) -> str:
+    found = re.search(r'name="csrf_token" value="([^"]+)"', html)
+    assert found is not None
+    return found.group(1)
+
+
+def _db() -> Session:
+    assert database.SessionLocal is not None
+    return database.SessionLocal()
+
+
+def _person(db: Session, login: str, role: Role) -> User:
+    user = User(
+        full_name=login,
+        login=login,
+        password_hash=hash_password("password1"),
+        role=role,
+        restaurant="",
+        is_active=True,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def _draft(nominal: int) -> IssueDraft:
+    return IssueDraft(
+        full_name="Иван Петров",
+        login="",
+        password="",
+        nominal=nominal,
+        balance=None,
+        note="",
+        expires_on=None,
+    )

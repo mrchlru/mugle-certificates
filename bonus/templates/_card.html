@@ -1,0 +1,12 @@
+<article class="cert">
+  <img class="cert-logo" src="/static/logo.svg" alt="" width="58" height="47">
+  <p class="eyebrow">Сертификат</p>
+  <p class="cert-number">{{ card.public_number }}</p>
+  <p class="balance">{{ card.balance|money }}</p>
+  <p class="muted">из {{ card.nominal|money }} · {{ status_label(card.status, card.balance, card.expires_on) }}</p>
+  <div class="qr">{{ card.qr_svg|safe }}</div>
+  <p class="short">{{ format_short_code(card.short_code) }}</p>
+  <p class="holder">{{ card.holder_name }}</p>
+  {% if card.expires_on %}<p class="muted">действует до {{ card.expires_on.strftime('%d.%m.%Y') }}</p>{% endif %}
+  {% if card.note %}<p class="note">{{ card.note }}</p>{% endif %}
+</article>
