@@ -620,6 +620,24 @@ body:has(.wallet-wrap) .flash {
   outline-offset: 2px;
 }
 
+.segment-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.segment-list li {
+  display: grid;
+  gap: 10px;
+  padding: 16px 0;
+  border-top: 1px solid var(--line);
+}
+
+.segment-edit,
+.segment-create {
+  gap: 10px;
+}
+
 .template-list {
   list-style: none;
   margin: 0;

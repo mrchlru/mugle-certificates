@@ -7,10 +7,10 @@ import pytest
 from sqlalchemy.orm import Session
 
 import bonus.db as database
+from bonus.catalog import create_segment, ensure_default_segments, list_segments, save_template, update_segment
 from bonus.importer import parse_table
-from bonus.models import Base, Role, User
+from bonus.models import AccrualPeriod, Base, Role, User
 from bonus.security import hash_password
-from bonus.catalog import create_segment, ensure_default_segments, save_template
 from bonus.services import (
     BonusError,
     IssueDraft,
@@ -52,11 +52,22 @@ def test_debit_stops_at_zero() -> None:
     assert issued.certificate.balance == 600_000
 
 
+def test_segment_edit_and_accrual_period() -> None:
+    db = _db()
+    ensure_default_segments(db)
+    lunch = next(item for item in list_segments(db) if item.name == "Ланч")
+    assert lunch.accrual_period == AccrualPeriod.daily
+    segment = create_segment(db, "Временный", AccrualPeriod.none)
+    updated = update_segment(db, segment, name="Премия", accrual_period=AccrualPeriod.monthly)
+    assert updated.name == "Премия"
+    assert updated.accrual_period == AccrualPeriod.monthly
+
+
 def test_issue_with_segment_color_and_template() -> None:
     db = _db()
     ensure_default_segments(db)
     hr = _person(db, "hr", Role.hr)
-    segment = create_segment(db, "Тестовый бартер")
+    segment = create_segment(db, "Тестовый бартер", AccrualPeriod.none)
     template = save_template(
         db,
         name="Баннер",

@@ -46,6 +46,15 @@ class TxType(str, enum.Enum):
     migrate = "migrate"
 
 
+class AccrualPeriod(str, enum.Enum):
+    """Как часто сегмент предполагает начисление бонусов. none — без автоначисления."""
+
+    none = "none"
+    daily = "daily"
+    monthly = "monthly"
+    yearly = "yearly"
+
+
 class User(Base):
     """Сотрудник, управляющий или HR."""
 
@@ -75,6 +84,10 @@ class Segment(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(120), unique=True)
     slug: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    accrual_period: Mapped[AccrualPeriod] = mapped_column(
+        Enum(AccrualPeriod, native_enum=False, length=16),
+        default=AccrualPeriod.none,
+    )
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(default=True)
 

@@ -5,17 +5,20 @@ from fastapi.responses import RedirectResponse, Response
 from sqlalchemy.orm import Session
 
 from bonus.catalog import (
+    ACCRUAL_CHOICES,
     CARD_COLORS,
     create_segment,
     list_segments,
     list_templates,
     media_url,
     normalize_color,
+    parse_accrual_period,
     resolve_segment,
     resolve_template,
     save_template,
     set_segment_active,
     set_template_active,
+    update_segment,
 )
 from bonus.db import get_db
 from bonus.http import form_money, guard_csrf, optional_money, public_base, render, require
@@ -129,6 +132,7 @@ def design_page(request: Request, db: Session = Depends(get_db), user: User = De
         segments=list_segments(db, active_only=False),
         templates=list_templates(db, active_only=False),
         media_url=media_url,
+        accrual_choices=ACCRUAL_CHOICES,
     )
 
 
@@ -138,16 +142,46 @@ def segment_create(
     db: Session = Depends(get_db),
     user: User = Depends(require(Role.hr)),
     name: str = Form(""),
+    accrual_period: str = Form("none"),
     csrf_token: str = Form(""),
 ):
-    """Добавляет свой сегмент."""
+    """Добавляет свой сегмент с периодичностью начисления."""
     try:
         guard_csrf(request, csrf_token)
-        create_segment(db, name)
+        create_segment(db, name, parse_accrual_period(accrual_period))
     except BonusError as exc:
         flash(request, exc.message, "bad")
     else:
         flash(request, "Сегмент добавлен")
+    return RedirectResponse("/hr/design", status_code=303)
+
+
+@router.post("/hr/design/segments/{segment_id}")
+def segment_update(
+    segment_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.hr)),
+    name: str = Form(""),
+    accrual_period: str = Form("none"),
+    csrf_token: str = Form(""),
+):
+    """Редактирует название и периодичность сегмента."""
+    segment = db.get(Segment, segment_id)
+    try:
+        guard_csrf(request, csrf_token)
+        if segment is None:
+            raise BonusError("Сегмент не найден")
+        update_segment(
+            db,
+            segment,
+            name=name,
+            accrual_period=parse_accrual_period(accrual_period),
+        )
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+    else:
+        flash(request, "Сегмент сохранён")
     return RedirectResponse("/hr/design", status_code=303)
 
 

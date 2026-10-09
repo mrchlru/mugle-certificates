@@ -8,19 +8,32 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from bonus.config import get_settings
-from bonus.models import CardTemplate, Segment
+from bonus.models import AccrualPeriod, CardTemplate, Segment
 from bonus.services import BonusError
 
-DEFAULT_SEGMENTS: tuple[str, ...] = (
-    "Ланч (ежедневное начисление)",
-    "Ежемесячные бонусы",
-    "Бартер на все рестораны",
-    "Бартер Москва-Стамбул",
-    "Бартер Сибирские Огни",
-    "Бартер Пинчи",
-    "Бартер Си мама",
-    "День рождения",
+DEFAULT_SEGMENTS: tuple[tuple[str, AccrualPeriod], ...] = (
+    ("Ланч", AccrualPeriod.daily),
+    ("Ежемесячные бонусы", AccrualPeriod.monthly),
+    ("Бартер на все рестораны", AccrualPeriod.none),
+    ("Бартер Москва-Стамбул", AccrualPeriod.none),
+    ("Бартер Сибирские Огни", AccrualPeriod.none),
+    ("Бартер Пинчи", AccrualPeriod.none),
+    ("Бартер Си мама", AccrualPeriod.none),
+    ("День рождения", AccrualPeriod.yearly),
 )
+
+# Старые названия из первого сида — подтягиваем периодичность и, где нужно, имя.
+_LEGACY_SEGMENTS: dict[str, tuple[str, AccrualPeriod]] = {
+    "ланч (ежедневное начисление)": ("Ланч", AccrualPeriod.daily),
+    "ланч": ("Ланч", AccrualPeriod.daily),
+    "ежемесячные бонусы": ("Ежемесячные бонусы", AccrualPeriod.monthly),
+    "бартер на все рестораны": ("Бартер на все рестораны", AccrualPeriod.none),
+    "бартер москва-стамбул": ("Бартер Москва-Стамбул", AccrualPeriod.none),
+    "бартер сибирские огни": ("Бартер Сибирские Огни", AccrualPeriod.none),
+    "бартер пинчи": ("Бартер Пинчи", AccrualPeriod.none),
+    "бартер си мама": ("Бартер Си мама", AccrualPeriod.none),
+    "день рождения": ("День рождения", AccrualPeriod.yearly),
+}
 
 CARD_COLORS: tuple[tuple[str, str], ...] = (
     ("#00A8A8", "Бирюзовый"),
@@ -29,6 +42,13 @@ CARD_COLORS: tuple[tuple[str, str], ...] = (
     ("#1D4ED8", "Синий"),
     ("#111111", "Чёрный"),
     ("#7C3AED", "Фиолетовый"),
+)
+
+ACCRUAL_CHOICES: tuple[tuple[str, str], ...] = (
+    (AccrualPeriod.none.value, "Без начисления"),
+    (AccrualPeriod.daily.value, "Ежедневно"),
+    (AccrualPeriod.monthly.value, "Ежемесячно"),
+    (AccrualPeriod.yearly.value, "Раз в год"),
 )
 
 _HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
@@ -40,13 +60,56 @@ _IMAGE_TYPES = {
 
 
 def ensure_default_segments(db: Session) -> None:
-    """Кладёт базовые сегменты, если их ещё нет."""
-    existing = {name.casefold() for name in db.scalars(select(Segment.name)).all()}
-    for index, name in enumerate(DEFAULT_SEGMENTS):
-        if name.casefold() in existing:
+    """Кладёт базовые сегменты и подтягивает периодичность у уже созданных."""
+    segments = list(db.scalars(select(Segment)).all())
+    by_name = {segment.name.casefold(): segment for segment in segments}
+    changed = False
+    for segment in segments:
+        legacy = _LEGACY_SEGMENTS.get(segment.name.casefold())
+        if legacy is None:
             continue
-        db.add(Segment(name=name, slug=_slug(name), sort_order=index, is_active=True))
-    db.commit()
+        new_name, period = legacy
+        target_key = new_name.casefold()
+        if segment.name == new_name:
+            if segment.accrual_period != period:
+                segment.accrual_period = period
+                changed = True
+            continue
+        existing_target = by_name.get(target_key)
+        if existing_target is None:
+            by_name.pop(segment.name.casefold(), None)
+            segment.name = new_name
+            by_name[target_key] = segment
+            changed = True
+            if segment.accrual_period != period:
+                segment.accrual_period = period
+            continue
+        if existing_target.accrual_period != period:
+            existing_target.accrual_period = period
+            changed = True
+        if segment.is_active:
+            segment.is_active = False
+            changed = True
+    for index, (name, period) in enumerate(DEFAULT_SEGMENTS):
+        found = by_name.get(name.casefold())
+        if found is None:
+            created = Segment(
+                name=name,
+                slug=_unique_slug(db, _slug(name)),
+                accrual_period=period,
+                sort_order=index,
+                is_active=True,
+            )
+            db.add(created)
+            by_name[name.casefold()] = created
+            changed = True
+            continue
+        if found.accrual_period != period or found.sort_order != index:
+            found.accrual_period = period
+            found.sort_order = index
+            changed = True
+    if changed:
+        db.commit()
 
 
 def list_segments(db: Session, *, active_only: bool = True) -> list[Segment]:
@@ -65,7 +128,15 @@ def list_templates(db: Session, *, active_only: bool = True) -> list[CardTemplat
     return list(db.scalars(statement).all())
 
 
-def create_segment(db: Session, name: str) -> Segment:
+def parse_accrual_period(raw: str) -> AccrualPeriod:
+    """Читает периодичность из формы."""
+    try:
+        return AccrualPeriod(raw.strip() or AccrualPeriod.none.value)
+    except ValueError as exc:
+        raise BonusError("Неизвестная периодичность начисления") from exc
+
+
+def create_segment(db: Session, name: str, accrual_period: AccrualPeriod = AccrualPeriod.none) -> Segment:
     """Добавляет новый сегмент."""
     cleaned = " ".join(name.split())
     if len(cleaned) < 2:
@@ -75,10 +146,32 @@ def create_segment(db: Session, name: str) -> Segment:
     segment = Segment(
         name=cleaned[:120],
         slug=_unique_slug(db, _slug(cleaned)),
+        accrual_period=accrual_period,
         sort_order=1000 + int(db.scalar(select(Segment.id).order_by(Segment.id.desc()).limit(1)) or 0),
         is_active=True,
     )
     db.add(segment)
+    db.commit()
+    db.refresh(segment)
+    return segment
+
+
+def update_segment(
+    db: Session,
+    segment: Segment,
+    *,
+    name: str,
+    accrual_period: AccrualPeriod,
+) -> Segment:
+    """Меняет название и периодичность начисления."""
+    cleaned = " ".join(name.split())
+    if len(cleaned) < 2:
+        raise BonusError("Укажите название сегмента")
+    twin = db.scalar(select(Segment.id).where(Segment.name == cleaned, Segment.id != segment.id))
+    if twin is not None:
+        raise BonusError("Сегмент с таким названием уже есть")
+    segment.name = cleaned[:120]
+    segment.accrual_period = accrual_period
     db.commit()
     db.refresh(segment)
     return segment
@@ -144,6 +237,15 @@ def resolve_template(db: Session, template_id: int | None) -> CardTemplate | Non
 def media_url(image_path: str) -> str:
     """Адрес загруженной картинки шаблона."""
     return f"/media/{image_path}"
+
+
+def accrual_label(period: AccrualPeriod | str) -> str:
+    """Подпись периодичности для интерфейса."""
+    key = period.value if isinstance(period, AccrualPeriod) else period
+    for value, title in ACCRUAL_CHOICES:
+        if value == key:
+            return title
+    return key
 
 
 def _uploads_dir() -> Path:

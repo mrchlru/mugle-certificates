@@ -5,19 +5,24 @@ from sqlalchemy.engine import Engine
 
 
 def ensure_schema(engine: Engine) -> None:
-    """Добавляет новые поля сертификата, если база создана раньше."""
+    """Добавляет новые поля, если база создана раньше."""
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
-    if "certificates" not in tables:
-        return
-    columns = {column["name"] for column in inspector.get_columns("certificates")}
     statements: list[str] = []
-    if "segment_id" not in columns:
-        statements.append("ALTER TABLE certificates ADD COLUMN segment_id INTEGER")
-    if "template_id" not in columns:
-        statements.append("ALTER TABLE certificates ADD COLUMN template_id INTEGER")
-    if "color" not in columns:
-        statements.append("ALTER TABLE certificates ADD COLUMN color VARCHAR(7) DEFAULT '#00A8A8'")
+    if "certificates" in tables:
+        columns = {column["name"] for column in inspector.get_columns("certificates")}
+        if "segment_id" not in columns:
+            statements.append("ALTER TABLE certificates ADD COLUMN segment_id INTEGER")
+        if "template_id" not in columns:
+            statements.append("ALTER TABLE certificates ADD COLUMN template_id INTEGER")
+        if "color" not in columns:
+            statements.append("ALTER TABLE certificates ADD COLUMN color VARCHAR(7) DEFAULT '#00A8A8'")
+    if "segments" in tables:
+        columns = {column["name"] for column in inspector.get_columns("segments")}
+        if "accrual_period" not in columns:
+            statements.append(
+                "ALTER TABLE segments ADD COLUMN accrual_period VARCHAR(16) DEFAULT 'none'"
+            )
     if not statements:
         return
     with engine.begin() as connection:

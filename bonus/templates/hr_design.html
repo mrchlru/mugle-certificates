@@ -4,19 +4,41 @@
 <div class="cert-layout">
   <section class="stack">
     <h1>Сегменты</h1>
-    <p class="lede">Ими фильтруют сертификаты и подписывают владельца на карточке.</p>
-    <form method="post" action="/hr/design/segments" class="inline">
+    <p class="lede">Ими фильтруют сертификаты и подписывают владельца на карточке. Периодичность нужна, если бонусы начисляются регулярно.</p>
+    <form method="post" action="/hr/design/segments" class="stack segment-create">
       <input type="hidden" name="csrf_token" value="{{ csrf }}">
-      <input name="name" placeholder="Новый сегмент" required>
+      <label class="field">Название
+        <input name="name" placeholder="Новый сегмент" required>
+      </label>
+      <label class="field">Начисление
+        <select name="accrual_period">
+          {% for value, title in accrual_choices %}
+          <option value="{{ value }}">{{ title }}</option>
+          {% endfor %}
+        </select>
+      </label>
       <button class="btn" type="submit">Добавить</button>
     </form>
-    <ul class="people">
+    <ul class="segment-list">
       {% for item in segments %}
       <li>
-        <div>
-          <p class="history-title">{{ item.name }}</p>
-          <p class="muted">{% if item.is_active %}активен{% else %}скрыт{% endif %}</p>
-        </div>
+        <form method="post" action="/hr/design/segments/{{ item.id }}" class="stack segment-edit">
+          <input type="hidden" name="csrf_token" value="{{ csrf }}">
+          <label class="field">Название
+            <input name="name" value="{{ item.name }}" required>
+          </label>
+          <label class="field">Начисление
+            <select name="accrual_period">
+              {% for value, title in accrual_choices %}
+              <option value="{{ value }}" {% if item.accrual_period.value == value %}selected{% endif %}>{{ title }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <div class="row-actions">
+            <button class="btn ghost" type="submit">Сохранить</button>
+            <p class="muted">{% if item.is_active %}активен{% else %}скрыт{% endif %} · {{ accrual_label(item.accrual_period) }}</p>
+          </div>
+        </form>
         <form method="post" action="/hr/design/segments/{{ item.id }}/active">
           <input type="hidden" name="csrf_token" value="{{ csrf }}">
           <input type="hidden" name="active" value="{{ '0' if item.is_active else '1' }}">
