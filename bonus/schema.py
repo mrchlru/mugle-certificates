@@ -25,7 +25,7 @@ def ensure_schema(engine: Engine) -> None:
             )
         if "requires_expiry" not in columns:
             statements.append(
-                "ALTER TABLE segments ADD COLUMN requires_expiry BOOLEAN DEFAULT 0"
+                "ALTER TABLE segments ADD COLUMN requires_expiry BOOLEAN DEFAULT FALSE"
             )
     if not statements:
         return
