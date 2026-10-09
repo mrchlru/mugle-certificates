@@ -19,6 +19,7 @@ from bonus.catalog import (
     set_segment_active,
     set_template_active,
     update_segment,
+    update_template,
 )
 from bonus.db import get_db
 from bonus.http import form_money, guard_csrf, optional_money, public_base, render, require
@@ -249,6 +250,44 @@ def template_create(
         flash(request, exc.message, "bad")
     else:
         flash(request, "Шаблон загружен")
+    return RedirectResponse("/hr/design", status_code=303)
+
+
+@router.post("/hr/design/templates/{template_id}")
+async def template_update(
+    template_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.hr)),
+    name: str = Form(""),
+    image: UploadFile | None = File(None),
+    csrf_token: str = Form(""),
+):
+    """Меняет название шаблона и при желании заменяет картинку."""
+    template = db.get(CardTemplate, template_id)
+    try:
+        guard_csrf(request, csrf_token)
+        if template is None:
+            raise BonusError("Шаблон не найден")
+        payload: bytes | None = None
+        content_type = ""
+        filename = ""
+        if image is not None and image.filename:
+            payload = await image.read()
+            content_type = image.content_type or ""
+            filename = image.filename
+        update_template(
+            db,
+            template,
+            name=name,
+            filename=filename,
+            payload=payload,
+            content_type=content_type,
+        )
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+    else:
+        flash(request, "Шаблон сохранён")
     return RedirectResponse("/hr/design", status_code=303)
 
 

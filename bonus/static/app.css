@@ -671,8 +671,14 @@ body:has(.wallet-wrap) .flash {
 .template-list li {
   display: flex;
   gap: 14px;
-  padding: 12px 0;
+  align-items: flex-start;
+  padding: 16px 0;
   border-top: 1px solid var(--line);
+}
+
+.template-edit {
+  flex: 1;
+  min-width: 0;
 }
 
 .template-list img {

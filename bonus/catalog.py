@@ -13,7 +13,7 @@ from bonus.config import get_settings
 from bonus.models import AccrualPeriod, CardTemplate, Segment
 from bonus.services import BonusError
 from bonus.storage import (
-    delete_local_template,
+    delete_template_object,
     public_media_url,
     read_template_bytes,
     s3_enabled,
@@ -228,6 +228,39 @@ def set_template_active(db: Session, template: CardTemplate, active: bool) -> No
     db.commit()
 
 
+def update_template(
+    db: Session,
+    template: CardTemplate,
+    *,
+    name: str,
+    filename: str = "",
+    payload: bytes | None = None,
+    content_type: str = "",
+) -> CardTemplate:
+    """Меняет название и при необходимости заменяет картинку, удаляя старую."""
+    cleaned = " ".join(name.split()) or template.name
+    if len(cleaned) < 1:
+        raise BonusError("Укажите название шаблона")
+    template.name = cleaned[:120]
+    if payload is not None and len(payload) > 0:
+        if content_type not in _IMAGE_TYPES:
+            raise BonusError("Нужен JPEG, PNG или WebP")
+        if len(payload) > _MAX_UPLOAD_BYTES:
+            raise BonusError("Картинка больше 8 МБ")
+        optimized = _optimize_template_image(payload)
+        stored = store_template_bytes(optimized, f"{secrets.token_hex(12)}.webp")
+        old_path = template.image_path
+        template.image_path = stored
+        db.commit()
+        db.refresh(template)
+        if old_path and old_path != stored:
+            delete_template_object(old_path)
+        return template
+    db.commit()
+    db.refresh(template)
+    return template
+
+
 def optimize_existing_templates(db: Session) -> None:
     """Пережимает локальные баннеры и при необходимости выгружает в S3."""
     changed = False
@@ -251,7 +284,7 @@ def optimize_existing_templates(db: Session) -> None:
         template.image_path = stored
         changed = True
         if old_name != stored:
-            delete_local_template(old_name)
+            delete_template_object(old_name)
     if changed:
         db.commit()
 

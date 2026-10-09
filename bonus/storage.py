@@ -66,6 +66,17 @@ def delete_local_template(image_path: str) -> None:
     _safe_unlink(get_settings().data_path() / "uploads" / Path(image_path).name)
 
 
+def delete_template_object(image_path: str) -> None:
+    """Удаляет обложку с диска и из S3, если хранилище настроено."""
+    key = _storage_key(image_path)
+    if not key:
+        return
+    delete_local_template(key)
+    settings = get_settings()
+    if s3_enabled(settings):
+        _delete_s3(settings, key)
+
+
 def _object_key(filename: str) -> str:
     settings = get_settings()
     prefix = settings.s3_prefix.strip().strip("/")
@@ -77,6 +88,19 @@ def _object_key(filename: str) -> str:
 
 def _local_file(image_path: str) -> Path:
     return get_settings().data_path() / "uploads" / image_path.lstrip("/").replace("\\", "/")
+
+
+def _storage_key(image_path: str) -> str:
+    cleaned = image_path.strip()
+    if cleaned == "":
+        return ""
+    if cleaned.startswith("http://") or cleaned.startswith("https://"):
+        settings = get_settings()
+        base = settings.s3_public_base_url.rstrip("/")
+        if base and cleaned.startswith(base + "/"):
+            return cleaned[len(base) + 1 :]
+        return cleaned.rsplit("/", 1)[-1]
+    return cleaned.lstrip("/")
 
 
 def _put_s3(settings: Settings, key: str, payload: bytes) -> None:
@@ -95,6 +119,17 @@ def _put_s3(settings: Settings, key: str, payload: bytes) -> None:
         )
     except (BotoCoreError, ClientError, OSError) as exc:
         raise BonusError("Не удалось загрузить картинку в S3") from exc
+
+
+def _delete_s3(settings: Settings, key: str) -> None:
+    try:
+        from botocore.exceptions import BotoCoreError, ClientError
+    except ImportError:
+        return
+    try:
+        _s3_client(settings).delete_object(Bucket=settings.s3_bucket, Key=key)
+    except (BotoCoreError, ClientError, OSError):
+        return
 
 
 def _s3_client(settings: Settings):

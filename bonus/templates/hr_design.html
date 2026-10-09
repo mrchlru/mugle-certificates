@@ -73,9 +73,21 @@
       {% for item in templates %}
       <li>
         <img src="{{ media_url(item.image_path) }}" alt="{{ item.name }}" width="120" height="72" loading="lazy" decoding="async">
-        <div>
-          <p class="history-title">{{ item.name }}</p>
-          <p class="muted">{% if item.is_active %}активен{% else %}скрыт{% endif %}</p>
+        <div class="stack template-edit">
+          <form method="post" action="/hr/design/templates/{{ item.id }}" enctype="multipart/form-data" class="stack">
+            <input type="hidden" name="csrf_token" value="{{ csrf }}">
+            <label class="field">Название
+              <input name="name" value="{{ item.name }}" required>
+            </label>
+            <label class="field">Новая картинка
+              <input type="file" name="image" accept="image/jpeg,image/png,image/webp">
+            </label>
+            <p class="muted">Если выбрать файл, старая картинка удалится.</p>
+            <div class="row-actions">
+              <button class="btn ghost" type="submit">Сохранить</button>
+              <p class="muted">{% if item.is_active %}активен{% else %}скрыт{% endif %}</p>
+            </div>
+          </form>
           <form method="post" action="/hr/design/templates/{{ item.id }}/active">
             <input type="hidden" name="csrf_token" value="{{ csrf }}">
             <input type="hidden" name="active" value="{{ '0' if item.is_active else '1' }}">

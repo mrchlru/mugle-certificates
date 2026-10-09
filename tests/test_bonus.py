@@ -8,7 +8,14 @@ import pytest
 from sqlalchemy.orm import Session
 
 import bonus.db as database
-from bonus.catalog import create_segment, ensure_default_segments, list_segments, save_template, update_segment
+from bonus.catalog import (
+    create_segment,
+    ensure_default_segments,
+    list_segments,
+    save_template,
+    update_segment,
+    update_template,
+)
 from bonus.config import get_settings
 from bonus.importer import parse_table
 from bonus.models import AccrualPeriod, Base, Role, User
@@ -138,6 +145,32 @@ def test_certificate_expiry_can_be_set() -> None:
     set_certificate_expiry(db, issued.certificate, date(2026, 12, 31))
     assert issued.certificate.expires_on == date(2026, 12, 31)
     assert format_date(issued.certificate.expires_on) == "31.12.2026"
+
+
+def test_template_replace_deletes_old_file() -> None:
+    db = _db()
+    first = save_template(
+        db,
+        name="Старый",
+        filename="old.png",
+        payload=_tiny_png(),
+        content_type="image/png",
+    )
+    old_key = first.image_path
+    old_path = get_settings().data_path() / "uploads" / Path(old_key)
+    assert old_path.is_file()
+    updated = update_template(
+        db,
+        first,
+        name="Новый",
+        filename="new.png",
+        payload=_tiny_png(),
+        content_type="image/png",
+    )
+    assert updated.name == "Новый"
+    assert updated.image_path != old_key
+    assert not old_path.is_file()
+    assert (get_settings().data_path() / "uploads" / Path(updated.image_path)).is_file()
 
 
 def test_issue_without_login_stores_internal_fields() -> None:
