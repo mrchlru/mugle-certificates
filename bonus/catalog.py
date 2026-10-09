@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from bonus.config import get_settings
 from bonus.models import AccrualPeriod, CardTemplate, Segment
-from bonus.services import BonusError
+from bonus.services import BonusError, normalize_discount
 from bonus.storage import (
     delete_template_object,
     public_media_url,
@@ -206,7 +206,15 @@ def set_segment_active(db: Session, segment: Segment, active: bool) -> None:
     db.commit()
 
 
-def save_template(db: Session, *, name: str, filename: str, payload: bytes, content_type: str) -> CardTemplate:
+def save_template(
+    db: Session,
+    *,
+    name: str,
+    filename: str,
+    payload: bytes,
+    content_type: str,
+    discount_percent: int = 0,
+) -> CardTemplate:
     """Сохраняет картинку шаблона на диск или в S3 и пишет путь в базу."""
     cleaned = " ".join(name.split()) or Path(filename).stem or "Шаблон"
     if content_type not in _IMAGE_TYPES:
@@ -215,7 +223,12 @@ def save_template(db: Session, *, name: str, filename: str, payload: bytes, cont
         raise BonusError("Картинка больше 8 МБ")
     optimized = _optimize_template_image(payload)
     stored = store_template_bytes(optimized, f"{secrets.token_hex(12)}.webp")
-    template = CardTemplate(name=cleaned[:120], image_path=stored, is_active=True)
+    template = CardTemplate(
+        name=cleaned[:120],
+        image_path=stored,
+        discount_percent=normalize_discount(discount_percent),
+        is_active=True,
+    )
     db.add(template)
     db.commit()
     db.refresh(template)
@@ -233,15 +246,17 @@ def update_template(
     template: CardTemplate,
     *,
     name: str,
+    discount_percent: int = 0,
     filename: str = "",
     payload: bytes | None = None,
     content_type: str = "",
 ) -> CardTemplate:
-    """Меняет название и при необходимости заменяет картинку, удаляя старую."""
+    """Меняет название, процент и при необходимости заменяет картинку, удаляя старую."""
     cleaned = " ".join(name.split()) or template.name
     if len(cleaned) < 1:
         raise BonusError("Укажите название шаблона")
     template.name = cleaned[:120]
+    template.discount_percent = normalize_discount(discount_percent)
     if payload is not None and len(payload) > 0:
         if content_type not in _IMAGE_TYPES:
             raise BonusError("Нужен JPEG, PNG или WebP")

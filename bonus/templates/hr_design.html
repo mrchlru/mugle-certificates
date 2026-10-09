@@ -64,6 +64,9 @@
       <label class="field">Название
         <input name="name" placeholder="Ланч, бартер…">
       </label>
+      <label class="field">Процент на карточке
+        <input name="discount_percent" inputmode="numeric" placeholder="например 30" maxlength="3">
+      </label>
       <label class="field">Картинка
         <input type="file" name="image" accept="image/jpeg,image/png,image/webp" required>
       </label>
@@ -79,13 +82,16 @@
             <label class="field">Название
               <input name="name" value="{{ item.name }}" required>
             </label>
+            <label class="field">Процент на карточке
+              <input name="discount_percent" value="{{ item.discount_percent or '' }}" inputmode="numeric" maxlength="3" placeholder="0">
+            </label>
             <label class="field">Новая картинка
               <input type="file" name="image" accept="image/jpeg,image/png,image/webp">
             </label>
             <p class="muted">Если выбрать файл, старая картинка удалится.</p>
             <div class="row-actions">
               <button class="btn ghost" type="submit">Сохранить</button>
-              <p class="muted">{% if item.is_active %}активен{% else %}скрыт{% endif %}</p>
+              <p class="muted">{% if item.is_active %}активен{% else %}скрыт{% endif %}{% if item.discount_percent %} · {{ item.discount_percent }}%{% endif %}</p>
             </div>
           </form>
           <form method="post" action="/hr/design/templates/{{ item.id }}/active">

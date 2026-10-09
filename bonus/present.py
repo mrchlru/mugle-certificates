@@ -25,6 +25,7 @@ class TxView:
     comment: str
     created_at: datetime
     actor_name: str
+    restaurant: str
     holder_name: str
     public_number: str
     reversal_of_id: int | None
@@ -51,6 +52,7 @@ class CardView:
     status: CertificateStatus
     can_spend: bool
     color: str
+    discount_percent: int
     segment_name: str
     template_url: str
     barcode_value: str
@@ -76,6 +78,7 @@ class StaffView:
     login: str
     role: Role
     restaurant: str
+    phone: str
     is_active: bool
 
 
@@ -114,7 +117,15 @@ def recent_debits(db: Session, actor: User, limit: int = 8) -> list[TxView]:
     ).all()
     undone = _undone_ids(db, [row[0].id for row in rows])
     return [
-        _tx_view(tx, actor.full_name, holder_name, public_number, tx.id in undone, actor)
+        _tx_view(
+            tx,
+            actor.full_name,
+            holder_name,
+            public_number,
+            tx.id in undone,
+            actor,
+            restaurant=tx.restaurant or actor.restaurant,
+        )
         for tx, public_number, holder_name in rows
     ]
 
@@ -195,6 +206,7 @@ def ledger(db: Session, actor: User, limit: int = 200) -> list[TxView]:
     ).all()
     actor_ids = {row[0].actor_id for row in rows if row[0].actor_id is not None}
     names = _user_names(db, actor_ids)
+    places = _user_restaurants(db, actor_ids)
     undone = _undone_ids(db, [row[0].id for row in rows])
     return [
         _tx_view(
@@ -204,6 +216,7 @@ def ledger(db: Session, actor: User, limit: int = 200) -> list[TxView]:
             public_number,
             tx.id in undone,
             actor,
+            restaurant=tx.restaurant or places.get(tx.actor_id or 0, ""),
         )
         for tx, public_number, holder_name in rows
     ]
@@ -221,6 +234,7 @@ def list_staff(db: Session) -> list[StaffView]:
             login=user.login,
             role=user.role,
             restaurant=user.restaurant,
+            phone=user.phone,
             is_active=user.is_active,
         )
         for user in users
@@ -235,15 +249,23 @@ def _history(
     public_number: str,
 ) -> list[TxView]:
     rows = db.execute(
-        select(Transaction, User.full_name)
+        select(Transaction, User.full_name, User.restaurant)
         .outerjoin(User, Transaction.actor_id == User.id)
         .where(Transaction.certificate_id == certificate_id)
         .order_by(Transaction.id.desc())
     ).all()
     undone = _undone_ids(db, [row[0].id for row in rows])
     return [
-        _tx_view(tx, actor_name or "", holder_name, public_number, tx.id in undone, actor)
-        for tx, actor_name in rows
+        _tx_view(
+            tx,
+            actor_name or "",
+            holder_name,
+            public_number,
+            tx.id in undone,
+            actor,
+            restaurant=tx.restaurant or place or "",
+        )
+        for tx, actor_name, place in rows
     ]
 
 
@@ -254,6 +276,7 @@ def _tx_view(
     public_number: str,
     undone: bool,
     viewer: User | None,
+    restaurant: str | None = None,
 ) -> TxView:
     return TxView(
         id=tx.id,
@@ -263,6 +286,7 @@ def _tx_view(
         comment=tx.comment,
         created_at=tx.created_at,
         actor_name=actor_name or "",
+        restaurant=tx.restaurant or restaurant or "",
         holder_name=holder_name,
         public_number=public_number,
         reversal_of_id=tx.reversal_of_id,
@@ -301,6 +325,7 @@ def _card_view(
         status=certificate.status,
         can_spend=_can_spend(certificate),
         color=certificate.color or "#00A8A8",
+        discount_percent=certificate.discount_percent or 0,
         segment_name=_segment_name(db, certificate.segment_id),
         template_url=template_path,
         barcode_value=format_short_code(certificate.short_code).replace("-", ""),
@@ -347,6 +372,13 @@ def _user_names(db: Session, user_ids: set[int]) -> dict[int, str]:
         return {}
     rows = db.execute(select(User.id, User.full_name).where(User.id.in_(user_ids))).all()
     return {user_id: name for user_id, name in rows}
+
+
+def _user_restaurants(db: Session, user_ids: set[int]) -> dict[int, str]:
+    if not user_ids:
+        return {}
+    rows = db.execute(select(User.id, User.restaurant).where(User.id.in_(user_ids))).all()
+    return {user_id: place for user_id, place in rows}
 
 
 def _moscow_day_start() -> datetime:

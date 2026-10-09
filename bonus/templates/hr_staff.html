@@ -4,25 +4,29 @@
 <div class="cert-layout">
   <section class="stack">
     <h1>Новый доступ</h1>
+    <p class="lede">Управляющий списывает бонусы в своём ресторане. Ресторан попадёт в журнал списаний.</p>
     <form method="post" action="/hr/staff" class="stack">
       <input type="hidden" name="csrf_token" value="{{ csrf }}">
       <label class="field">Имя
-        <input name="full_name" required>
+        <input name="first_name" required autocomplete="given-name">
       </label>
-      <label class="field">Логин
-        <input name="login" required autocomplete="off">
+      <label class="field">Фамилия
+        <input name="last_name" required autocomplete="family-name">
       </label>
-      <label class="field">Пароль
-        <input name="password" autocomplete="off" placeholder="Если пусто — придумаем">
+      <label class="field">Телефон
+        <input name="phone" maxlength="40" inputmode="tel" placeholder="+7 …">
       </label>
       <label class="field">Роль
-        <select name="role">
+        <select name="role" id="staff-role">
           <option value="manager">Управляющий</option>
           <option value="hr">HR</option>
         </select>
       </label>
       <label class="field">Ресторан
-        <input name="restaurant" placeholder="Хачапури Марико, Казань">
+        <input name="restaurant" id="staff-restaurant" placeholder="Хачапури Марико, Казань">
+      </label>
+      <label class="field">Пароль
+        <input name="password" autocomplete="new-password" placeholder="Если пусто — придумаем">
       </label>
       <button class="btn" type="submit">Создать</button>
     </form>
@@ -34,7 +38,13 @@
       <li>
         <div>
           <p class="history-title">{{ person.full_name }}</p>
-          <p class="muted">{{ person.login }} · {{ 'HR' if person.role.value == 'hr' else 'Управляющий' }}{% if person.restaurant %} · {{ person.restaurant }}{% endif %}{% if not person.is_active %} · отключён{% endif %}</p>
+          <p class="muted">
+            {{ 'HR' if person.role.value == 'hr' else 'Управляющий' }}
+            {% if person.restaurant %} · {{ person.restaurant }}{% endif %}
+            {% if person.phone %} · {{ person.phone }}{% endif %}
+            · {{ person.login }}
+            {% if not person.is_active %} · отключён{% endif %}
+          </p>
         </div>
         <form method="post" action="/hr/staff/{{ person.id }}/active">
           <input type="hidden" name="csrf_token" value="{{ csrf }}">
@@ -46,4 +56,16 @@
     </ul>
   </section>
 </div>
+<script>
+(function () {
+  var role = document.getElementById("staff-role");
+  var restaurant = document.getElementById("staff-restaurant");
+  if (!role || !restaurant) return;
+  function sync() {
+    restaurant.required = role.value === "manager";
+  }
+  role.addEventListener("change", sync);
+  sync();
+})();
+</script>
 {% endblock %}

@@ -23,6 +23,7 @@ from bonus.security import hash_password
 from bonus.services import (
     BonusError,
     IssueDraft,
+    create_staff,
     credit_certificate,
     debit_certificate,
     find_certificate,
@@ -171,6 +172,45 @@ def test_template_replace_deletes_old_file() -> None:
     assert updated.image_path != old_key
     assert not old_path.is_file()
     assert (get_settings().data_path() / "uploads" / Path(updated.image_path)).is_file()
+
+
+def test_staff_and_debit_keeps_restaurant() -> None:
+    db = _db()
+    hr = _person(db, "hr", Role.hr)
+    manager, _plain = create_staff(
+        db,
+        first_name="Игорь",
+        last_name="Смирнов",
+        phone="+79001234567",
+        password="password1",
+        role=Role.manager,
+        restaurant="Си мама",
+    )
+    assert manager.restaurant == "Си мама"
+    assert manager.phone == "+79001234567"
+    issued = issue_certificate(db, _draft(500_000), hr)
+    tx = debit_certificate(db, issued.certificate, manager, 100_000, "обед")
+    assert tx.restaurant == "Си мама"
+
+
+def test_issue_with_discount_percent() -> None:
+    db = _db()
+    hr = _person(db, "hr", Role.hr)
+    issued = issue_certificate(
+        db,
+        IssueDraft(
+            full_name="Гость",
+            login="",
+            password="",
+            nominal=200_000,
+            balance=None,
+            note="",
+            expires_on=None,
+            discount_percent=30,
+        ),
+        hr,
+    )
+    assert issued.certificate.discount_percent == 30
 
 
 def test_issue_without_login_stores_internal_fields() -> None:

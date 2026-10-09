@@ -48,16 +48,20 @@
       </div>
     </fieldset>
     <label class="field">Шаблон баннера
-      <select name="template_id">
-        <option value="0">Без картинки</option>
+      <select name="template_id" id="template-select">
+        <option value="0" data-discount="0">Без картинки</option>
         {% for item in templates %}
-        <option value="{{ item.id }}">{{ item.name }}</option>
+        <option value="{{ item.id }}" data-discount="{{ item.discount_percent or 0 }}">{{ item.name }}{% if item.discount_percent %} · {{ item.discount_percent }}%{% endif %}</option>
         {% endfor %}
       </select>
     </label>
     {% if not templates %}
     <p class="muted">Сначала загрузите картинку в разделе «Оформление».</p>
     {% endif %}
+    <label class="field">Процент на карточке
+      <input name="discount_percent" id="discount-percent" inputmode="numeric" placeholder="например 30" maxlength="3">
+    </label>
+    <p class="muted">На карточке покажется просто «30%», без слова «скидка». Можно подставить из шаблона.</p>
     <label class="field">Комментарий
       <input name="note" maxlength="500">
     </label>
@@ -69,15 +73,25 @@
   var select = document.getElementById("segment-select");
   var input = document.getElementById("expires-on");
   var hint = document.getElementById("expires-hint");
-  if (!select || !input) return;
-  function sync() {
-    var option = select.options[select.selectedIndex];
-    var needed = option && option.getAttribute("data-requires-expiry") === "1";
-    input.required = needed;
-    if (hint) hint.hidden = !needed;
+  if (select && input) {
+    function syncExpiry() {
+      var option = select.options[select.selectedIndex];
+      var needed = option && option.getAttribute("data-requires-expiry") === "1";
+      input.required = needed;
+      if (hint) hint.hidden = !needed;
+    }
+    select.addEventListener("change", syncExpiry);
+    syncExpiry();
   }
-  select.addEventListener("change", sync);
-  sync();
+  var templates = document.getElementById("template-select");
+  var discount = document.getElementById("discount-percent");
+  if (templates && discount) {
+    templates.addEventListener("change", function () {
+      var option = templates.options[templates.selectedIndex];
+      var value = option ? option.getAttribute("data-discount") : "0";
+      if (value && value !== "0") discount.value = value;
+    });
+  }
 })();
 </script>
 {% endblock %}

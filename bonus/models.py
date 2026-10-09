@@ -104,6 +104,7 @@ class CardTemplate(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(120))
     image_path: Mapped[str] = mapped_column(String(200))
+    discount_percent: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: _utcnow())
 
@@ -125,6 +126,7 @@ class Certificate(Base):
     segment_id: Mapped[int | None] = mapped_column(ForeignKey("segments.id"), nullable=True, index=True)
     template_id: Mapped[int | None] = mapped_column(ForeignKey("card_templates.id"), nullable=True)
     color: Mapped[str] = mapped_column(String(7), default="#00A8A8")
+    discount_percent: Mapped[int] = mapped_column(Integer, default=0)
     nominal: Mapped[int] = mapped_column(Integer)
     balance: Mapped[int] = mapped_column(Integer)
     note: Mapped[str] = mapped_column(String(500), default="")
@@ -155,6 +157,7 @@ class Transaction(Base):
     amount: Mapped[int] = mapped_column(Integer, default=0)
     balance_after: Mapped[int] = mapped_column(Integer)
     comment: Mapped[str] = mapped_column(String(300), default="")
+    restaurant: Mapped[str] = mapped_column(String(200), default="")
     reversal_of_id: Mapped[int | None] = mapped_column(ForeignKey("transactions.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

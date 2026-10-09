@@ -8,7 +8,7 @@
         <p class="history-title">{{ tx_label(item.tx_type, item.reversal_of_id) }}
           {% if item.holder_name and show_holder %} · {{ item.holder_name }}{% endif %}
         </p>
-        <p class="muted">{{ item.created_at|when }}{% if item.actor_name %} · {{ item.actor_name }}{% endif %}{% if item.comment %} · {{ item.comment }}{% endif %}</p>
+        <p class="muted">{{ item.created_at|when }}{% if item.actor_name %} · {{ item.actor_name }}{% endif %}{% if item.restaurant %} · {{ item.restaurant }}{% endif %}{% if item.comment %} · {{ item.comment }}{% endif %}</p>
       </div>
       <div class="history-side">
         {% if item.tx_type not in ['block', 'unblock'] %}

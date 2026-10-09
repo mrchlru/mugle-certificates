@@ -4,6 +4,9 @@
     <div class="wallet-balance">
       <p class="wallet-label">Баланс</p>
       <p class="wallet-amount">{{ "{:,}".format(card.balance // 100).replace(",", " ") }}</p>
+      {% if card.discount_percent and card.discount_percent > 0 %}
+      <p class="wallet-discount">{{ card.discount_percent }}%</p>
+      {% endif %}
     </div>
   </div>
   <div class="wallet-banner{% if not card.template_url %} is-empty{% endif %}">

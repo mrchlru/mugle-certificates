@@ -48,6 +48,7 @@ class IssueDraft:
     department: str = ""
     job_title: str = ""
     phone: str = ""
+    discount_percent: int = 0
 
 
 def issue_certificate(db: Session, draft: IssueDraft, actor: User | None) -> IssuedCertificate:
@@ -62,6 +63,7 @@ def issue_certificate(db: Session, draft: IssueDraft, actor: User | None) -> Iss
         segment_id=draft.segment_id,
         template_id=draft.template_id,
         color=draft.color or "#00A8A8",
+        discount_percent=normalize_discount(draft.discount_percent),
         nominal=nominal,
         balance=balance,
         note=draft.note.strip()[:500],
@@ -119,6 +121,7 @@ def debit_certificate(
         amount=amount,
         balance_after=certificate.balance,
         comment=comment.strip()[:300],
+        restaurant=actor.restaurant.strip()[:200],
     )
     db.commit()
     db.refresh(tx)
@@ -250,34 +253,53 @@ def change_password(db: Session, user: User, current: str, new_password: str) ->
 def create_staff(
     db: Session,
     *,
-    full_name: str,
-    login: str,
+    first_name: str,
+    last_name: str,
+    phone: str,
     password: str,
     role: Role,
     restaurant: str,
+    login: str = "",
 ) -> tuple[User, str]:
-    """Заводит управляющего или ещё одного сотрудника HR."""
+    """Заводит управляющего или ещё одного сотрудника HR для ресторана."""
     if role == Role.employee:
         raise BonusError("Сотрудник появляется вместе с сертификатом")
-    cleaned_login = _normalize_login(login)
+    first = " ".join(first_name.split())
+    last = " ".join(last_name.split())
+    if len(first) < 1 or len(last) < 1:
+        raise BonusError("Укажите имя и фамилию")
+    place = restaurant.strip()
+    if role == Role.manager and place == "":
+        raise BonusError("Укажите ресторан для управляющего")
+    phone_clean = _clean_optional(phone, 40)
+    cleaned_login = _normalize_login(login) if login.strip() else _unique_login(db, _login_from_staff(last, phone_clean))
     if db.scalar(select(User.id).where(User.login == cleaned_login)) is not None:
         raise BonusError("Такой логин уже есть")
     plain = password.strip() or generate_password()
     if len(plain) < 8:
         raise BonusError("Пароль — минимум 8 символов")
     user = User(
-        full_name=_clean_name(full_name),
+        full_name=_clean_name(f"{last} {first}"),
         login=cleaned_login,
         password_hash=hash_password(plain),
         role=role,
-        restaurant=restaurant.strip()[:200],
+        restaurant=place[:200],
+        phone=phone_clean,
         is_active=True,
-        must_change_password=False,
+        must_change_password=True,
     )
     db.add(user)
     db.commit()
     db.refresh(user)
     return user, plain
+
+
+def _login_from_staff(last_name: str, phone: str) -> str:
+    digits = "".join(char for char in phone if char.isdigit())
+    if len(digits) >= 4:
+        return f"mgr{digits[-4:]}"
+    base = _login_from_name(last_name)
+    return base if base else "manager"
 
 
 def set_user_active(db: Session, user: User, active: bool) -> None:
@@ -432,6 +454,7 @@ def _add_transaction(
     balance_after: int,
     comment: str,
     reversal_of_id: int | None = None,
+    restaurant: str = "",
 ) -> Transaction:
     tx = Transaction(
         certificate_id=certificate_id,
@@ -440,11 +463,19 @@ def _add_transaction(
         amount=amount,
         balance_after=balance_after,
         comment=comment,
+        restaurant=restaurant.strip()[:200],
         reversal_of_id=reversal_of_id,
     )
     db.add(tx)
     db.flush()
     return tx
+
+
+def normalize_discount(value: int) -> int:
+    """Проверяет процент скидки на карточке."""
+    if value < 0 or value > 100:
+        raise BonusError("Процент — целое число от 0 до 100")
+    return value
 
 
 def _new_token(db: Session) -> str:

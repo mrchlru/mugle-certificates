@@ -33,6 +33,7 @@ from bonus.services import (
     create_staff,
     credit_certificate,
     issue_certificate,
+    normalize_discount,
     set_blocked,
     set_certificate_expiry,
     set_user_active,
@@ -90,6 +91,7 @@ def issue_submit(
     nominal: str = Form(""),
     note: str = Form(""),
     expires_on: str = Form(""),
+    discount_percent: str = Form(""),
     segment_id: int = Form(0),
     template_id: int = Form(0),
     color: str = Form("#00A8A8"),
@@ -106,6 +108,9 @@ def issue_submit(
         expires = _expires(expires_on)
         if segment.requires_expiry and expires is None:
             raise BonusError("Укажите срок действия для этого сегмента")
+        discount = _discount(discount_percent)
+        if discount == 0 and template is not None and template.discount_percent:
+            discount = template.discount_percent
         issued = issue_certificate(
             db,
             IssueDraft(
@@ -122,6 +127,7 @@ def issue_submit(
                 department=department,
                 job_title=job_title,
                 phone=phone,
+                discount_percent=discount,
             ),
             user,
         )
@@ -232,6 +238,7 @@ def template_create(
     db: Session = Depends(get_db),
     user: User = Depends(require(Role.hr)),
     name: str = Form(""),
+    discount_percent: str = Form(""),
     image: UploadFile = File(...),
     csrf_token: str = Form(""),
 ):
@@ -245,6 +252,7 @@ def template_create(
             filename=image.filename or "template.png",
             payload=payload,
             content_type=image.content_type or "",
+            discount_percent=_discount(discount_percent),
         )
     except BonusError as exc:
         flash(request, exc.message, "bad")
@@ -260,6 +268,7 @@ async def template_update(
     db: Session = Depends(get_db),
     user: User = Depends(require(Role.hr)),
     name: str = Form(""),
+    discount_percent: str = Form(""),
     image: UploadFile | None = File(None),
     csrf_token: str = Form(""),
 ):
@@ -280,6 +289,7 @@ async def template_update(
             db,
             template,
             name=name,
+            discount_percent=_discount(discount_percent),
             filename=filename,
             payload=payload,
             content_type=content_type,
@@ -499,8 +509,9 @@ def staff_submit(
     request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(require(Role.hr)),
-    full_name: str = Form(""),
-    login: str = Form(""),
+    first_name: str = Form(""),
+    last_name: str = Form(""),
+    phone: str = Form(""),
     password: str = Form(""),
     role: str = Form("manager"),
     restaurant: str = Form(""),
@@ -511,8 +522,9 @@ def staff_submit(
         guard_csrf(request, csrf_token)
         created, plain = create_staff(
             db,
-            full_name=full_name,
-            login=login,
+            first_name=first_name,
+            last_name=last_name,
+            phone=phone,
             password=password,
             role=Role.hr if role == "hr" else Role.manager,
             restaurant=restaurant,
@@ -520,7 +532,7 @@ def staff_submit(
     except BonusError as exc:
         flash(request, exc.message, "bad")
         return RedirectResponse("/hr/staff", status_code=303)
-    flash(request, f"Доступ для {created.full_name} создан")
+    flash(request, f"Доступ для {created.full_name} создан · логин {created.login}")
     flash(request, plain, "secret")
     return RedirectResponse("/hr/staff", status_code=303)
 
@@ -563,6 +575,16 @@ def _expires(raw: str):
         return parse_date(raw)
     except MoneyError as exc:
         raise BonusError(exc.message) from exc
+
+
+def _discount(raw: str) -> int:
+    cleaned = raw.strip().replace("%", "")
+    if cleaned == "":
+        return 0
+    try:
+        return normalize_discount(int(cleaned))
+    except ValueError as exc:
+        raise BonusError("Процент — целое число от 0 до 100") from exc
 
 
 def _import_row(db: Session, actor: User, row, base_url: str) -> ImportRowResult:
