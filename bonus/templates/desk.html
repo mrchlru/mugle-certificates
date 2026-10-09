@@ -1,22 +1,39 @@
 {% extends "base.html" %}
 {% block title %}Списание{% endblock %}
-{% block main_class %}narrow{% endblock %}
+{% block main_class %}narrow desk-wrap{% endblock %}
 {% block content %}
-<section class="stack">
-  <p class="eyebrow">Касса</p>
-  <h1>Списать бонусы</h1>
-  <p class="lede">Наведите камеру телефона на QR с карточки гостя или введите код под ним.</p>
-  <form method="get" action="/desk" class="stack">
-    <label class="field">Код
-      <input name="code" autocomplete="off" autofocus placeholder="K7M-2QP" enterkeyhint="go">
-    </label>
-    <button class="btn wide" type="submit">Открыть сертификат</button>
-  </form>
-  <button class="btn ghost wide" type="button" id="open-camera">Открыть камеру</button>
-  <div id="camera-box" class="camera" hidden>
-    <video id="camera" playsinline></video>
+<section class="desk-page stack">
+  <header class="desk-intro">
+    <h1>Списать бонусы</h1>
+    <p class="lede">Наведите QR в рамку или введите код с карточки.</p>
+  </header>
+
+  <div class="scan-stage" id="camera-box">
+    <div class="scan-viewport">
+      <video id="camera" playsinline muted></video>
+      <div class="scan-idle" id="scan-idle">
+        <p class="scan-idle-title">Камера</p>
+        <p class="scan-idle-text">Включите, чтобы сканировать QR</p>
+      </div>
+      <div class="scan-veil" aria-hidden="true"></div>
+      <div class="scan-frame" aria-hidden="true">
+        <span class="scan-corner is-tl"></span>
+        <span class="scan-corner is-tr"></span>
+        <span class="scan-corner is-bl"></span>
+        <span class="scan-corner is-br"></span>
+      </div>
+    </div>
+    <button class="btn soft wide" type="button" id="open-camera">Включить камеру</button>
+    <p class="scan-hint muted">Держите QR внутри рамки</p>
   </div>
   <p id="camera-note" class="muted" hidden></p>
+
+  <form method="get" action="/desk" class="desk-code stack">
+    <label class="field">Код сертификата
+      <input name="code" autocomplete="off" autofocus placeholder="K7M-2QP" enterkeyhint="go">
+    </label>
+    <button class="btn wide" type="submit">Продолжить</button>
+  </form>
 </section>
 {% set history_title = "Последние списания" %}
 {% set next_path = '/desk' %}

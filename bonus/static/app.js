@@ -72,15 +72,21 @@ function startCamera(opener, box, video, note) {
     note.textContent = "Камера здесь недоступна. Введите код вручную или наведите обычную камеру телефона на QR.";
     return;
   }
+  opener.disabled = true;
   navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(function (stream) {
-    box.hidden = false;
+    const idle = document.getElementById("scan-idle");
+    if (idle) {
+      idle.hidden = true;
+    }
+    box.classList.add("is-live");
     opener.hidden = true;
     video.srcObject = stream;
     video.play();
     const canvas = document.createElement("canvas");
     const context = canvas.getContext("2d", { willReadFrequently: true });
+    let locked = false;
     window.setInterval(function () {
-      if (!context || video.readyState < 2) {
+      if (locked || !context || video.readyState < 2) {
         return;
       }
       canvas.width = video.videoWidth;
@@ -89,11 +95,14 @@ function startCamera(opener, box, video, note) {
       const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
       const found = jsQR(pixels.data, pixels.width, pixels.height);
       if (found && found.data) {
+        locked = true;
+        box.classList.add("is-found");
         stream.getTracks().forEach(function (track) { track.stop(); });
         window.location.href = "/desk?code=" + encodeURIComponent(found.data);
       }
     }, 250);
   }).catch(function () {
+    opener.disabled = false;
     note.hidden = false;
     note.textContent = "Камера не открылась. Введите код с карточки или отсканируйте QR обычной камерой — откроется страница списания.";
   });

@@ -1,43 +1,54 @@
 {% extends "base.html" %}
 {% block title %}Списание {{ card.public_number }}{% endblock %}
-{% block main_class %}narrow{% endblock %}
+{% block main_class %}narrow desk-wrap{% endblock %}
 {% block content %}
 {% for item in card.history if item.id == done_id %}
-<section class="receipt">
+<section class="receipt desk-receipt">
   <p class="eyebrow">Готово</p>
   <h1>Списано {{ item.amount|money }}</h1>
-  <p class="lede">Остаток {{ card.balance|money }} · {{ card.holder_name }}</p>
+  <p class="lede">Остаток {{ card.balance|money }} · {{ card.public_number }}</p>
   <a class="btn wide" href="/desk">Новое списание</a>
 </section>
-{% endfor %}
-{% include "_card.html" %}
-{% if error %}<p class="flash bad">{{ error }}</p>{% endif %}
-{% if card.can_spend %}
-<form method="post" action="/m/{{ token }}" class="stack" data-once>
-  <input type="hidden" name="csrf_token" value="{{ csrf }}">
-  <label class="field">Сумма списания
-    <input id="amount" name="amount" inputmode="decimal" required value="{{ amount or '' }}" placeholder="0" data-balance="{{ card.balance }}">
-  </label>
-  <div class="chips">
-    <button type="button" data-add="50000">500 ₽</button>
-    <button type="button" data-add="100000">1 000 ₽</button>
-    <button type="button" data-add="200000">2 000 ₽</button>
-    <button type="button" data-add="500000">5 000 ₽</button>
-    <button type="button" data-all>Весь остаток</button>
-  </div>
-  <label class="field">Комментарий
-    <input name="comment" maxlength="300" value="{{ comment or '' }}" placeholder="Стол, чек">
-  </label>
-  <button class="btn wide" type="submit">Списать</button>
-</form>
-{% elif card.status.value != 'active' %}
-<p class="flash bad">Сертификат заблокирован. Списать нельзя.</p>
-{% elif card.balance <= 0 %}
-<p class="flash bad">Бонусы на этом сертификате закончились.</p>
 {% else %}
-<p class="flash bad">Срок сертификата истёк.</p>
-{% endif %}
-<p><a class="text-link" href="/desk">К другому сертификату</a></p>
+<section class="desk-page desk-debit stack">
+  <header class="debit-summary">
+    <p class="eyebrow">К списанию</p>
+    <p class="debit-balance">{{ card.balance|money }}</p>
+    <p class="muted debit-meta">Остаток · {{ card.public_number }}</p>
+  </header>
+
+  {% if error %}<p class="flash bad">{{ error }}</p>{% endif %}
+
+  {% if card.can_spend %}
+  <form method="post" action="/m/{{ token }}" class="desk-spend stack" data-once>
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <label class="field">Сумма списания
+      <input id="amount" name="amount" inputmode="decimal" required value="{{ amount or '' }}" placeholder="0" data-balance="{{ card.balance }}" autofocus>
+    </label>
+    <div class="chips">
+      <button type="button" data-add="50000">500 ₽</button>
+      <button type="button" data-add="100000">1 000 ₽</button>
+      <button type="button" data-add="200000">2 000 ₽</button>
+      <button type="button" data-add="500000">5 000 ₽</button>
+      <button type="button" data-all>Весь остаток</button>
+    </div>
+    <label class="field">За что списать
+      <input name="comment" maxlength="300" value="{{ comment or '' }}" placeholder="Стол, чек, заказ">
+    </label>
+    <button class="btn wide" type="submit">Списать</button>
+  </form>
+  {% elif card.status.value != 'active' %}
+  <p class="flash bad">Сертификат заблокирован. Списать нельзя.</p>
+  {% elif card.balance <= 0 %}
+  <p class="flash bad">Бонусы на этом сертификате закончились.</p>
+  {% else %}
+  <p class="flash bad">Срок сертификата истёк.</p>
+  {% endif %}
+
+  <p><a class="text-link" href="/desk">К другому сертификату</a></p>
+</section>
+{% endfor %}
+
 {% set next_path = '/m/' ~ token %}
 {% set show_holder = false %}
 {% with items=card.history %}
