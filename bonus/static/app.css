@@ -621,11 +621,26 @@ th {
   margin: 0 auto;
 }
 
-.preview-qr svg {
+.preview-barcode {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 2px;
   width: 100%;
-  height: auto;
-  display: block;
+  height: 56px;
+  padding: 8px 10px 4px;
 }
+
+.preview-barcode span {
+  display: block;
+  width: 2px;
+  background: #111;
+  border-radius: 1px;
+}
+
+.preview-barcode span:nth-child(3n) { height: 100%; }
+.preview-barcode span:nth-child(3n+1) { height: 72%; }
+.preview-barcode span:nth-child(3n+2) { height: 88%; }
 
 @media (min-width: 900px) {
   .cert-layout { grid-template-columns: 420px 1fr; align-items: start; }
@@ -815,22 +830,24 @@ body:has(.wallet-wrap) .flash {
   text-align: center;
 }
 
-.wallet-qr {
-  width: 148px;
+.wallet-barcode {
+  width: min(220px, 100%);
   margin: 0 auto;
+  line-height: 0;
 }
 
-.wallet-qr svg {
+.wallet-barcode svg {
   width: 100%;
   height: auto;
   display: block;
 }
 
 .wallet-code-number {
-  margin: 4px 0 0;
-  font-size: 14px;
+  margin: 8px 0 0;
+  font-size: 15px;
   font-weight: 700;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
 }
 
 .wallet-meta {

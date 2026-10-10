@@ -420,11 +420,15 @@ def find_certificate(db: Session, raw: str) -> Certificate | None:
     by_token = db.scalar(select(Certificate).where(Certificate.token == extracted))
     if by_token is not None:
         return _ready_certificate(db, by_token)
-    compact = extracted.replace("-", "").replace(" ", "").upper()
-    by_short = db.scalar(select(Certificate).where(Certificate.short_code == compact))
+    compact = extracted.replace("-", "").replace(" ", "")
+    by_short = db.scalar(select(Certificate).where(Certificate.short_code == compact.upper()))
+    if by_short is None:
+        digits_only = "".join(char for char in compact if char.isdigit())
+        if digits_only != "":
+            by_short = db.scalar(select(Certificate).where(Certificate.short_code == digits_only))
     if by_short is not None:
         return _ready_certificate(db, by_short)
-    public = _public_number(compact)
+    public = _public_number(compact.upper())
     if public == "":
         return None
     found = db.scalar(select(Certificate).where(Certificate.public_number == public))
@@ -580,10 +584,144 @@ def _add_transaction(
 
 
 def normalize_discount(value: int) -> int:
-    """Проверяет процент скидки на карточке."""
+    """Проверяет отображаемый процент на карточке (не автоскидка в заказе)."""
     if value < 0 or value > 100:
         raise BonusError("Процент — целое число от 0 до 100")
     return value
+
+
+@dataclass(frozen=True)
+class IikoDebitResult:
+    """Результат списания для плагина iiko: сколько списали и сколько осталось доплатить."""
+
+    transaction: Transaction
+    paid: int
+    remainder: int
+    balance_after: int
+    replayed: bool = False
+
+
+def lookup_for_iiko(db: Session, code: str) -> Certificate:
+    """Находит сертификат по QR/коду для кассы iiko."""
+    certificate = find_certificate(db, code)
+    if certificate is None:
+        raise BonusError("Сертификат не найден")
+    apply_expiry_writeoff(db, certificate)
+    db.commit()
+    db.refresh(certificate)
+    return certificate
+
+
+def debit_for_iiko(
+    db: Session,
+    certificate: Certificate,
+    *,
+    amount: int,
+    external_id: str,
+    restaurant: str = "",
+    comment: str = "",
+) -> IikoDebitResult:
+    """Списывает бонусы до суммы заказа; при нехватке — весь остаток. Идемпотентно по external_id."""
+    marker = _iiko_marker(external_id)
+    existing = _find_iiko_debit(db, marker)
+    if existing is not None:
+        unpaid = max(0, amount - existing.amount)
+        return IikoDebitResult(
+            transaction=existing,
+            paid=existing.amount,
+            remainder=unpaid,
+            balance_after=existing.balance_after,
+            replayed=True,
+        )
+    if apply_expiry_writeoff(db, certificate):
+        db.commit()
+        db.refresh(certificate)
+    if certificate.status != CertificateStatus.active:
+        raise BonusError("Сертификат заблокирован")
+    if certificate.expires_on is not None and certificate.expires_on < today_msk():
+        raise BonusError("Срок сертификата истёк")
+    if amount <= 0:
+        raise BonusError("Сумма списания должна быть больше нуля")
+    if certificate.balance <= 0:
+        raise BonusError("На сертификате нет бонусов")
+    paid = min(amount, certificate.balance)
+    changed = _change_balance(db, certificate.id, -paid, require_active=True)
+    if not changed:
+        db.rollback()
+        raise BonusError("Недостаточно бонусов или сертификат уже недоступен")
+    db.refresh(certificate)
+    note = f"{marker} {(comment or 'iiko').strip()}"[:300]
+    tx = _add_transaction(
+        db,
+        certificate_id=certificate.id,
+        actor_id=None,
+        tx_type=TxType.debit,
+        amount=paid,
+        balance_after=certificate.balance,
+        comment=note,
+        restaurant=restaurant.strip()[:200],
+    )
+    db.commit()
+    db.refresh(tx)
+    return IikoDebitResult(
+        transaction=tx,
+        paid=paid,
+        remainder=max(0, amount - paid),
+        balance_after=certificate.balance,
+        replayed=False,
+    )
+
+
+def refund_for_iiko(db: Session, external_id: str, reason: str = "") -> Transaction:
+    """Возвращает бонусы по операции iiko (отмена оплаты на кассе)."""
+    marker = _iiko_marker(external_id)
+    tx = _find_iiko_debit(db, marker)
+    if tx is None:
+        raise BonusError("Операция iiko не найдена")
+    if _is_reversed(db, tx.id):
+        raise BonusError("Эта операция уже отменена")
+    certificate = db.get(Certificate, tx.certificate_id)
+    if certificate is None:
+        raise BonusError("Сертификат не найден")
+    changed = _change_balance(db, certificate.id, tx.amount, require_active=False)
+    if not changed:
+        db.rollback()
+        raise BonusError("Не удалось вернуть бонусы")
+    db.refresh(certificate)
+    reversal = _add_transaction(
+        db,
+        certificate_id=certificate.id,
+        actor_id=None,
+        tx_type=TxType.credit,
+        amount=tx.amount,
+        balance_after=certificate.balance,
+        comment=(reason or "Возврат iiko").strip()[:300],
+        reversal_of_id=tx.id,
+        restaurant=tx.restaurant,
+    )
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise BonusError("Эта операция уже отменена") from exc
+    db.refresh(reversal)
+    return reversal
+
+
+def _iiko_marker(external_id: str) -> str:
+    cleaned = " ".join(external_id.split())
+    if cleaned == "":
+        raise BonusError("Нужен идентификатор операции iiko")
+    return f"iiko:{cleaned[:80]}"
+
+
+def _find_iiko_debit(db: Session, marker: str) -> Transaction | None:
+    return db.scalar(
+        select(Transaction)
+        .where(Transaction.tx_type == TxType.debit, Transaction.comment.startswith(marker))
+        .order_by(Transaction.id.desc())
+        .limit(1)
+    )
 
 
 def _new_token(db: Session) -> str:
@@ -597,11 +735,11 @@ def _new_token(db: Session) -> str:
 
 
 def _new_short_code(db: Session) -> str:
+    """Восемь цифр без ведущего нуля — удобно для Code128 и сканеров кассы."""
     import secrets
 
-    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-    for _ in range(8):
-        code = "".join(secrets.choice(alphabet) for _ in range(6))
+    for _ in range(24):
+        code = f"{secrets.randbelow(90_000_000) + 10_000_000:08d}"
         if db.scalar(select(Certificate.id).where(Certificate.short_code == code)) is None:
             return code
     raise BonusError("Не удалось выдать короткий код")

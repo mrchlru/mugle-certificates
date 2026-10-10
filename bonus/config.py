@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     s3_region: str = "ru-1"
     s3_public_base_url: str = ""
     s3_prefix: str = "templates"
+    iiko_api_key: str = ""
 
     def normalized_database_url(self) -> str:
         """Возвращает URL базы в формате SQLAlchemy."""

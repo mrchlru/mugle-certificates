@@ -27,8 +27,8 @@
     <p class="wallet-expiry">Действует до {{ card.expires_on|day }}</p>
     {% endif %}
     <div class="wallet-code">
-      {% if card.qr_svg %}
-      <div class="wallet-qr">{{ card.qr_svg|safe }}</div>
+      {% if card.barcode_svg %}
+      <div class="wallet-barcode" aria-hidden="true">{{ card.barcode_svg|safe }}</div>
       {% endif %}
       <p class="wallet-code-number">{{ card.barcode_value }}</p>
     </div>

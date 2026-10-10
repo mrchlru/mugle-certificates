@@ -331,6 +331,8 @@ def test_import_keeps_spent_balance_and_skips_bad_row() -> None:
     assert found.id == issued.certificate.id
     by_short = find_certificate(db, issued.certificate.short_code)
     assert by_short is not None
+    assert issued.certificate.short_code.isdigit()
+    assert len(issued.certificate.short_code) == 8
 
 
 def test_login_card_and_debit(tmp_path, monkeypatch) -> None:

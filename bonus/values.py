@@ -97,11 +97,14 @@ def format_date(value: date | None) -> str:
 
 
 def format_short_code(code: str) -> str:
-    """Показывает короткий код группами: K7M-2QP."""
-    raw = code.replace("-", "").replace(" ", "").upper()
-    if len(raw) == 6:
-        return f"{raw[:3]}-{raw[3:]}"
-    return raw
+    """Показывает короткий код группами: 1234-5678 или старый буквенный."""
+    raw = code.replace("-", "").replace(" ", "")
+    if raw.isdigit() and len(raw) == 8:
+        return f"{raw[:4]}-{raw[4:]}"
+    upper = raw.upper()
+    if len(upper) == 6:
+        return f"{upper[:3]}-{upper[3:]}"
+    return upper
 
 
 def status_label(status: CertificateStatus | str, balance: int, expires_on: date | None) -> str:

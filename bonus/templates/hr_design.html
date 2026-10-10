@@ -10,7 +10,7 @@
     <section class="design-panel">
       <header class="design-panel-head">
         <h2>Сегменты</h2>
-        <p class="muted">Периодичность — если бонусы начисляются регулярно. Срок — если на карточке нужен «годен до».</p>
+        <p class="muted">Периодичность — регулярные начисления. Срок — «годен до». Процент — только на карточке как право на скидку, без автоприменения.</p>
       </header>
 
       <form method="post" action="/hr/design/segments" class="design-create">
@@ -26,8 +26,8 @@
               {% endfor %}
             </select>
           </label>
-          <label class="field">Процент
-            <input name="discount_percent" inputmode="numeric" placeholder="30" maxlength="3">
+          <label class="field">% на карточке
+            <input name="discount_percent" inputmode="numeric" placeholder="30" maxlength="3" title="Только отображение, без автоскидки">
           </label>
         </div>
         <label class="switch">
@@ -54,8 +54,8 @@
                   {% endfor %}
                 </select>
               </label>
-              <label class="field">Процент
-                <input name="discount_percent" value="{{ item.discount_percent or '' }}" inputmode="numeric" maxlength="3" placeholder="0">
+              <label class="field">% на карточке
+                <input name="discount_percent" value="{{ item.discount_percent or '' }}" inputmode="numeric" maxlength="3" placeholder="0" title="Только отображение">
               </label>
             </div>
             <label class="switch">
@@ -84,7 +84,7 @@
     <section class="design-panel">
       <header class="design-panel-head">
         <h2>Шаблоны</h2>
-        <p class="muted">Картинка попадает в середину карточки. Один шаблон можно выбрать при импорте для всех строк.</p>
+        <p class="muted">Картинка в середине карточки. Процент с шаблона — тоже только подпись на карточке, не автоскидка.</p>
       </header>
 
       <form method="post" action="/hr/design/templates" enctype="multipart/form-data" class="design-create">
@@ -93,8 +93,8 @@
           <label class="field">Название
             <input name="name" placeholder="Ланч, бартер…">
           </label>
-          <label class="field">Процент
-            <input name="discount_percent" inputmode="numeric" placeholder="30" maxlength="3">
+          <label class="field">% на карточке
+            <input name="discount_percent" inputmode="numeric" placeholder="30" maxlength="3" title="Только отображение">
           </label>
         </div>
         <label class="field">Картинка
@@ -120,8 +120,8 @@
                 <label class="field">Название
                   <input name="name" value="{{ item.name }}" required>
                 </label>
-                <label class="field">Процент
-                  <input name="discount_percent" value="{{ item.discount_percent or '' }}" inputmode="numeric" maxlength="3" placeholder="0">
+                <label class="field">% на карточке
+                  <input name="discount_percent" value="{{ item.discount_percent or '' }}" inputmode="numeric" maxlength="3" placeholder="0" title="Только отображение">
                 </label>
               </div>
               <label class="field">Заменить картинку

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from bonus.catalog import media_url
 from bonus.models import Certificate, CertificateStatus, Role, Segment, Transaction, TxType, User
-from bonus.qr import qr_svg
+from bonus.barcode_draw import barcode_svg
 from bonus.services import apply_due_expiries, apply_expiry_writeoff
 from bonus.values import MSK, as_utc, format_short_code, today_msk
 
@@ -57,7 +57,7 @@ class CardView:
     segment_name: str
     template_url: str
     barcode_value: str
-    qr_svg: str
+    barcode_svg: str
     history: tuple[TxView, ...]
 
 
@@ -363,8 +363,8 @@ def _card_view(
         discount_percent=certificate.discount_percent or 0,
         segment_name=_segment_name(db, certificate.segment_id),
         template_url=template_path,
-        barcode_value=format_short_code(certificate.short_code).replace("-", ""),
-        qr_svg=qr_svg(f"{base_url}/m/{certificate.token}") if base_url else "",
+        barcode_value=format_short_code(certificate.short_code),
+        barcode_svg=barcode_svg(certificate.short_code.replace("-", "").replace(" ", "")),
         history=history,
     )
 
