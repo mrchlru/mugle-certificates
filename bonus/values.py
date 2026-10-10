@@ -107,14 +107,21 @@ def format_short_code(code: str) -> str:
     return upper
 
 
-def status_label(status: CertificateStatus | str, balance: int, expires_on: date | None) -> str:
+def status_label(
+    status: CertificateStatus | str,
+    balance: int,
+    expires_on: date | None,
+    single_use: bool = False,
+) -> str:
     """Короткая подпись состояния сертификата."""
     if status == CertificateStatus.blocked or status == CertificateStatus.blocked.value:
         return "Заблокирован"
     if expires_on is not None and expires_on < today_msk():
         return "Срок истёк"
     if balance <= 0:
-        return "Израсходован"
+        return "Использован" if single_use else "Израсходован"
+    if single_use:
+        return "Активен · разовое использование"
     return "Активен"
 
 
@@ -130,6 +137,7 @@ def tx_label(tx_type: TxType | str, reversal_of_id: int | None) -> str:
         TxType.unblock.value: "Разблокировка",
         TxType.migrate.value: "Перенос остатка",
         TxType.expire.value: "Списание по сроку",
+        TxType.burn.value: "Сгорание остатка",
     }
     key = tx_type.value if isinstance(tx_type, TxType) else tx_type
     return labels.get(key, key)

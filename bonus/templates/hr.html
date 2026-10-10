@@ -60,7 +60,7 @@
         </td>
         <td>{{ card.segment_name or "—" }}</td>
         <td>{{ card.balance|money }}</td>
-        <td>{{ status_label(card.status, card.balance, card.expires_on) }}</td>
+        <td>{{ status_label(card.status, card.balance, card.expires_on, card.single_use) }}</td>
       </tr>
       {% endfor %}
     </tbody>

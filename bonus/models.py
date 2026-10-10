@@ -45,6 +45,7 @@ class TxType(str, enum.Enum):
     unblock = "unblock"
     migrate = "migrate"
     expire = "expire"
+    burn = "burn"
 
 
 class AccrualPeriod(str, enum.Enum):
@@ -93,6 +94,7 @@ class Segment(Base):
         default=AccrualPeriod.none,
     )
     requires_expiry: Mapped[bool] = mapped_column(default=False)
+    single_use: Mapped[bool] = mapped_column(default=False)
     discount_percent: Mapped[int] = mapped_column(Integer, default=0)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(default=True)
@@ -129,6 +131,7 @@ class Certificate(Base):
     template_id: Mapped[int | None] = mapped_column(ForeignKey("card_templates.id"), nullable=True)
     color: Mapped[str] = mapped_column(String(7), default="#00A8A8")
     discount_percent: Mapped[int] = mapped_column(Integer, default=0)
+    single_use: Mapped[bool] = mapped_column(default=False)
     nominal: Mapped[int] = mapped_column(Integer)
     balance: Mapped[int] = mapped_column(Integer)
     note: Mapped[str] = mapped_column(String(500), default="")

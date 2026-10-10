@@ -10,7 +10,7 @@
     <section class="design-panel">
       <header class="design-panel-head">
         <h2>Сегменты</h2>
-        <p class="muted">Периодичность — регулярные начисления. Срок — «годен до». Процент — только на карточке как право на скидку, без автоприменения.</p>
+        <p class="muted">Периодичность — регулярные начисления. Срок — «годен до». Разовый — одно списание, остаток сгорает. Процент — только подпись на карточке.</p>
       </header>
 
       <form method="post" action="/hr/design/segments" class="design-create">
@@ -34,6 +34,11 @@
           <input type="checkbox" name="requires_expiry" value="1">
           <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
           <span class="switch-copy">Нужен срок действия на карточке</span>
+        </label>
+        <label class="switch">
+          <input type="checkbox" name="single_use" value="1">
+          <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+          <span class="switch-copy">Разовый: после первого списания остаток сгорает</span>
         </label>
         <button class="btn" type="submit">Добавить сегмент</button>
       </form>
@@ -63,11 +68,16 @@
               <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
               <span class="switch-copy">Нужен срок действия на карточке</span>
             </label>
+            <label class="switch">
+              <input type="checkbox" name="single_use" value="1" {% if item.single_use %}checked{% endif %}>
+              <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+              <span class="switch-copy">Разовый: после первого списания остаток сгорает</span>
+            </label>
             <div class="design-card-foot">
               <span class="status-pill {% if item.is_active %}is-on{% else %}is-off{% endif %}">
                 {% if item.is_active %}Активен{% else %}Скрыт{% endif %}
               </span>
-              <span class="muted design-meta">{{ accrual_label(item.accrual_period) }}{% if item.requires_expiry %} · со сроком{% endif %}{% if item.discount_percent %} · {{ item.discount_percent }}%{% endif %}</span>
+              <span class="muted design-meta">{{ accrual_label(item.accrual_period) }}{% if item.requires_expiry %} · со сроком{% endif %}{% if item.single_use %} · разовый{% endif %}{% if item.discount_percent %} · {{ item.discount_percent }}%{% endif %}</span>
               <button class="btn ghost compact" type="submit">Сохранить</button>
             </div>
           </form>

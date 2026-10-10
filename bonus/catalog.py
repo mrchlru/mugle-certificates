@@ -24,29 +24,31 @@ _BANNER_SIZE = (720, 264)
 _WEBP_QUALITY = 78
 _MAX_UPLOAD_BYTES = 8_000_000
 
-# name, начисление, нужен ли срок действия на карточке
-DEFAULT_SEGMENTS: tuple[tuple[str, AccrualPeriod, bool], ...] = (
-    ("Ланч", AccrualPeriod.daily, False),
-    ("Ежемесячные бонусы", AccrualPeriod.monthly, False),
-    ("Бартер на все рестораны", AccrualPeriod.none, True),
-    ("Бартер Москва-Стамбул", AccrualPeriod.none, True),
-    ("Бартер Сибирские Огни", AccrualPeriod.none, True),
-    ("Бартер Пинчи", AccrualPeriod.none, True),
-    ("Бартер Си мама", AccrualPeriod.none, True),
-    ("День рождения", AccrualPeriod.yearly, True),
+# name, начисление, нужен ли срок, одноразовый
+DEFAULT_SEGMENTS: tuple[tuple[str, AccrualPeriod, bool, bool], ...] = (
+    ("Ланч", AccrualPeriod.daily, False, False),
+    ("Ежемесячные бонусы", AccrualPeriod.monthly, False, False),
+    ("Бартер на все рестораны", AccrualPeriod.none, True, False),
+    ("Бартер Москва-Стамбул", AccrualPeriod.none, True, False),
+    ("Бартер Сибирские Огни", AccrualPeriod.none, True, False),
+    ("Бартер Пинчи", AccrualPeriod.none, True, False),
+    ("Бартер Си мама", AccrualPeriod.none, True, False),
+    ("День рождения", AccrualPeriod.yearly, True, False),
+    ("Разовый", AccrualPeriod.none, False, True),
 )
 
 # Старые названия из первого сида — подтягиваем периодичность и, где нужно, имя.
-_LEGACY_SEGMENTS: dict[str, tuple[str, AccrualPeriod, bool]] = {
-    "ланч (ежедневное начисление)": ("Ланч", AccrualPeriod.daily, False),
-    "ланч": ("Ланч", AccrualPeriod.daily, False),
-    "ежемесячные бонусы": ("Ежемесячные бонусы", AccrualPeriod.monthly, False),
-    "бартер на все рестораны": ("Бартер на все рестораны", AccrualPeriod.none, True),
-    "бартер москва-стамбул": ("Бартер Москва-Стамбул", AccrualPeriod.none, True),
-    "бартер сибирские огни": ("Бартер Сибирские Огни", AccrualPeriod.none, True),
-    "бартер пинчи": ("Бартер Пинчи", AccrualPeriod.none, True),
-    "бартер си мама": ("Бартер Си мама", AccrualPeriod.none, True),
-    "день рождения": ("День рождения", AccrualPeriod.yearly, True),
+_LEGACY_SEGMENTS: dict[str, tuple[str, AccrualPeriod, bool, bool]] = {
+    "ланч (ежедневное начисление)": ("Ланч", AccrualPeriod.daily, False, False),
+    "ланч": ("Ланч", AccrualPeriod.daily, False, False),
+    "ежемесячные бонусы": ("Ежемесячные бонусы", AccrualPeriod.monthly, False, False),
+    "бартер на все рестораны": ("Бартер на все рестораны", AccrualPeriod.none, True, False),
+    "бартер москва-стамбул": ("Бартер Москва-Стамбул", AccrualPeriod.none, True, False),
+    "бартер сибирские огни": ("Бартер Сибирские Огни", AccrualPeriod.none, True, False),
+    "бартер пинчи": ("Бартер Пинчи", AccrualPeriod.none, True, False),
+    "бартер си мама": ("Бартер Си мама", AccrualPeriod.none, True, False),
+    "день рождения": ("День рождения", AccrualPeriod.yearly, True, False),
+    "разовый": ("Разовый", AccrualPeriod.none, False, True),
 }
 
 CARD_COLORS: tuple[tuple[str, str], ...] = (
@@ -82,10 +84,10 @@ def ensure_default_segments(db: Session) -> None:
         legacy = _LEGACY_SEGMENTS.get(segment.name.casefold())
         if legacy is None:
             continue
-        new_name, period, needs_expiry = legacy
+        new_name, period, needs_expiry, one_shot = legacy
         target_key = new_name.casefold()
         if segment.name == new_name:
-            if _sync_segment_defaults(segment, period, needs_expiry):
+            if _sync_segment_defaults(segment, period, needs_expiry, one_shot):
                 changed = True
             continue
         existing_target = by_name.get(target_key)
@@ -94,14 +96,14 @@ def ensure_default_segments(db: Session) -> None:
             segment.name = new_name
             by_name[target_key] = segment
             changed = True
-            _sync_segment_defaults(segment, period, needs_expiry)
+            _sync_segment_defaults(segment, period, needs_expiry, one_shot)
             continue
-        if _sync_segment_defaults(existing_target, period, needs_expiry):
+        if _sync_segment_defaults(existing_target, period, needs_expiry, one_shot):
             changed = True
         if segment.is_active:
             segment.is_active = False
             changed = True
-    for index, (name, period, needs_expiry) in enumerate(DEFAULT_SEGMENTS):
+    for index, (name, period, needs_expiry, one_shot) in enumerate(DEFAULT_SEGMENTS):
         found = by_name.get(name.casefold())
         if found is None:
             created = Segment(
@@ -109,6 +111,7 @@ def ensure_default_segments(db: Session) -> None:
                 slug=_unique_slug(db, _slug(name)),
                 accrual_period=period,
                 requires_expiry=needs_expiry,
+                single_use=one_shot,
                 sort_order=index,
                 is_active=True,
             )
@@ -116,7 +119,7 @@ def ensure_default_segments(db: Session) -> None:
             by_name[name.casefold()] = created
             changed = True
             continue
-        touched = _sync_segment_defaults(found, period, needs_expiry)
+        touched = _sync_segment_defaults(found, period, needs_expiry, one_shot)
         if found.sort_order != index:
             found.sort_order = index
             touched = True
@@ -156,6 +159,7 @@ def create_segment(
     accrual_period: AccrualPeriod = AccrualPeriod.none,
     *,
     requires_expiry: bool = False,
+    single_use: bool = False,
     discount_percent: int = 0,
 ) -> Segment:
     """Добавляет новый сегмент."""
@@ -169,6 +173,7 @@ def create_segment(
         slug=_unique_slug(db, _slug(cleaned)),
         accrual_period=accrual_period,
         requires_expiry=requires_expiry,
+        single_use=single_use,
         discount_percent=normalize_discount(discount_percent),
         sort_order=1000 + int(db.scalar(select(Segment.id).order_by(Segment.id.desc()).limit(1)) or 0),
         is_active=True,
@@ -186,9 +191,10 @@ def update_segment(
     name: str,
     accrual_period: AccrualPeriod,
     requires_expiry: bool,
+    single_use: bool = False,
     discount_percent: int = 0,
 ) -> Segment:
-    """Меняет название, периодичность, срок и процент на карточке."""
+    """Меняет название, периодичность, срок, одноразовость и процент."""
     cleaned = " ".join(name.split())
     if len(cleaned) < 2:
         raise BonusError("Укажите название сегмента")
@@ -198,6 +204,7 @@ def update_segment(
     segment.name = cleaned[:120]
     segment.accrual_period = accrual_period
     segment.requires_expiry = requires_expiry
+    segment.single_use = single_use
     segment.discount_percent = normalize_discount(discount_percent)
     db.commit()
     db.refresh(segment)
@@ -348,14 +355,22 @@ def accrual_label(period: AccrualPeriod | str) -> str:
     return key
 
 
-def _sync_segment_defaults(segment: Segment, period: AccrualPeriod, requires_expiry: bool) -> bool:
-    """Обновляет период и признак срока у сегмента из каталога по умолчанию."""
+def _sync_segment_defaults(
+    segment: Segment,
+    period: AccrualPeriod,
+    requires_expiry: bool,
+    single_use: bool = False,
+) -> bool:
+    """Обновляет период, срок и одноразовость у сегмента из каталога по умолчанию."""
     changed = False
     if segment.accrual_period != period:
         segment.accrual_period = period
         changed = True
     if segment.requires_expiry != requires_expiry:
         segment.requires_expiry = requires_expiry
+        changed = True
+    if segment.single_use != single_use:
+        segment.single_use = single_use
         changed = True
     return changed
 

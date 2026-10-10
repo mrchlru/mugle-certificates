@@ -75,6 +75,9 @@ def test_segment_edit_and_accrual_period() -> None:
     assert barter.requires_expiry is True
     birthday = next(item for item in list_segments(db) if item.name == "День рождения")
     assert birthday.requires_expiry is True
+    one_shot = next(item for item in list_segments(db) if item.name == "Разовый")
+    assert one_shot.single_use is True
+    assert one_shot.requires_expiry is False
     segment = create_segment(
         db,
         "Временный",
@@ -95,6 +98,41 @@ def test_segment_edit_and_accrual_period() -> None:
     assert updated.accrual_period == AccrualPeriod.monthly
     assert updated.requires_expiry is False
     assert updated.discount_percent == 15
+
+
+def test_single_use_burns_remainder_after_first_debit() -> None:
+    db = _db()
+    hr = _person(db, "hr", Role.hr)
+    manager = _person(db, "manager", Role.manager)
+    issued = issue_certificate(
+        db,
+        IssueDraft(
+            full_name="Гость Разовый",
+            login="",
+            password="",
+            nominal=300_000,
+            balance=None,
+            note="",
+            expires_on=None,
+            single_use=True,
+        ),
+        hr,
+    )
+    assert issued.certificate.single_use is True
+    assert issued.certificate.balance == 300_000
+    debit_certificate(db, issued.certificate, manager, 100_000, "обед")
+    db.refresh(issued.certificate)
+    assert issued.certificate.balance == 0
+    burns = db.scalars(
+        select(Transaction).where(
+            Transaction.certificate_id == issued.certificate.id,
+            Transaction.tx_type == TxType.burn,
+        )
+    ).all()
+    assert len(burns) == 1
+    assert burns[0].amount == 200_000
+    with pytest.raises(BonusError):
+        debit_certificate(db, issued.certificate, manager, 100, "ещё")
 
 
 def test_issue_with_segment_color_and_template() -> None:

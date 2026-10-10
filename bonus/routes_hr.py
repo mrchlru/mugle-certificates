@@ -136,6 +136,7 @@ def issue_submit(
                 job_title=job_title,
                 phone=phone,
                 discount_percent=discount,
+                single_use=segment.single_use,
             ),
             user,
         )
@@ -168,6 +169,7 @@ def segment_create(
     name: str = Form(""),
     accrual_period: str = Form("none"),
     requires_expiry: str = Form("0"),
+    single_use: str = Form("0"),
     discount_percent: str = Form(""),
     csrf_token: str = Form(""),
 ):
@@ -179,6 +181,7 @@ def segment_create(
             name,
             parse_accrual_period(accrual_period),
             requires_expiry=requires_expiry == "1",
+            single_use=single_use == "1",
             discount_percent=_discount(discount_percent),
         )
     except BonusError as exc:
@@ -197,6 +200,7 @@ def segment_update(
     name: str = Form(""),
     accrual_period: str = Form("none"),
     requires_expiry: str = Form("0"),
+    single_use: str = Form("0"),
     discount_percent: str = Form(""),
     csrf_token: str = Form(""),
 ):
@@ -212,6 +216,7 @@ def segment_update(
             name=name,
             accrual_period=parse_accrual_period(accrual_period),
             requires_expiry=requires_expiry == "1",
+            single_use=single_use == "1",
             discount_percent=_discount(discount_percent),
         )
     except BonusError as exc:
@@ -704,15 +709,19 @@ def _import_row(
     try:
         segment_id = _segment_id_by_name(db, row.draft.segment_name)
         discount = row.draft.discount_percent
-        if discount == 0 and segment_id is not None:
+        one_shot = row.draft.single_use
+        if segment_id is not None:
             segment = db.get(Segment, segment_id)
-            if segment is not None and segment.discount_percent:
-                discount = segment.discount_percent
+            if segment is not None:
+                if discount == 0 and segment.discount_percent:
+                    discount = segment.discount_percent
+                one_shot = segment.single_use
         draft = replace(
             row.draft,
             segment_id=segment_id,
             template_id=template_id,
             discount_percent=discount,
+            single_use=one_shot,
         )
         issued = issue_certificate(db, draft, actor)
     except BonusError as exc:

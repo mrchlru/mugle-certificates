@@ -32,6 +32,6 @@
       {% endif %}
       <p class="wallet-code-number">{{ card.barcode_value }}</p>
     </div>
-    <p class="wallet-meta">{{ card.public_number }} · {{ status_label(card.status, card.balance, card.expires_on) }}</p>
+    <p class="wallet-meta">{{ card.public_number }} · {{ status_label(card.status, card.balance, card.expires_on, card.single_use) }}</p>
   </div>
 </article>

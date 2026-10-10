@@ -54,6 +54,7 @@ class CardView:
     can_spend: bool
     color: str
     discount_percent: int
+    single_use: bool
     segment_name: str
     template_url: str
     barcode_value: str
@@ -361,6 +362,7 @@ def _card_view(
         can_spend=_can_spend(certificate),
         color=certificate.color or "#00A8A8",
         discount_percent=certificate.discount_percent or 0,
+        single_use=bool(certificate.single_use),
         segment_name=_segment_name(db, certificate.segment_id),
         template_url=template_path,
         barcode_value=format_short_code(certificate.short_code),

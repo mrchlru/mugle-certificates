@@ -50,6 +50,7 @@ class IssueDraft:
     phone: str = ""
     discount_percent: int = 0
     segment_name: str = ""
+    single_use: bool = False
 
 
 def issue_certificate(db: Session, draft: IssueDraft, actor: User | None) -> IssuedCertificate:
@@ -65,6 +66,7 @@ def issue_certificate(db: Session, draft: IssueDraft, actor: User | None) -> Iss
         template_id=draft.template_id,
         color=draft.color or "#00A8A8",
         discount_percent=normalize_discount(draft.discount_percent),
+        single_use=draft.single_use,
         nominal=nominal,
         balance=balance,
         note=draft.note.strip()[:500],
@@ -107,7 +109,7 @@ def debit_certificate(
     amount: int,
     comment: str,
 ) -> Transaction:
-    """Списывает бонусы. Повторный клик не уводит остаток ниже нуля."""
+    """Списывает бонусы. У одноразового после списания сгорает весь остаток."""
     if apply_expiry_writeoff(db, certificate):
         db.commit()
         db.refresh(certificate)
@@ -127,6 +129,13 @@ def debit_certificate(
         comment=comment.strip()[:300],
         restaurant=actor.restaurant.strip()[:200],
     )
+    _burn_single_use_remainder(
+        db,
+        certificate,
+        actor_id=actor.id,
+        after_debit_id=tx.id,
+        restaurant=actor.restaurant.strip()[:200],
+    )
     db.commit()
     db.refresh(tx)
     return tx
@@ -141,6 +150,7 @@ def undo_debit(db: Session, tx_id: int, actor: User, reason: str) -> Transaction
     certificate = db.get(Certificate, tx.certificate_id)
     if certificate is None:
         raise BonusError("Сертификат не найден")
+    _restore_single_use_burn(db, certificate, tx, actor.id)
     changed = _change_balance(db, certificate.id, tx.amount, require_active=False)
     if not changed:
         db.rollback()
@@ -155,6 +165,7 @@ def undo_debit(db: Session, tx_id: int, actor: User, reason: str) -> Transaction
         balance_after=certificate.balance,
         comment=(reason or "Отмена списания").strip()[:300],
         reversal_of_id=tx.id,
+        restaurant=tx.restaurant,
     )
     try:
         db.commit()
@@ -590,6 +601,68 @@ def normalize_discount(value: int) -> int:
     return value
 
 
+def _burn_single_use_remainder(
+    db: Session,
+    certificate: Certificate,
+    *,
+    actor_id: int | None,
+    after_debit_id: int,
+    restaurant: str = "",
+) -> Transaction | None:
+    """После первого списания одноразового сертификата обнуляет остаток."""
+    if not certificate.single_use or certificate.balance <= 0:
+        return None
+    amount = certificate.balance
+    certificate.balance = 0
+    return _add_transaction(
+        db,
+        certificate_id=certificate.id,
+        actor_id=actor_id,
+        tx_type=TxType.burn,
+        amount=amount,
+        balance_after=0,
+        comment=f"Списано: одноразовый сертификат · после #{after_debit_id}",
+        restaurant=restaurant,
+    )
+
+
+def _restore_single_use_burn(
+    db: Session,
+    certificate: Certificate,
+    debit: Transaction,
+    actor_id: int | None,
+) -> None:
+    """При отмене списания возвращает и сожжённый остаток одноразовой карты."""
+    burn = db.scalar(
+        select(Transaction)
+        .where(
+            Transaction.certificate_id == certificate.id,
+            Transaction.tx_type == TxType.burn,
+            Transaction.id > debit.id,
+            Transaction.comment.contains(f"#{debit.id}"),
+        )
+        .order_by(Transaction.id)
+        .limit(1)
+    )
+    if burn is None or _is_reversed(db, burn.id):
+        return
+    changed = _change_balance(db, certificate.id, burn.amount, require_active=False)
+    if not changed:
+        raise BonusError("Не удалось вернуть сгоревший остаток")
+    db.refresh(certificate)
+    _add_transaction(
+        db,
+        certificate_id=certificate.id,
+        actor_id=actor_id,
+        tx_type=TxType.credit,
+        amount=burn.amount,
+        balance_after=certificate.balance,
+        comment="Возврат сгоревшего остатка одноразового сертификата",
+        reversal_of_id=burn.id,
+        restaurant=burn.restaurant,
+    )
+
+
 @dataclass(frozen=True)
 class IikoDebitResult:
     """Результат списания для плагина iiko: сколько списали и сколько осталось доплатить."""
@@ -651,6 +724,7 @@ def debit_for_iiko(
         raise BonusError("Недостаточно бонусов или сертификат уже недоступен")
     db.refresh(certificate)
     note = f"{marker} {(comment or 'iiko').strip()}"[:300]
+    place = restaurant.strip()[:200]
     tx = _add_transaction(
         db,
         certificate_id=certificate.id,
@@ -659,9 +733,17 @@ def debit_for_iiko(
         amount=paid,
         balance_after=certificate.balance,
         comment=note,
-        restaurant=restaurant.strip()[:200],
+        restaurant=place,
+    )
+    _burn_single_use_remainder(
+        db,
+        certificate,
+        actor_id=None,
+        after_debit_id=tx.id,
+        restaurant=place,
     )
     db.commit()
+    db.refresh(certificate)
     db.refresh(tx)
     return IikoDebitResult(
         transaction=tx,

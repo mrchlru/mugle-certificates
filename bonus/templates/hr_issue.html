@@ -60,7 +60,7 @@
         <select name="segment_id" id="segment-select" required>
           <option value="" data-requires-expiry="0" data-discount="0" data-name="">Выберите сегмент</option>
           {% for segment in segments %}
-          <option value="{{ segment.id }}" data-name="{{ segment.name }}" data-requires-expiry="{{ '1' if segment.requires_expiry else '0' }}" data-discount="{{ segment.discount_percent or 0 }}">{{ segment.name }}{% if segment.discount_percent %} · {{ segment.discount_percent }}%{% endif %}</option>
+          <option value="{{ segment.id }}" data-name="{{ segment.name }}" data-requires-expiry="{{ '1' if segment.requires_expiry else '0' }}" data-single-use="{{ '1' if segment.single_use else '0' }}" data-discount="{{ segment.discount_percent or 0 }}">{{ segment.name }}{% if segment.single_use %} · разовый{% endif %}{% if segment.discount_percent %} · {{ segment.discount_percent }}%{% endif %}</option>
           {% endfor %}
         </select>
       </label>
@@ -68,6 +68,7 @@
         <input type="date" name="expires_on" id="expires-on">
         <span class="muted field-hint" id="expires-hint">Для бартера и дня рождения обязателен</span>
       </label>
+      <p class="muted" id="single-use-hint" hidden>Разовый сегмент: после первого списания весь остаток сгорит, даже если потратили меньше номинала. Срок можно не ставить.</p>
       <label class="field">Номинал, ₽
         <input name="nominal" id="field-nominal" inputmode="decimal" required placeholder="10000">
       </label>
@@ -124,12 +125,17 @@
   var bannerImg = document.getElementById("preview-banner-img");
   var bannerEmpty = document.getElementById("preview-banner-empty");
 
+  var singleHint = document.getElementById("single-use-hint");
+
   function syncExpiry() {
     if (!select || !expires) return;
     var option = select.options[select.selectedIndex];
     var needed = option && option.getAttribute("data-requires-expiry") === "1";
     expires.required = needed;
     if (hint) hint.hidden = !needed;
+    if (singleHint) {
+      singleHint.hidden = !(option && option.getAttribute("data-single-use") === "1");
+    }
   }
 
   function formatMoney(raw) {

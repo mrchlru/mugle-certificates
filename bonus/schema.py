@@ -19,6 +19,8 @@ def ensure_schema(engine: Engine) -> None:
             statements.append("ALTER TABLE certificates ADD COLUMN color VARCHAR(7) DEFAULT '#00A8A8'")
         if "discount_percent" not in columns:
             statements.append("ALTER TABLE certificates ADD COLUMN discount_percent INTEGER DEFAULT 0")
+        if "single_use" not in columns:
+            statements.append("ALTER TABLE certificates ADD COLUMN single_use BOOLEAN DEFAULT FALSE")
     if "card_templates" in tables:
         columns = {column["name"] for column in inspector.get_columns("card_templates")}
         if "discount_percent" not in columns:
@@ -51,6 +53,8 @@ def ensure_schema(engine: Engine) -> None:
             statements.append(
                 "ALTER TABLE segments ADD COLUMN discount_percent INTEGER DEFAULT 0"
             )
+        if "single_use" not in columns:
+            statements.append("ALTER TABLE segments ADD COLUMN single_use BOOLEAN DEFAULT FALSE")
     if not statements:
         return
     with engine.begin() as connection:
