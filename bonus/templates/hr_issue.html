@@ -40,22 +40,38 @@
   <section class="stack issue-form">
     <p class="eyebrow">Новый сертификат</p>
     <h1>Выписать</h1>
-    <p class="lede">После выпуска появится ссылка. Её нужно отправить сотруднику — это и есть его сертификат.</p>
+    <p class="lede">После выпуска появится ссылка. Её нужно отправить сотруднику — это и есть его сертификат. Учёт уйдёт в Google Таблицу на выбранный лист.</p>
     <form method="post" action="/hr/new" class="stack" id="issue-form">
       <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <fieldset class="ledger-field">
+        <legend>Лист учёта</legend>
+        <div class="ledger-grid" id="ledger-grid">
+          {% for value, title in ledger_choices %}
+          <label class="ledger-option">
+            <input type="radio" name="ledger_sheet" value="{{ value }}" data-birth="{{ '1' if value in ['birthday', 'gift_birthday'] else '0' }}" data-single="{{ '1' if value in ['birthday', 'gift_birthday'] else '0' }}" {% if value == 'employee' %}checked{% endif %}>
+            <span>{{ title }}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </fieldset>
       <label class="field">ФИО
         <input name="full_name" id="field-name" required>
       </label>
-      <label class="field">Отдел
-        <input name="department" maxlength="120" placeholder="Необязательно">
+      <label class="field">ООО
+        <input name="company" id="field-company" maxlength="200" required placeholder="Юрлицо">
+      </label>
+      <label class="field">Ресторан / офис
+        <input name="department" id="field-department" maxlength="120" required placeholder="Если ресторан — название руками">
       </label>
       <label class="field">Должность
-        <input name="job_title" maxlength="120" placeholder="Необязательно">
+        <input name="job_title" id="field-job" maxlength="120" required>
+      </label>
+      <label class="field" id="birth-field" hidden>Дата рождения
+        <input type="date" name="birth_date" id="birth-date">
       </label>
       <label class="field">Телефон
         <input name="phone" maxlength="40" inputmode="tel" placeholder="Необязательно">
       </label>
-      <p class="muted">Отдел, должность и телефон видны только в кабинете HR и участвуют в поиске.</p>
       <label class="field">Сегмент
         <select name="segment_id" id="segment-select" required>
           <option value="" data-requires-expiry="0" data-discount="0" data-name="">Выберите сегмент</option>
@@ -68,7 +84,7 @@
         <input type="date" name="expires_on" id="expires-on">
         <span class="muted field-hint" id="expires-hint">Для бартера и дня рождения обязателен</span>
       </label>
-      <p class="muted" id="single-use-hint" hidden>Разовый сегмент: после первого списания весь остаток сгорит, даже если потратили меньше номинала. Срок можно не ставить.</p>
+      <p class="muted" id="single-use-hint" hidden>Разовый: после первого списания остаток сгорает (полная сумма или часть — не важно). В таблице появится дата, сумма и ресторан использования.</p>
       <label class="field">Номинал, ₽
         <input name="nominal" id="field-nominal" inputmode="decimal" required placeholder="10000">
       </label>
@@ -97,7 +113,7 @@
       <label class="field">Процент на карточке
         <input name="discount_percent" id="discount-percent" inputmode="numeric" placeholder="например 30" maxlength="3">
       </label>
-      <p class="muted">Только отображение: «30%» на карточке как право сотрудника. Скидку в чеке управляющий ставит вручную — у нас она сама не применяется. Пусто, если в ресторане скидки нет. Подставляется из сегмента или шаблона.</p>
+      <p class="muted">Только отображение на карточке. Скидку в чеке управляющий ставит вручную.</p>
       <label class="field">Комментарий
         <input name="note" maxlength="500">
       </label>
@@ -124,8 +140,21 @@
   var banner = document.getElementById("preview-banner");
   var bannerImg = document.getElementById("preview-banner-img");
   var bannerEmpty = document.getElementById("preview-banner-empty");
-
   var singleHint = document.getElementById("single-use-hint");
+  var birthField = document.getElementById("birth-field");
+  var birthInput = document.getElementById("birth-date");
+
+  function selectedLedger() {
+    return document.querySelector('input[name="ledger_sheet"]:checked');
+  }
+
+  function syncLedger() {
+    var ledger = selectedLedger();
+    var needBirth = ledger && ledger.getAttribute("data-birth") === "1";
+    if (birthField) birthField.hidden = !needBirth;
+    if (birthInput) birthInput.required = !!needBirth;
+    syncExpiry();
+  }
 
   function syncExpiry() {
     if (!select || !expires) return;
@@ -133,9 +162,10 @@
     var needed = option && option.getAttribute("data-requires-expiry") === "1";
     expires.required = needed;
     if (hint) hint.hidden = !needed;
-    if (singleHint) {
-      singleHint.hidden = !(option && option.getAttribute("data-single-use") === "1");
-    }
+    var ledger = selectedLedger();
+    var single = (option && option.getAttribute("data-single-use") === "1") ||
+      (ledger && ledger.getAttribute("data-single") === "1");
+    if (singleHint) singleHint.hidden = !single;
   }
 
   function formatMoney(raw) {
@@ -203,6 +233,9 @@
     if (value && value !== "0") discount.value = value;
   }
 
+  document.querySelectorAll('input[name="ledger_sheet"]').forEach(function (radio) {
+    radio.addEventListener("change", syncLedger);
+  });
   if (select) {
     select.addEventListener("change", function () {
       syncExpiry();
@@ -224,7 +257,7 @@
       syncPreview();
     });
   }
-  syncExpiry();
+  syncLedger();
   syncPreview();
 })();
 </script>

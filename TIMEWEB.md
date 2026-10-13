@@ -26,6 +26,9 @@
 | `S3_PUBLIC_BASE_URL` | Публичный URL бакета или CDN без слэша в конце |
 | `S3_PREFIX` | Папка внутри бакета, по умолчанию `templates` |
 | `IIKO_API_KEY` | Общий секрет с плагином iikoFront. Плагин шлёт его в заголовке `X-Iiko-Key`. Пусто = API `/api/iiko/*` выключен. Не путать с Module ID / binding.jwt портала iiko |
+| `GOOGLE_SHEETS_SPREADSHEET_ID` | ID Google Таблицы учёта (из URL `/d/ID/edit`) |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | JSON ключ сервисного аккаунта одной строкой. Таблицу нужно расшарить на `client_email` из JSON (редактор) |
+| `GOOGLE_SERVICE_ACCOUNT_FILE` | Альтернатива JSON: путь к файлу ключа внутри контейнера |
 
 `DATA_DIR` нужен только для SQLite и локальных загрузок без S3. Файл базы тогда должен жить на постоянном диске, смонтированном в `/data`. Иначе при следующем деплое сертификаты исчезнут. Для боевого запуска берите PostgreSQL.
 

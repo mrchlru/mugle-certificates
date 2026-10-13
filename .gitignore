@@ -3,6 +3,7 @@ __pycache__/
 .pytest_cache/
 *.pyc
 .env
+secrets/
 data/*.db
 data/*.db-*
 data/CREDENTIALS.txt

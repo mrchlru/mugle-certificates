@@ -29,6 +29,12 @@ from sqlalchemy import select
 
 from bonus.importer import ImportRowResult, build_sample_workbook, parse_table
 from bonus.models import CardTemplate, Role, Segment, User
+from bonus.ledger import (
+    LEDGER_CHOICES,
+    ledger_is_single_use,
+    ledger_needs_birth_date,
+    parse_ledger_sheet,
+)
 from bonus.present import dashboard_stats, ledger, list_staff, load_card, search_certificates
 from bonus.security import flash
 from bonus.services import (
@@ -82,6 +88,7 @@ def issue_form(request: Request, db: Session = Depends(get_db), user: User = Dep
         templates=list_templates(db),
         colors=CARD_COLORS,
         media_url=media_url,
+        ledger_choices=LEDGER_CHOICES,
     )
 
 
@@ -94,6 +101,9 @@ def issue_submit(
     department: str = Form(""),
     job_title: str = Form(""),
     phone: str = Form(""),
+    company: str = Form(""),
+    birth_date: str = Form(""),
+    ledger_sheet: str = Form("employee"),
     nominal: str = Form(""),
     note: str = Form(""),
     expires_on: str = Form(""),
@@ -109,16 +119,30 @@ def issue_submit(
         nominal_value = optional_money(nominal)
         if nominal_value is None:
             raise BonusError("Укажите номинал")
+        try:
+            sheet = parse_ledger_sheet(ledger_sheet)
+        except ValueError as exc:
+            raise BonusError(str(exc)) from exc
         segment = resolve_segment(db, segment_id)
         template = resolve_template(db, template_id)
         expires = _expires(expires_on)
         if segment.requires_expiry and expires is None:
             raise BonusError("Укажите срок действия для этого сегмента")
+        born = _expires(birth_date)
+        if ledger_needs_birth_date(sheet) and born is None:
+            raise BonusError("Укажите дату рождения")
+        if not company.strip():
+            raise BonusError("Укажите ООО")
+        if not department.strip():
+            raise BonusError("Укажите ресторан или офис")
+        if not job_title.strip():
+            raise BonusError("Укажите должность")
         discount = _discount(discount_percent)
         if discount == 0 and segment.discount_percent:
             discount = segment.discount_percent
         if discount == 0 and template is not None and template.discount_percent:
             discount = template.discount_percent
+        one_shot = segment.single_use or ledger_is_single_use(sheet)
         issued = issue_certificate(
             db,
             IssueDraft(
@@ -136,7 +160,11 @@ def issue_submit(
                 job_title=job_title,
                 phone=phone,
                 discount_percent=discount,
-                single_use=segment.single_use,
+                single_use=one_shot,
+                segment_name=segment.name,
+                ledger_sheet=sheet.value,
+                company=company,
+                birth_date=born,
             ),
             user,
         )

@@ -34,7 +34,10 @@ DEFAULT_SEGMENTS: tuple[tuple[str, AccrualPeriod, bool, bool], ...] = (
     ("Бартер Сибирские Огни", AccrualPeriod.none, True, False),
     ("Бартер Пинчи", AccrualPeriod.none, True, False),
     ("Бартер Си мама", AccrualPeriod.none, True, False),
-    ("День рождения", AccrualPeriod.yearly, True, False),
+    ("День рождения", AccrualPeriod.yearly, True, True),
+    ("Спасибо", AccrualPeriod.none, True, False),
+    ("Подарок на день рождения", AccrualPeriod.none, True, True),
+    ("Карта сотрудника", AccrualPeriod.monthly, False, False),
     ("Разовый", AccrualPeriod.none, False, True),
 )
 
@@ -48,7 +51,10 @@ _LEGACY_SEGMENTS: dict[str, tuple[str, AccrualPeriod, bool, bool]] = {
     "бартер сибирские огни": ("Бартер Сибирские Огни", AccrualPeriod.none, True, False),
     "бартер пинчи": ("Бартер Пинчи", AccrualPeriod.none, True, False),
     "бартер си мама": ("Бартер Си мама", AccrualPeriod.none, True, False),
-    "день рождения": ("День рождения", AccrualPeriod.yearly, True, False),
+    "день рождения": ("День рождения", AccrualPeriod.yearly, True, True),
+    "спасибо": ("Спасибо", AccrualPeriod.none, True, False),
+    "подарок на день рождения": ("Подарок на день рождения", AccrualPeriod.none, True, True),
+    "карта сотрудника": ("Карта сотрудника", AccrualPeriod.monthly, False, False),
     "разовый": ("Разовый", AccrualPeriod.none, False, True),
 }
 

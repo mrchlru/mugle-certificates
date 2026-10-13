@@ -15,6 +15,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from bonus.ledger import LedgerSheet
+
 
 class Base(DeclarativeBase):
     """Общая база моделей."""
@@ -135,6 +137,13 @@ class Certificate(Base):
     nominal: Mapped[int] = mapped_column(Integer)
     balance: Mapped[int] = mapped_column(Integer)
     note: Mapped[str] = mapped_column(String(500), default="")
+    ledger_sheet: Mapped[str] = mapped_column(
+        String(32),
+        default=LedgerSheet.employee.value,
+        index=True,
+    )
+    company: Mapped[str] = mapped_column(String(200), default="")
+    birth_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     status: Mapped[CertificateStatus] = mapped_column(
         Enum(CertificateStatus, native_enum=False, length=16),
         default=CertificateStatus.active,

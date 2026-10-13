@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     s3_public_base_url: str = ""
     s3_prefix: str = "templates"
     iiko_api_key: str = ""
+    google_sheets_spreadsheet_id: str = ""
+    google_service_account_json: str = ""
+    google_service_account_file: str = ""
 
     def normalized_database_url(self) -> str:
         """Возвращает URL базы в формате SQLAlchemy."""

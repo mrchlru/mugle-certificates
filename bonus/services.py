@@ -51,6 +51,9 @@ class IssueDraft:
     discount_percent: int = 0
     segment_name: str = ""
     single_use: bool = False
+    ledger_sheet: str = "employee"
+    company: str = ""
+    birth_date: date | None = None
 
 
 def issue_certificate(db: Session, draft: IssueDraft, actor: User | None) -> IssuedCertificate:
@@ -70,6 +73,9 @@ def issue_certificate(db: Session, draft: IssueDraft, actor: User | None) -> Iss
         nominal=nominal,
         balance=balance,
         note=draft.note.strip()[:500],
+        ledger_sheet=(draft.ledger_sheet or "employee").strip()[:32],
+        company=(draft.company or "").strip()[:200],
+        birth_date=draft.birth_date,
         status=CertificateStatus.active,
         expires_on=draft.expires_on,
         issued_by_id=None if actor is None else actor.id,
@@ -99,6 +105,7 @@ def issue_certificate(db: Session, draft: IssueDraft, actor: User | None) -> Iss
     db.commit()
     db.refresh(certificate)
     db.refresh(holder)
+    _sync_issue(certificate, holder, draft.segment_name)
     return IssuedCertificate(user=holder, certificate=certificate, password=password)
 
 
@@ -113,6 +120,7 @@ def debit_certificate(
     if apply_expiry_writeoff(db, certificate):
         db.commit()
         db.refresh(certificate)
+        _sync_usage(certificate, amount=0, restaurant="", expired=True)
     _ensure_can_debit(certificate, amount)
     changed = _change_balance(db, certificate.id, -amount, require_active=True)
     if not changed:
@@ -129,15 +137,17 @@ def debit_certificate(
         comment=comment.strip()[:300],
         restaurant=actor.restaurant.strip()[:200],
     )
+    place = actor.restaurant.strip()[:200]
     _burn_single_use_remainder(
         db,
         certificate,
         actor_id=actor.id,
         after_debit_id=tx.id,
-        restaurant=actor.restaurant.strip()[:200],
+        restaurant=place,
     )
     db.commit()
     db.refresh(tx)
+    _sync_usage(certificate, amount=tx.amount, restaurant=place)
     return tx
 
 
@@ -250,9 +260,11 @@ def set_certificate_expiry(db: Session, certificate: Certificate, expires_on: da
     """Задаёт или снимает срок действия сертификата."""
     certificate.expires_on = expires_on
     db.flush()
-    apply_expiry_writeoff(db, certificate)
+    expired = apply_expiry_writeoff(db, certificate)
     db.commit()
     db.refresh(certificate)
+    if expired:
+        _sync_usage(certificate, amount=0, restaurant="", expired=True)
 
 
 def apply_expiry_writeoff(db: Session, certificate: Certificate) -> bool:
@@ -287,11 +299,15 @@ def apply_due_expiries(db: Session) -> int:
         )
     ).all()
     changed = 0
+    expired_cards: list[Certificate] = []
     for certificate in rows:
         if apply_expiry_writeoff(db, certificate):
             changed += 1
+            expired_cards.append(certificate)
     if changed:
         db.commit()
+        for certificate in expired_cards:
+            _sync_usage(certificate, amount=0, restaurant="", expired=True)
     return changed
 
 
@@ -679,9 +695,11 @@ def lookup_for_iiko(db: Session, code: str) -> Certificate:
     certificate = find_certificate(db, code)
     if certificate is None:
         raise BonusError("Сертификат не найден")
-    apply_expiry_writeoff(db, certificate)
+    expired = apply_expiry_writeoff(db, certificate)
     db.commit()
     db.refresh(certificate)
+    if expired:
+        _sync_usage(certificate, amount=0, restaurant="", expired=True)
     return certificate
 
 
@@ -709,6 +727,7 @@ def debit_for_iiko(
     if apply_expiry_writeoff(db, certificate):
         db.commit()
         db.refresh(certificate)
+        _sync_usage(certificate, amount=0, restaurant="", expired=True)
     if certificate.status != CertificateStatus.active:
         raise BonusError("Сертификат заблокирован")
     if certificate.expires_on is not None and certificate.expires_on < today_msk():
@@ -745,6 +764,7 @@ def debit_for_iiko(
     db.commit()
     db.refresh(certificate)
     db.refresh(tx)
+    _sync_usage(certificate, amount=paid, restaurant=place)
     return IikoDebitResult(
         transaction=tx,
         paid=paid,
@@ -884,6 +904,30 @@ def _public_number(compact: str) -> str:
     if not digits.isdigit():
         return ""
     return f"MR-{int(digits):05d}"
+
+
+def _sync_issue(certificate: Certificate, holder: User, segment_name: str) -> None:
+    from bonus.sheets_sync import sync_certificate_issued
+
+    sync_certificate_issued(certificate, holder, segment_name=segment_name.strip())
+
+
+def _sync_usage(
+    certificate: Certificate,
+    *,
+    amount: int,
+    restaurant: str,
+    expired: bool = False,
+) -> None:
+    from bonus.sheets_sync import sync_certificate_usage
+
+    sync_certificate_usage(
+        certificate,
+        used_on=today_msk(),
+        amount_kopecks=amount,
+        restaurant=restaurant,
+        expired=expired,
+    )
 
 
 _TRANSLIT = {

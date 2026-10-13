@@ -918,6 +918,52 @@ body:has(.wallet-wrap) .flash {
   vertical-align: middle;
 }
 
+.ledger-field {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.ledger-field legend {
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ledger-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ledger-option {
+  position: relative;
+  cursor: pointer;
+}
+
+.ledger-option input {
+  position: absolute;
+  opacity: 0;
+}
+
+.ledger-option span {
+  display: block;
+  padding: 8px 12px;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.ledger-option input:checked + span {
+  border-color: var(--black);
+  box-shadow: inset 0 0 0 1px var(--black);
+}
+
 .color-field {
   margin: 0;
   padding: 0;

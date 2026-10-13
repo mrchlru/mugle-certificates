@@ -21,6 +21,14 @@ def ensure_schema(engine: Engine) -> None:
             statements.append("ALTER TABLE certificates ADD COLUMN discount_percent INTEGER DEFAULT 0")
         if "single_use" not in columns:
             statements.append("ALTER TABLE certificates ADD COLUMN single_use BOOLEAN DEFAULT FALSE")
+        if "ledger_sheet" not in columns:
+            statements.append(
+                "ALTER TABLE certificates ADD COLUMN ledger_sheet VARCHAR(32) DEFAULT 'employee'"
+            )
+        if "company" not in columns:
+            statements.append("ALTER TABLE certificates ADD COLUMN company VARCHAR(200) DEFAULT ''")
+        if "birth_date" not in columns:
+            statements.append("ALTER TABLE certificates ADD COLUMN birth_date DATE")
     if "card_templates" in tables:
         columns = {column["name"] for column in inspector.get_columns("card_templates")}
         if "discount_percent" not in columns:
