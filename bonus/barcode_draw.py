@@ -6,6 +6,10 @@ from io import BytesIO
 from barcode import Code128
 from barcode.writer import SVGWriter
 
+_SIZE_MM = re.compile(
+    r'\swidth="(?P<width>[\d.]+)mm"\s+height="(?P<height>[\d.]+)mm"',
+)
+
 
 def barcode_svg(digits: str) -> str:
     """Рисует Code128 по цифровому коду сертификата."""
@@ -34,27 +38,28 @@ def barcode_svg(digits: str) -> str:
 
 
 def _fit_svg_to_card(svg: str) -> str:
-    """Растягивает SVG штрихкода на всю ширину белого блока карточки."""
+    """Растягивает SVG штрихкода на всю ширину белого блока карточки.
+
+    python-barcode рисует полоски в мм без viewBox. Без viewBox при width=100%
+    координаты остаются абсолютными и штрихкод «прилипает» влево.
+    """
     if not svg.startswith("<svg"):
         return svg
+    size = _SIZE_MM.search(svg)
+    view_box = ""
+    if size is not None:
+        view_box = (
+            f' viewBox="0 0 {size.group("width")} {size.group("height")}"'
+        )
     svg = re.sub(r'\swidth="[^"]*"', "", svg, count=1)
     svg = re.sub(r'\sheight="[^"]*"', "", svg, count=1)
-    if "preserveAspectRatio=" in svg:
-        svg = re.sub(
-            r'preserveAspectRatio="[^"]*"',
-            'preserveAspectRatio="none"',
-            svg,
-            count=1,
-        )
-        svg = svg.replace(
-            "<svg",
-            '<svg width="100%" height="56"',
-            1,
-        )
-    else:
-        svg = svg.replace(
-            "<svg",
-            '<svg width="100%" height="56" preserveAspectRatio="none"',
-            1,
-        )
-    return svg
+    svg = re.sub(r'\spreserveAspectRatio="[^"]*"', "", svg, count=1)
+    svg = re.sub(r'\sviewBox="[^"]*"', "", svg, count=1)
+    return svg.replace(
+        "<svg",
+        (
+            '<svg width="100%" height="56"'
+            f'{view_box} preserveAspectRatio="none"'
+        ),
+        1,
+    )
