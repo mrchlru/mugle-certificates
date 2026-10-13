@@ -7,12 +7,13 @@ from fastapi import Depends, Request
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
+from bonus import __version__
+from bonus.catalog import accrual_label
 from bonus.config import get_settings
 from bonus.db import get_db, open_session
 from bonus.models import Role, User
 from bonus.security import csrf_ok, ensure_csrf, home_for, login_redirect, pop_flashes
 from bonus.services import BonusError
-from bonus.catalog import accrual_label
 from bonus.values import (
     MoneyError,
     format_date,
@@ -63,6 +64,7 @@ def render(request: Request, name: str, status_code: int = 200, **context: objec
     context["flashes"] = pop_flashes(request)
     context["csrf"] = ensure_csrf(request)
     context["warn_secret"] = get_settings().uses_default_secret()
+    context["asset_v"] = __version__
     response = templates.TemplateResponse(request, name, context, status_code=status_code)
     response.headers["Cache-Control"] = "no-store"
     return response

@@ -1,6 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Списание{% endblock %}
 {% block main_class %}narrow desk-wrap{% endblock %}
+{% block head_scripts %}
+<script src="/static/zxing.min.js?v={{ asset_v|default('1') }}"></script>
+{% endblock %}
 {% block content %}
 <section class="desk-page stack">
   <header class="desk-intro">
@@ -9,7 +12,7 @@
 
   <div class="scan-stage" id="camera-box">
     <div class="scan-viewport">
-      <video id="camera" playsinline muted></video>
+      <video id="camera" playsinline muted autoplay></video>
       <div class="scan-idle" id="scan-idle">
         <p class="scan-idle-title">Камера</p>
         <p class="scan-idle-text">Сканировать штрихкод</p>
@@ -39,7 +42,4 @@
 {% with items=recent %}
   {% include "_history.html" %}
 {% endwith %}
-{% endblock %}
-{% block scripts %}
-<script src="/static/zxing.min.js"></script>
 {% endblock %}
