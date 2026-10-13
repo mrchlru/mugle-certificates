@@ -67,45 +67,67 @@ function bindCamera() {
 }
 
 function startCamera(opener, box, video, note) {
-  if (!navigator.mediaDevices || typeof jsQR !== "function") {
+  const ZXing = window.ZXing;
+  if (!navigator.mediaDevices || !ZXing || typeof ZXing.BrowserMultiFormatReader !== "function") {
     note.hidden = false;
-    note.textContent = "Камера здесь недоступна. Введите код вручную или наведите обычную камеру телефона на QR.";
+    note.textContent = "Камера здесь недоступна. Введите код вручную.";
     return;
   }
   opener.disabled = true;
-  navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(function (stream) {
+  const hints = new Map();
+  hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+    ZXing.BarcodeFormat.CODE_128,
+    ZXing.BarcodeFormat.CODE_39,
+    ZXing.BarcodeFormat.EAN_13,
+    ZXing.BarcodeFormat.EAN_8,
+  ]);
+  hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+  const reader = new ZXing.BrowserMultiFormatReader(hints);
+  let locked = false;
+  reader.decodeFromConstraints(
+    { audio: false, video: { facingMode: { ideal: "environment" } } },
+    video,
+    function (result) {
+      if (locked || !result) {
+        return;
+      }
+      const code = normalizeScanCode(result.getText());
+      if (!code) {
+        return;
+      }
+      locked = true;
+      box.classList.add("is-found");
+      try {
+        reader.reset();
+      } catch (_err) {
+        /* поток уже останавливается при уходе со страницы */
+      }
+      window.location.href = "/desk?code=" + encodeURIComponent(code);
+    }
+  ).then(function () {
     const idle = document.getElementById("scan-idle");
     if (idle) {
       idle.hidden = true;
     }
     box.classList.add("is-live");
     opener.hidden = true;
-    video.srcObject = stream;
-    video.play();
-    const canvas = document.createElement("canvas");
-    const context = canvas.getContext("2d", { willReadFrequently: true });
-    let locked = false;
-    window.setInterval(function () {
-      if (locked || !context || video.readyState < 2) {
-        return;
-      }
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      context.drawImage(video, 0, 0);
-      const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
-      const found = jsQR(pixels.data, pixels.width, pixels.height);
-      if (found && found.data) {
-        locked = true;
-        box.classList.add("is-found");
-        stream.getTracks().forEach(function (track) { track.stop(); });
-        window.location.href = "/desk?code=" + encodeURIComponent(found.data);
-      }
-    }, 250);
   }).catch(function () {
     opener.disabled = false;
     note.hidden = false;
-    note.textContent = "Камера не открылась. Введите код с карточки или отсканируйте QR обычной камерой — откроется страница списания.";
+    note.textContent = "Камера не открылась. Введите код с карточки.";
   });
+}
+
+function normalizeScanCode(raw) {
+  const text = String(raw || "").trim();
+  if (!text) {
+    return "";
+  }
+  const digits = text.replace(/\D/g, "");
+  if (digits.length >= 6) {
+    return digits;
+  }
+  return text.replace(/\s+/g, "").toUpperCase();
 }
 
 function formatKopecks(kopecks) {

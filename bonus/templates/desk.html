@@ -5,8 +5,26 @@
 <section class="desk-page stack">
   <header class="desk-intro">
     <h1>Списать бонусы</h1>
-    <p class="lede">Наведите сканер на штрихкод карточки — цифры попадут в поле — или введите код вручную.</p>
   </header>
+
+  <div class="scan-stage" id="camera-box">
+    <div class="scan-viewport">
+      <video id="camera" playsinline muted></video>
+      <div class="scan-idle" id="scan-idle">
+        <p class="scan-idle-title">Камера</p>
+        <p class="scan-idle-text">Сканировать штрихкод</p>
+      </div>
+      <div class="scan-veil" aria-hidden="true"></div>
+      <div class="scan-frame" aria-hidden="true">
+        <span class="scan-corner is-tl"></span>
+        <span class="scan-corner is-tr"></span>
+        <span class="scan-corner is-bl"></span>
+        <span class="scan-corner is-br"></span>
+      </div>
+    </div>
+    <button class="btn soft wide" type="button" id="open-camera">Включить камеру</button>
+    <p id="camera-note" class="muted" hidden></p>
+  </div>
 
   <form method="get" action="/desk" class="desk-code stack">
     <label class="field">Код сертификата
@@ -14,7 +32,6 @@
     </label>
     <button class="btn wide" type="submit">Продолжить</button>
   </form>
-  <p class="muted">На карточке — штрихкод Code128 из восьми цифр. Старые буквенные коды тоже принимаются.</p>
 </section>
 {% set history_title = "Последние списания" %}
 {% set next_path = '/desk' %}
@@ -22,4 +39,7 @@
 {% with items=recent %}
   {% include "_history.html" %}
 {% endwith %}
+{% endblock %}
+{% block scripts %}
+<script src="/static/zxing.min.js"></script>
 {% endblock %}
