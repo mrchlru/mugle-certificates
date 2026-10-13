@@ -1,5 +1,6 @@
 """Штрихкод Code128 только из цифр — для сканеров на кассе."""
 
+import re
 from io import BytesIO
 
 from barcode import Code128
@@ -29,10 +30,31 @@ def barcode_svg(digits: str) -> str:
     start = text.find("<svg")
     if start > 0:
         text = text[start:]
-    # Растягиваем штрихкод на всю ширину белого блока карточки.
-    if 'preserveAspectRatio="' in text:
-        text = text.replace('preserveAspectRatio="xMidYMid meet"', 'preserveAspectRatio="none"', 1)
-        text = text.replace('preserveAspectRatio="xMinYMid meet"', 'preserveAspectRatio="none"', 1)
-    elif text.startswith("<svg"):
-        text = text.replace("<svg", '<svg preserveAspectRatio="none"', 1)
-    return text
+    return _fit_svg_to_card(text)
+
+
+def _fit_svg_to_card(svg: str) -> str:
+    """Растягивает SVG штрихкода на всю ширину белого блока карточки."""
+    if not svg.startswith("<svg"):
+        return svg
+    svg = re.sub(r'\swidth="[^"]*"', "", svg, count=1)
+    svg = re.sub(r'\sheight="[^"]*"', "", svg, count=1)
+    if "preserveAspectRatio=" in svg:
+        svg = re.sub(
+            r'preserveAspectRatio="[^"]*"',
+            'preserveAspectRatio="none"',
+            svg,
+            count=1,
+        )
+        svg = svg.replace(
+            "<svg",
+            '<svg width="100%" height="56"',
+            1,
+        )
+    else:
+        svg = svg.replace(
+            "<svg",
+            '<svg width="100%" height="56" preserveAspectRatio="none"',
+            1,
+        )
+    return svg

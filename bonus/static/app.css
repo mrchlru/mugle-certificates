@@ -847,6 +847,9 @@ body:has(.wallet-wrap) .flash {
 }
 
 .wallet-barcode {
+  display: flex;
+  justify-content: center;
+  align-items: center;
   width: 100%;
   margin: 0;
   line-height: 0;
@@ -854,7 +857,9 @@ body:has(.wallet-wrap) .flash {
 
 .wallet-barcode svg {
   width: 100%;
+  max-width: 100%;
   height: 56px;
+  margin: 0 auto;
   display: block;
 }
 
@@ -864,6 +869,7 @@ body:has(.wallet-wrap) .flash {
   font-weight: 600;
   letter-spacing: 0.04em;
   line-height: 1.2;
+  text-align: center;
   font-variant-numeric: tabular-nums;
 }
 
