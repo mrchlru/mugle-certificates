@@ -40,8 +40,9 @@ def barcode_svg(digits: str) -> str:
 def _fit_svg_to_card(svg: str) -> str:
     """Растягивает SVG штрихкода на всю ширину белого блока карточки.
 
-    python-barcode рисует полоски в мм без viewBox. Без viewBox при width=100%
-    координаты остаются абсолютными и штрихкод «прилипает» влево.
+    python-barcode рисует полоски в мм без viewBox. Браузер не сопоставляет
+    абсолютные mm с unitless viewBox — полоски остаются слева. Убираем суффикс
+    mm, чтобы координаты совпали с viewBox, и растягиваем на 100% ширины.
     """
     if not svg.startswith("<svg"):
         return svg
@@ -55,6 +56,7 @@ def _fit_svg_to_card(svg: str) -> str:
     svg = re.sub(r'\sheight="[^"]*"', "", svg, count=1)
     svg = re.sub(r'\spreserveAspectRatio="[^"]*"', "", svg, count=1)
     svg = re.sub(r'\sviewBox="[^"]*"', "", svg, count=1)
+    svg = re.sub(r"(?<=\d)mm", "", svg)
     return svg.replace(
         "<svg",
         (

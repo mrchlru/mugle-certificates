@@ -20,7 +20,8 @@ from bonus.storage import (
     store_template_bytes,
 )
 
-_BANNER_SIZE = (720, 264)
+# Натуральный макет баннера 1672×763 — храним половину, та же пропорция.
+_BANNER_SIZE = (836, 382)
 _WEBP_QUALITY = 78
 _MAX_UPLOAD_BYTES = 8_000_000
 
