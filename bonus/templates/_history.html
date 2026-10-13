@@ -12,8 +12,8 @@
       </div>
       <div class="history-side">
         {% if item.tx_type not in ['block', 'unblock'] %}
-        <p class="{% if item.tx_type in ['debit', 'migrate', 'expire', 'burn'] %}minus{% else %}plus{% endif %}">
-          {% if item.tx_type in ['debit', 'migrate', 'expire', 'burn'] %}−{% endif %}{{ item.amount|money }}
+        <p class="history-amount {% if item.tx_type in ['debit', 'migrate', 'expire', 'burn'] %}minus{% else %}plus{% endif %}">
+          {% if item.tx_type in ['debit', 'migrate', 'expire', 'burn'] %}−{% endif %}{{ item.amount|money_plain }}
         </p>
         {% endif %}
         {% if item.can_undo %}

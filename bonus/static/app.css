@@ -305,11 +305,25 @@ select:focus {
   border-top: 1px solid var(--line);
 }
 
-.history-title { margin: 0; font-weight: 700; }
+.history-title {
+  margin: 0;
+  font-weight: 700;
+  white-space: nowrap;
+}
 
 .history p, .people p { margin: 0; }
 
-.history-side { text-align: right; }
+.history-side {
+  flex: none;
+  text-align: right;
+}
+
+.history-amount {
+  margin: 0;
+  font-weight: 700;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 
 .minus { margin: 0; font-weight: 700; }
 
@@ -421,9 +435,10 @@ select:focus {
   position: absolute;
   top: 50%;
   left: 50%;
-  width: min(340px, 94%);
-  height: 58px;
-  border-radius: 10px;
+  /* Как белый блок штрихкода на карточке (.wallet-code). */
+  width: min(248px, 78%);
+  height: 88px;
+  border-radius: 8px;
   transform: translate(-50%, -50%);
   box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.45);
   pointer-events: none;
@@ -744,7 +759,7 @@ body:has(.wallet-wrap) .flash {
 
 .wallet-banner {
   position: relative;
-  height: 132px;
+  height: 176px;
   overflow: hidden;
   background: rgba(0, 0, 0, 0.2);
 }
@@ -756,8 +771,9 @@ body:has(.wallet-wrap) .flash {
 .wallet-banner img,
 .wallet-placeholder {
   width: 100%;
-  height: 132px;
+  height: 176px;
   object-fit: cover;
+  object-position: center;
   display: block;
 }
 
@@ -782,17 +798,17 @@ body:has(.wallet-wrap) .flash {
   letter-spacing: 0.08em;
 }
 
-.wallet-body { padding: 18px; }
+.wallet-body { padding: 20px 18px 22px; }
 
 .wallet-holder {
-  margin: 6px 0 0;
+  margin: 8px 0 0;
   font-size: 22px;
   font-weight: 700;
-  line-height: 1.2;
+  line-height: 1.25;
 }
 
 .wallet-expiry {
-  margin: 6px 0 0;
+  margin: 8px 0 0;
   font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -820,9 +836,9 @@ body:has(.wallet-wrap) .flash {
 }
 
 .wallet-code {
-  width: min(268px, 100%);
-  margin: 16px auto 0;
-  padding: 10px 14px 8px;
+  width: min(248px, 92%);
+  margin: 28px auto 0;
+  padding: 12px 10px 10px;
   border-radius: 8px;
   background: #fff;
   color: #111;
@@ -832,13 +848,13 @@ body:has(.wallet-wrap) .flash {
 
 .wallet-barcode {
   width: 100%;
-  margin: 0 auto;
+  margin: 0;
   line-height: 0;
 }
 
 .wallet-barcode svg {
   width: 100%;
-  height: 52px;
+  height: 56px;
   display: block;
 }
 

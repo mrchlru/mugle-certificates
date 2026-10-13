@@ -42,16 +42,21 @@ def parse_money(value: object, *, blank_as_none: bool = False) -> int | None:
     return _guard_kopecks(int((amount * 100).quantize(Decimal("1"))))
 
 
-def format_money(kopecks: int) -> str:
-    """Форматирует копейки как рубли: 12 500 ₽ или 12 500,50 ₽."""
+def format_money_plain(kopecks: int) -> str:
+    """Форматирует копейки как рубли без символа валюты: 12 500 или 12 500,50."""
     sign = "−" if kopecks < 0 else ""
     absolute = abs(int(kopecks))
     whole = absolute // 100
     frac = absolute % 100
     grouped = f"{whole:,}".replace(",", " ")
     if frac == 0:
-        return f"{sign}{grouped} ₽"
-    return f"{sign}{grouped},{frac:02d} ₽"
+        return f"{sign}{grouped}"
+    return f"{sign}{grouped},{frac:02d}"
+
+
+def format_money(kopecks: int) -> str:
+    """Форматирует копейки как рубли: 12 500 ₽ или 12 500,50 ₽."""
+    return f"{format_money_plain(kopecks)} ₽"
 
 
 def parse_date(value: object) -> date | None:

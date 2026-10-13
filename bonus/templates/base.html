@@ -31,9 +31,6 @@
   {% endblock %}
   {% if user and user.role.value == 'hr' and section is defined %}
   <div class="wrap nav-wrap">
-    {% if user.must_change_password %}
-    <p class="flash bad">Смените пароль, который выдали при запуске. Это занимает минуту.</p>
-    {% endif %}
     {% if warn_secret %}
     <p class="flash bad">Перед реальными сертификатами задайте свой SECRET_KEY в настройках Timeweb.</p>
     {% endif %}
@@ -58,9 +55,6 @@
   {% endif %}
   <main class="{% block main_class %}wrap{% endblock %}">
     {% if not (user and user.role.value == 'hr' and section is defined) %}
-    {% if user and user.must_change_password %}
-    <p class="flash bad">Смените пароль, который выдали при запуске. Это занимает минуту.</p>
-    {% endif %}
     {% if user and user.role.value == 'hr' and warn_secret %}
     <p class="flash bad">Перед реальными сертификатами задайте свой SECRET_KEY в настройках Timeweb.</p>
     {% endif %}

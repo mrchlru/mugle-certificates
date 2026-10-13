@@ -19,6 +19,7 @@ from bonus.values import (
     format_date,
     format_dt,
     format_money,
+    format_money_plain,
     format_short_code,
     parse_money,
     status_label,
@@ -28,6 +29,7 @@ from bonus.values import (
 PACKAGE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(PACKAGE_DIR / "templates"))
 templates.env.filters["money"] = format_money
+templates.env.filters["money_plain"] = format_money_plain
 templates.env.filters["when"] = format_dt
 templates.env.filters["day"] = format_date
 templates.env.globals["status_label"] = status_label
