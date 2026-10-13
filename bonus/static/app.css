@@ -820,33 +820,34 @@ body:has(.wallet-wrap) .flash {
 }
 
 .wallet-code {
-  width: fit-content;
-  max-width: 100%;
-  margin: 18px auto 0;
-  padding: 8px 8px 6px;
-  border-radius: 12px;
-  background: white;
+  width: min(268px, 100%);
+  margin: 16px auto 0;
+  padding: 10px 14px 8px;
+  border-radius: 8px;
+  background: #fff;
   color: #111;
   text-align: center;
+  box-sizing: border-box;
 }
 
 .wallet-barcode {
-  width: min(220px, 100%);
+  width: 100%;
   margin: 0 auto;
   line-height: 0;
 }
 
 .wallet-barcode svg {
   width: 100%;
-  height: auto;
+  height: 52px;
   display: block;
 }
 
 .wallet-code-number {
-  margin: 8px 0 0;
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
+  margin: 6px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
   font-variant-numeric: tabular-nums;
 }
 

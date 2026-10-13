@@ -15,9 +15,9 @@ def barcode_svg(digits: str) -> str:
     Code128(payload, writer=SVGWriter()).write(
         buffer,
         options={
-            "module_width": 0.35,
-            "module_height": 18.0,
-            "quiet_zone": 2.0,
+            "module_width": 0.42,
+            "module_height": 22.0,
+            "quiet_zone": 1.5,
             "font_size": 0,
             "text_distance": 1.0,
             "write_text": False,
