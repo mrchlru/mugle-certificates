@@ -594,6 +594,8 @@ def _add_transaction(
     comment: str,
     reversal_of_id: int | None = None,
     restaurant: str = "",
+    order_ref: str = "",
+    cheque_detail: str = "",
 ) -> Transaction:
     tx = Transaction(
         certificate_id=certificate_id,
@@ -603,6 +605,8 @@ def _add_transaction(
         balance_after=balance_after,
         comment=comment,
         restaurant=restaurant.strip()[:200],
+        order_ref=order_ref.strip()[:80],
+        cheque_detail=cheque_detail.strip()[:4000],
         reversal_of_id=reversal_of_id,
     )
     db.add(tx)
@@ -711,6 +715,8 @@ def debit_for_iiko(
     external_id: str,
     restaurant: str = "",
     comment: str = "",
+    order_ref: str = "",
+    cheque_detail: str = "",
 ) -> IikoDebitResult:
     """Списывает бонусы до суммы заказа; при нехватке — весь остаток. Идемпотентно по external_id."""
     marker = _iiko_marker(external_id)
@@ -753,6 +759,8 @@ def debit_for_iiko(
         balance_after=certificate.balance,
         comment=note,
         restaurant=place,
+        order_ref=order_ref,
+        cheque_detail=cheque_detail,
     )
     _burn_single_use_remainder(
         db,

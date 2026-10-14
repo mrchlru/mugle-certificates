@@ -11,6 +11,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -172,6 +173,8 @@ class Transaction(Base):
     balance_after: Mapped[int] = mapped_column(Integer)
     comment: Mapped[str] = mapped_column(String(300), default="")
     restaurant: Mapped[str] = mapped_column(String(200), default="")
+    order_ref: Mapped[str] = mapped_column(String(80), default="")
+    cheque_detail: Mapped[str] = mapped_column(Text, default="")
     reversal_of_id: Mapped[int | None] = mapped_column(ForeignKey("transactions.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

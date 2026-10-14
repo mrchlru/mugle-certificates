@@ -28,6 +28,7 @@ from dataclasses import replace
 from sqlalchemy import select
 
 from bonus.importer import ImportRowResult, build_sample_workbook, parse_table
+from bonus.storage import s3_enabled
 from bonus.models import CardTemplate, Role, Segment, User
 from bonus.ledger import (
     LEDGER_CHOICES,
@@ -186,6 +187,7 @@ def design_page(request: Request, db: Session = Depends(get_db), user: User = De
         templates=list_templates(db, active_only=False),
         media_url=media_url,
         accrual_choices=ACCRUAL_CHOICES,
+        media_on_s3=s3_enabled(),
     )
 
 

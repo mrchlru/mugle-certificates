@@ -1,7 +1,7 @@
 """API для плагина iikoFront: lookup / списание бонусов / возврат.
 
-Скидка % с карточки сюда не применяется — только показывается плагину
-как право сотрудника; скидку в чеке ставит управляющий вручную в iiko.
+Плагин после списания сам вешает тип оплаты «Mugle Bonus» на заказ в iiko
+(как Statix). Сюда уходит снимок чека для журнала HR.
 """
 
 from typing import Annotated
@@ -49,6 +49,9 @@ class DebitBody(BaseModel):
     transaction_id: str = Field(min_length=1, max_length=80, description="Guid операции iiko")
     restaurant: str = ""
     comment: str = ""
+    order_number: str = ""
+    table: str = ""
+    cheque_detail: str = ""
 
 
 class DebitResponse(BaseModel):
@@ -137,6 +140,8 @@ def iiko_debit(
             external_id=body.transaction_id,
             restaurant=body.restaurant,
             comment=body.comment or "Mugle Bonus",
+            order_ref=body.order_number or body.table,
+            cheque_detail=_cheque_text(body),
         )
     except MoneyError as exc:
         raise HTTPException(status_code=400, detail=exc.message) from exc
@@ -174,3 +179,18 @@ def iiko_refund(
         refunded=tx.amount,
         refunded_rub=format_money(tx.amount),
     )
+
+
+def _cheque_text(body: DebitBody) -> str:
+    """Собирает текст чека из полей плагина."""
+    detail = (body.cheque_detail or "").strip()
+    if detail:
+        return detail[:4000]
+    parts: list[str] = []
+    if body.order_number.strip():
+        parts.append(f"Заказ: {body.order_number.strip()}")
+    if body.table.strip():
+        parts.append(f"Стол: {body.table.strip()}")
+    if body.comment.strip():
+        parts.append(body.comment.strip())
+    return "\n".join(parts)[:4000]

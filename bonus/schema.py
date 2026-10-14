@@ -39,6 +39,10 @@ def ensure_schema(engine: Engine) -> None:
         columns = {column["name"] for column in inspector.get_columns("transactions")}
         if "restaurant" not in columns:
             statements.append("ALTER TABLE transactions ADD COLUMN restaurant VARCHAR(200) DEFAULT ''")
+        if "order_ref" not in columns:
+            statements.append("ALTER TABLE transactions ADD COLUMN order_ref VARCHAR(80) DEFAULT ''")
+        if "cheque_detail" not in columns:
+            statements.append("ALTER TABLE transactions ADD COLUMN cheque_detail TEXT DEFAULT ''")
     if "users" in tables:
         columns = {column["name"] for column in inspector.get_columns("users")}
         if "department" not in columns:

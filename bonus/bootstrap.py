@@ -10,12 +10,21 @@ from bonus.db import open_session
 from bonus.models import Role, User
 from bonus.security import hash_password
 from bonus.services import IssueDraft, apply_due_expiries, debit_certificate, issue_certificate
+from bonus.storage import s3_enabled
 
 
 def bootstrap(settings: Settings) -> None:
     """Создаёт каталог данных, сегменты и стартовые входы."""
     settings.data_path().mkdir(parents=True, exist_ok=True)
     (settings.data_path() / "uploads").mkdir(parents=True, exist_ok=True)
+    if s3_enabled(settings):
+        print("Mugle Bonus: обложки → S3", flush=True)
+    else:
+        print(
+            "Mugle Bonus: S3 выключен — обложки на локальном диске, "
+            "при деплое без тома пропадут",
+            flush=True,
+        )
     db = open_session()
     try:
         ensure_default_segments(db)

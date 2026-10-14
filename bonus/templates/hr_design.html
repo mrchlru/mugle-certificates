@@ -4,6 +4,11 @@
 <section class="design-page">
   <header class="design-intro">
     <h1>Оформление</h1>
+    {% if media_on_s3 %}
+    <p class="muted lede">Обложки пишутся в S3 — после деплоя не пропадают.</p>
+    {% else %}
+    <p class="flash bad">S3 не настроен: картинки лежат в контейнере и пропадут при деплое. В Timeweb задайте все <code>S3_*</code> (включая <code>S3_PUBLIC_BASE_URL</code>), затем заново загрузите шаблон ниже.</p>
+    {% endif %}
   </header>
 
   <div class="design-grid">

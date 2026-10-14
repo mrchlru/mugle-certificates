@@ -27,6 +27,8 @@ class TxView:
     created_at: datetime
     actor_name: str
     restaurant: str
+    order_ref: str
+    cheque_detail: str
     holder_name: str
     public_number: str
     reversal_of_id: int | None
@@ -319,16 +321,27 @@ def _tx_view(
         tx_type=tx.tx_type.value,
         amount=tx.amount,
         balance_after=tx.balance_after,
-        comment=tx.comment,
+        comment=_public_comment(tx.comment),
         created_at=tx.created_at,
         actor_name=actor_name or "",
         restaurant=tx.restaurant or restaurant or "",
+        order_ref=(tx.order_ref or "").strip(),
+        cheque_detail=(tx.cheque_detail or "").strip(),
         holder_name=holder_name,
         public_number=public_number,
         reversal_of_id=tx.reversal_of_id,
         undone=undone,
         can_undo=_can_undo(tx, viewer, undone),
     )
+
+
+def _public_comment(comment: str) -> str:
+    """Убирает служебный маркер iiko:guid из текста для UI."""
+    text = (comment or "").strip()
+    if not text.startswith("iiko:"):
+        return text
+    parts = text.split(None, 1)
+    return parts[1].strip() if len(parts) > 1 else ""
 
 
 def _card_view(
