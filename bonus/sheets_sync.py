@@ -139,9 +139,28 @@ def _service_account_info(settings: Any) -> dict[str, Any]:
     if path:
         return json.loads(Path(path).read_text(encoding="utf-8"))
     raw = settings.google_service_account_json.strip()
-    if raw.startswith("{"):
-        return json.loads(raw)
-    raise RuntimeError("Нет GOOGLE_SERVICE_ACCOUNT_JSON или GOOGLE_SERVICE_ACCOUNT_FILE")
+    if not raw:
+        raise RuntimeError("Нет GOOGLE_SERVICE_ACCOUNT_JSON или GOOGLE_SERVICE_ACCOUNT_FILE")
+    return _parse_service_account_json(raw)
+
+
+def _parse_service_account_json(raw: str) -> dict[str, Any]:
+    """Разбирает JSON ключа; терпит кавычки и \\n из панелей хостинга."""
+    text = raw.strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in "'\"":
+        text = text[1:-1].strip()
+    if "\\n" in text and "\n" not in text:
+        text = text.replace("\\n", "\n").replace("\\t", "\t").replace('\\"', '"')
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            "GOOGLE_SERVICE_ACCOUNT_JSON повреждён: вставьте ключ одной строкой "
+            "без лишних кавычек вокруг всего JSON"
+        ) from exc
+    if not isinstance(data, dict):
+        raise RuntimeError("GOOGLE_SERVICE_ACCOUNT_JSON должен быть объектом JSON")
+    return data
 
 
 def _spreadsheet() -> Any:
