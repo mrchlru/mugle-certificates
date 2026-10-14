@@ -721,7 +721,7 @@ def debit_for_iiko(
     """Списывает бонусы до суммы заказа; при нехватке — весь остаток. Идемпотентно по external_id."""
     marker = _iiko_marker(external_id)
     existing = _find_iiko_debit(db, marker)
-    if existing is not None:
+    if existing is not None and not _is_reversed(db, existing.id):
         unpaid = max(0, amount - existing.amount)
         return IikoDebitResult(
             transaction=existing,
@@ -788,8 +788,9 @@ def refund_for_iiko(db: Session, external_id: str, reason: str = "") -> Transact
     tx = _find_iiko_debit(db, marker)
     if tx is None:
         raise BonusError("Операция iiko не найдена")
-    if _is_reversed(db, tx.id):
-        raise BonusError("Эта операция уже отменена")
+    existing_reversal = _reversal_of(db, tx.id)
+    if existing_reversal is not None:
+        return existing_reversal
     certificate = db.get(Certificate, tx.certificate_id)
     if certificate is None:
         raise BonusError("Сертификат не найден")
@@ -811,11 +812,21 @@ def refund_for_iiko(db: Session, external_id: str, reason: str = "") -> Transact
     )
     try:
         db.commit()
-    except IntegrityError as exc:
+    except IntegrityError:
         db.rollback()
-        raise BonusError("Эта операция уже отменена") from exc
+        again = _reversal_of(db, tx.id)
+        if again is not None:
+            return again
+        raise BonusError("Эта операция уже отменена")
     db.refresh(reversal)
     return reversal
+
+
+def _reversal_of(db: Session, tx_id: int) -> Transaction | None:
+    """Находит проводку-отмену для списания, если она уже есть."""
+    return db.scalar(
+        select(Transaction).where(Transaction.reversal_of_id == tx_id).limit(1)
+    )
 
 
 def _iiko_marker(external_id: str) -> str:
