@@ -146,21 +146,65 @@ def _service_account_info(settings: Any) -> dict[str, Any]:
 
 def _parse_service_account_json(raw: str) -> dict[str, Any]:
     """Разбирает JSON ключа; терпит кавычки и \\n из панелей хостинга."""
+    text = _normalize_service_account_json_text(raw)
+    last_error: json.JSONDecodeError | None = None
+    for candidate in (text, _unescape_env_json_whitespace(text)):
+        try:
+            data = json.loads(candidate)
+        except json.JSONDecodeError as exc:
+            last_error = exc
+            continue
+        if not isinstance(data, dict):
+            raise RuntimeError("GOOGLE_SERVICE_ACCOUNT_JSON должен быть объектом JSON")
+        return data
+    raise RuntimeError(
+        "GOOGLE_SERVICE_ACCOUNT_JSON не разбирается: в Timeweb вставьте компактный "
+        "JSON одной строкой без кавычек вокруг всего значения"
+    ) from last_error
+
+
+def _normalize_service_account_json_text(raw: str) -> str:
+    """Убирает обёртку кавычек и вырезает объект `{...}` из экспорта Timeweb."""
     text = raw.strip()
     if len(text) >= 2 and text[0] == text[-1] and text[0] in "'\"":
         text = text[1:-1].strip()
-    if "\\n" in text and "\n" not in text:
-        text = text.replace("\\n", "\n").replace("\\t", "\t").replace('\\"', '"')
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(
-            "GOOGLE_SERVICE_ACCOUNT_JSON повреждён: вставьте ключ одной строкой "
-            "без лишних кавычек вокруг всего JSON"
-        ) from exc
-    if not isinstance(data, dict):
-        raise RuntimeError("GOOGLE_SERVICE_ACCOUNT_JSON должен быть объектом JSON")
-    return data
+    start = text.find("{")
+    end = text.rfind("}")
+    if start >= 0 and end > start:
+        return text[start : end + 1]
+    return text
+
+
+def _unescape_env_json_whitespace(text: str) -> str:
+    """Превращает \\n/\\t вне строк JSON в пробелы; внутри строк (PEM) не трогает."""
+    out: list[str] = []
+    in_string = False
+    escape = False
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if in_string:
+            out.append(char)
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            index += 1
+            continue
+        if char == '"':
+            in_string = True
+            out.append(char)
+            index += 1
+            continue
+        if char == "\\" and index + 1 < len(text) and text[index + 1] in "ntr":
+            out.append({"n": "\n", "t": "\t", "r": "\r"}[text[index + 1]])
+            index += 2
+            continue
+        out.append(char)
+        index += 1
+    return "".join(out)
 
 
 def _spreadsheet() -> Any:
