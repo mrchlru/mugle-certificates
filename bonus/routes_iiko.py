@@ -1,6 +1,6 @@
 """API для плагина iikoFront: lookup / списание бонусов / возврат.
 
-Плагин после списания сам вешает тип оплаты «Mugle Bonus» на заказ в iiko
+Плагин после списания сам вешает тип оплаты на заказ в iiko
 (как Statix). Сюда уходит снимок чека для журнала HR.
 """
 
@@ -162,7 +162,7 @@ def iiko_debit(
             amount=amount,
             external_id=body.transaction_id,
             restaurant=body.restaurant,
-            comment=body.comment or "Mugle Bonus",
+            comment=body.comment or "Pulse Bonus",
             order_ref=body.order_number or body.table,
             cheque_detail=_cheque_text(body),
         )

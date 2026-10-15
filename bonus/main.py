@@ -38,7 +38,7 @@ def create_app() -> FastAPI:
     settings = get_settings()
     uploads = settings.data_path() / "uploads"
     uploads.mkdir(parents=True, exist_ok=True)
-    app = FastAPI(title="Mugle Rest — сертификаты", version=__version__, lifespan=_lifespan)
+    app = FastAPI(title="Pulse Bonus — сертификаты", version=__version__, lifespan=_lifespan)
     app.add_middleware(
         SessionMiddleware,
         secret_key=settings.secret_key,
