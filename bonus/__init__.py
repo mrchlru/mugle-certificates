@@ -1,3 +1,3 @@
-"""Pulse Bonus — корпоративные сертификаты (замена Statix Bonus)."""
+"""Teams Bonus — корпоративные сертификаты (замена Statix Bonus)."""
 
 __version__ = "1.0.7"

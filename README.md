@@ -1,4 +1,4 @@
-# Pulse Bonus
+# Teams Bonus
 
 Корпоративные сертификаты (замена Statix Bonus).
 

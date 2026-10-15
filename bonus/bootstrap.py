@@ -18,10 +18,10 @@ def bootstrap(settings: Settings) -> None:
     settings.data_path().mkdir(parents=True, exist_ok=True)
     (settings.data_path() / "uploads").mkdir(parents=True, exist_ok=True)
     if s3_enabled(settings):
-        print("Pulse Bonus: обложки → S3", flush=True)
+        print("Teams Bonus: обложки → S3", flush=True)
     else:
         print(
-            "Pulse Bonus: S3 выключен — обложки на локальном диске, "
+            "Teams Bonus: S3 выключен — обложки на локальном диске, "
             "при деплое без тома пропадут",
             flush=True,
         )
@@ -52,7 +52,7 @@ def bootstrap(settings: Settings) -> None:
         db.refresh(hr)
         db.refresh(manager)
         lines = [
-            "Pulse Bonus — сертификаты",
+            "Teams Bonus — сертификаты",
             f"HR: {hr.login} / {settings.hr_password}",
             f"Управляющий: {manager.login} / {settings.manager_password}",
         ]
@@ -97,4 +97,4 @@ def _write_credentials(path: Path, lines: list[str]) -> None:
     if path.exists():
         return
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print(f"Pulse Bonus: первые входы записаны в {path}", flush=True)
+    print(f"Teams Bonus: первые входы записаны в {path}", flush=True)

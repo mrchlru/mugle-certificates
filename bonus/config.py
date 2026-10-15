@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     seed_demo: bool = True
     hr_login: str = "hr"
     hr_password: str = "mugle-hr"
-    hr_name: str = "HR Pulse Bonus"
+    hr_name: str = "HR Teams Bonus"
     manager_login: str = "manager"
     manager_password: str = "mugle-desk"
     manager_name: str = "Управляющий"

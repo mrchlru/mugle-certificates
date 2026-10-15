@@ -162,7 +162,7 @@ def iiko_debit(
             amount=amount,
             external_id=body.transaction_id,
             restaurant=body.restaurant,
-            comment=body.comment or "Pulse Bonus",
+            comment=body.comment or "Teams Bonus",
             order_ref=body.order_number or body.table,
             cheque_detail=_cheque_text(body),
         )
