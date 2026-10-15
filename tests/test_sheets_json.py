@@ -1,6 +1,6 @@
 """Разбор GOOGLE_SERVICE_ACCOUNT_JSON из формата Timeweb."""
 
-from bonus.sheets_sync import _parse_service_account_json
+from bonus.sheets_sync import _normalize_card_number, _parse_service_account_json
 
 
 def test_parse_compact_json() -> None:
@@ -24,3 +24,9 @@ def test_parse_timeweb_pretty_with_literal_newlines() -> None:
     assert data["project_id"] == "demo"
     assert data["private_key"].startswith("-----BEGIN PRIVATE KEY-----\n")
     assert "\nABC\n" in data["private_key"]
+
+
+def test_normalize_card_number() -> None:
+    assert _normalize_card_number("MR-00003") == "MR-00003"
+    assert _normalize_card_number("mr-3") == "MR-00003"
+    assert _normalize_card_number("MR00003") == "MR-00003"

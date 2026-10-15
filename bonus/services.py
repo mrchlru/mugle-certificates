@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from bonus.models import Certificate, CertificateStatus, Role, Transaction, TxType, User
 from bonus.security import generate_password, hash_password
-from bonus.values import as_utc, format_date, today_msk
+from bonus.values import MSK, as_utc, format_date, today_msk
 
 UNDO_WINDOW = timedelta(minutes=15)
 
@@ -120,7 +120,7 @@ def debit_certificate(
     if apply_expiry_writeoff(db, certificate):
         db.commit()
         db.refresh(certificate)
-        _sync_usage(certificate, amount=0, restaurant="", expired=True)
+        _sync_usage(db, certificate, expired=True)
     _ensure_can_debit(certificate, amount)
     changed = _change_balance(db, certificate.id, -amount, require_active=True)
     if not changed:
@@ -147,7 +147,7 @@ def debit_certificate(
     )
     db.commit()
     db.refresh(tx)
-    _sync_usage(certificate, amount=tx.amount, restaurant=place)
+    _sync_usage(db, certificate)
     return tx
 
 
@@ -183,6 +183,8 @@ def undo_debit(db: Session, tx_id: int, actor: User, reason: str) -> Transaction
         db.rollback()
         raise BonusError("Это списание уже отменено") from exc
     db.refresh(reversal)
+    db.refresh(certificate)
+    _sync_usage(db, certificate)
     return reversal
 
 
@@ -264,7 +266,7 @@ def set_certificate_expiry(db: Session, certificate: Certificate, expires_on: da
     db.commit()
     db.refresh(certificate)
     if expired:
-        _sync_usage(certificate, amount=0, restaurant="", expired=True)
+        _sync_usage(db, certificate, expired=True)
 
 
 def apply_expiry_writeoff(db: Session, certificate: Certificate) -> bool:
@@ -307,7 +309,7 @@ def apply_due_expiries(db: Session) -> int:
     if changed:
         db.commit()
         for certificate in expired_cards:
-            _sync_usage(certificate, amount=0, restaurant="", expired=True)
+            _sync_usage(db, certificate, expired=True)
     return changed
 
 
@@ -703,7 +705,7 @@ def lookup_for_iiko(db: Session, code: str) -> Certificate:
     db.commit()
     db.refresh(certificate)
     if expired:
-        _sync_usage(certificate, amount=0, restaurant="", expired=True)
+        _sync_usage(db, certificate, expired=True)
     return certificate
 
 
@@ -733,7 +735,7 @@ def debit_for_iiko(
     if apply_expiry_writeoff(db, certificate):
         db.commit()
         db.refresh(certificate)
-        _sync_usage(certificate, amount=0, restaurant="", expired=True)
+        _sync_usage(db, certificate, expired=True)
     if certificate.status != CertificateStatus.active:
         raise BonusError("Сертификат заблокирован")
     if certificate.expires_on is not None and certificate.expires_on < today_msk():
@@ -772,7 +774,7 @@ def debit_for_iiko(
     db.commit()
     db.refresh(certificate)
     db.refresh(tx)
-    _sync_usage(certificate, amount=paid, restaurant=place)
+    _sync_usage(db, certificate)
     return IikoDebitResult(
         transaction=tx,
         paid=paid,
@@ -819,6 +821,8 @@ def refund_for_iiko(db: Session, external_id: str, reason: str = "") -> Transact
             return again
         raise BonusError("Эта операция уже отменена")
     db.refresh(reversal)
+    db.refresh(certificate)
+    _sync_usage(db, certificate)
     return reversal
 
 
@@ -932,21 +936,59 @@ def _sync_issue(certificate: Certificate, holder: User, segment_name: str) -> No
 
 
 def _sync_usage(
+    db: Session,
     certificate: Certificate,
     *,
-    amount: int,
-    restaurant: str,
     expired: bool = False,
 ) -> None:
-    from bonus.sheets_sync import sync_certificate_usage
+    """Пишет карту и расходы в Google Sheets по журналу (без отменённых списаний)."""
+    from bonus.sheets_sync import SheetUsageEntry, sync_certificate_usage
 
+    holder = certificate.holder
+    segment_name = ""
+    if certificate.segment is not None:
+        segment_name = (certificate.segment.name or "").strip()
+    usages: list[SheetUsageEntry] = []
+    if not expired:
+        usages = _sheet_usages(db, certificate.id)
     sync_certificate_usage(
         certificate,
-        used_on=today_msk(),
-        amount_kopecks=amount,
-        restaurant=restaurant,
+        holder,
+        usages=usages,
+        segment_name=segment_name,
         expired=expired,
     )
+
+
+def _sheet_usages(db: Session, certificate_id: int) -> list:
+    """Неотменённые списания карты для колонок Google Sheets."""
+    from bonus.sheets_sync import SheetUsageEntry
+
+    reversed_ids = select(Transaction.reversal_of_id).where(
+        Transaction.reversal_of_id.is_not(None)
+    )
+    rows = db.scalars(
+        select(Transaction)
+        .where(
+            Transaction.certificate_id == certificate_id,
+            Transaction.tx_type == TxType.debit,
+            Transaction.id.not_in(reversed_ids),
+        )
+        .order_by(Transaction.id)
+    ).all()
+    return [
+        SheetUsageEntry(
+            used_on=as_utc(tx.created_at).astimezone(MSK).date(),
+            amount_kopecks=tx.amount,
+            restaurant=tx.restaurant or "",
+        )
+        for tx in rows
+    ]
+
+
+def push_certificate_to_sheets(db: Session, certificate: Certificate) -> None:
+    """Дозаписывает карту и все расходы из журнала в Google Sheets."""
+    _sync_usage(db, certificate)
 
 
 _TRANSLIT = {

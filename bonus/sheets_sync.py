@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,15 @@ logger = logging.getLogger("bonus.sheets")
 _EXPIRED_MARK = "истек"
 
 
+@dataclass(frozen=True)
+class SheetUsageEntry:
+    """Одно списание для колонок использования в таблице."""
+
+    used_on: date
+    amount_kopecks: int
+    restaurant: str
+
+
 def sheets_enabled() -> bool:
     """Включена ли синхронизация (есть таблица и ключ сервисного аккаунта)."""
     settings = get_settings()
@@ -39,61 +49,141 @@ def sync_certificate_issued(
     *,
     segment_name: str = "",
 ) -> None:
-    """Добавляет строку карты на нужный лист после выпуска."""
+    """Добавляет строку карты на нужный лист после выпуска (без дублей)."""
     if not sheets_enabled():
         return
     try:
         kind = parse_ledger_sheet(certificate.ledger_sheet)
         worksheet = _worksheet(kind)
-        row = _issue_row(kind, certificate, holder, segment_name=segment_name)
-        worksheet.append_row(row, value_input_option="USER_ENTERED")
+        row_index = _ensure_certificate_row(
+            worksheet,
+            kind,
+            certificate,
+            holder,
+            segment_name=segment_name,
+        )
+        logger.info(
+            "Google Sheets: выпуск %s → лист «%s», строка %s",
+            certificate.public_number,
+            worksheet.title,
+            row_index,
+        )
     except Exception:
         logger.exception("Google Sheets: не удалось записать выпуск %s", certificate.public_number)
 
 
 def sync_certificate_usage(
     certificate: Certificate,
+    holder: User,
     *,
-    used_on: date | None,
-    amount_kopecks: int,
-    restaurant: str,
+    usages: list[SheetUsageEntry],
+    segment_name: str = "",
     expired: bool = False,
 ) -> None:
-    """Дописывает использование или помечает «истек» в строке карты."""
+    """Пишет строку карты и колонки использования по журналу списаний."""
     if not sheets_enabled():
         return
     try:
         kind = parse_ledger_sheet(certificate.ledger_sheet)
         worksheet = _worksheet(kind)
-        row_index = _find_row(worksheet, certificate.public_number)
-        if row_index is None:
-            logger.warning(
-                "Google Sheets: карта %s не найдена на листе %s",
-                certificate.public_number,
-                ledger_title(kind),
-            )
-            return
+        row_index = _ensure_certificate_row(
+            worksheet,
+            kind,
+            certificate,
+            holder,
+            segment_name=segment_name,
+        )
         date_col, amount_col, place_col = _usage_columns(kind)
         if expired:
             _set_cell(worksheet, row_index, date_col, _EXPIRED_MARK)
+            logger.info(
+                "Google Sheets: %s помечена «истек» на листе «%s»",
+                certificate.public_number,
+                worksheet.title,
+            )
             return
-        used = used_on or today_msk()
-        date_text = format_date(used)
-        amount_text = format_money_plain(amount_kopecks)
-        place = (restaurant or "").strip() or "—"
-        if ledger_is_single_use(kind):
-            _set_cell(worksheet, row_index, date_col, date_text)
-            _set_cell(worksheet, row_index, amount_col, amount_text)
-            _set_cell(worksheet, row_index, place_col, place)
-            return
-        _append_list_cell(worksheet, row_index, date_col, date_text)
-        _append_list_cell(worksheet, row_index, amount_col, amount_text)
-        _append_list_cell(worksheet, row_index, place_col, place)
+        _write_usage_columns(
+            worksheet,
+            kind,
+            row_index,
+            date_col,
+            amount_col,
+            place_col,
+            usages,
+        )
+        logger.info(
+            "Google Sheets: %s — %s списаний на листе «%s», строка %s",
+            certificate.public_number,
+            len(usages),
+            worksheet.title,
+            row_index,
+        )
     except Exception:
         logger.exception(
             "Google Sheets: не удалось обновить использование %s",
             certificate.public_number,
         )
+
+
+def _ensure_certificate_row(
+    worksheet: Any,
+    kind: LedgerSheet,
+    certificate: Certificate,
+    holder: User,
+    *,
+    segment_name: str,
+) -> int:
+    """Находит строку карты; если выпуска не было в таблице — дописывает строку."""
+    row_index = _find_row(worksheet, certificate.public_number)
+    if row_index is not None:
+        return row_index
+    row = _issue_row(kind, certificate, holder, segment_name=segment_name)
+    worksheet.append_row(row, value_input_option="USER_ENTERED")
+    logger.info(
+        "Google Sheets: добавлена карта %s на лист «%s»",
+        certificate.public_number,
+        worksheet.title,
+    )
+    found = _find_row(worksheet, certificate.public_number)
+    if found is None:
+        raise RuntimeError(
+            f"Не удалось найти карту {certificate.public_number} после добавления строки"
+        )
+    return found
+
+
+def _write_usage_columns(
+    worksheet: Any,
+    kind: LedgerSheet,
+    row_index: int,
+    date_col: int,
+    amount_col: int,
+    place_col: int,
+    usages: list[SheetUsageEntry],
+) -> None:
+    """Перезаписывает колонки использования по полному списку из журнала."""
+    if not usages:
+        _set_cell(worksheet, row_index, date_col, "")
+        _set_cell(worksheet, row_index, amount_col, "")
+        _set_cell(worksheet, row_index, place_col, "")
+        return
+    if ledger_is_single_use(kind):
+        last = usages[-1]
+        _set_cell(worksheet, row_index, date_col, format_date(last.used_on))
+        _set_cell(worksheet, row_index, amount_col, format_money_plain(last.amount_kopecks))
+        _set_cell(
+            worksheet,
+            row_index,
+            place_col,
+            (last.restaurant or "").strip() or "—",
+        )
+        return
+    dates = ", ".join(format_date(item.used_on) for item in usages)
+    amounts = ", ".join(format_money_plain(item.amount_kopecks) for item in usages)
+    places = ", ".join((item.restaurant or "").strip() or "—" for item in usages)
+    _set_cell(worksheet, row_index, date_col, dates)
+    _set_cell(worksheet, row_index, amount_col, amounts)
+    _set_cell(worksheet, row_index, place_col, places)
 
 
 def ensure_ledger_worksheets() -> list[str]:
@@ -215,9 +305,8 @@ def _spreadsheet() -> Any:
 def _worksheet(kind: LedgerSheet) -> Any:
     title = ledger_title(kind)
     book = _spreadsheet()
-    try:
-        worksheet = book.worksheet(title)
-    except Exception:
+    worksheet = _find_worksheet(book, title)
+    if worksheet is None:
         worksheet = book.add_worksheet(title=title, rows=2000, cols=len(ledger_headers(kind)))
         worksheet.append_row(list(ledger_headers(kind)), value_input_option="USER_ENTERED")
         return worksheet
@@ -230,6 +319,33 @@ def _worksheet(kind: LedgerSheet) -> Any:
         if len(current) == 0:
             worksheet.update("A1", [headers])
     return worksheet
+
+
+def _find_worksheet(book: Any, title: str) -> Any | None:
+    """Ищет вкладку по имени без учёта регистра; при дублях берёт самую заполненную."""
+    needle = title.casefold()
+    exact: Any | None = None
+    folded: list[Any] = []
+    for worksheet in book.worksheets():
+        current = (worksheet.title or "").strip()
+        if current == title:
+            exact = worksheet
+            break
+        if current.casefold() == needle:
+            folded.append(worksheet)
+    if exact is not None:
+        return exact
+    if not folded:
+        return None
+    if len(folded) == 1:
+        return folded[0]
+    return max(folded, key=_worksheet_data_rows)
+
+
+def _worksheet_data_rows(worksheet: Any) -> int:
+    """Сколько непустых строк в колонке A (кроме заголовка)."""
+    values = worksheet.col_values(1)
+    return sum(1 for index, value in enumerate(values) if index > 0 and str(value).strip())
 
 
 def _issue_row(
@@ -299,27 +415,28 @@ def _last_index(items: tuple[str, ...], name: str) -> int:
 
 def _find_row(worksheet: Any, public_number: str) -> int | None:
     values = worksheet.col_values(1)
-    needle = public_number.strip()
+    needle = _normalize_card_number(public_number)
     for index, value in enumerate(values, start=1):
         if index == 1:
             continue
-        if str(value).strip() == needle:
+        if _normalize_card_number(str(value)) == needle:
             return index
     return None
 
 
+def _normalize_card_number(value: str) -> str:
+    """Сводит номер карты к виду MR-00003 для сравнения."""
+    compact = "".join(ch for ch in (value or "").upper() if ch.isalnum())
+    if not compact.startswith("MR"):
+        return (value or "").strip().upper()
+    digits = compact[2:]
+    if digits.isdigit():
+        return f"MR-{int(digits):05d}"
+    return compact
+
+
 def _set_cell(worksheet: Any, row: int, col: int, value: str) -> None:
     worksheet.update_cell(row, col, value)
-
-
-def _append_list_cell(worksheet: Any, row: int, col: int, value: str) -> None:
-    current = str(worksheet.cell(row, col).value or "").strip()
-    if current == "" or current.casefold() == _EXPIRED_MARK:
-        _set_cell(worksheet, row, col, value)
-        return
-    if value in {part.strip() for part in current.split(",")}:
-        return
-    _set_cell(worksheet, row, col, f"{current}, {value}")
 
 
 def _format_dt(value: datetime | None) -> str:
