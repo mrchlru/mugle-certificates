@@ -974,13 +974,19 @@ body:has(.wallet-wrap) .flash {
   background: var(--soft);
 }
 
+.cert-ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
 .swatch {
-  display: inline-block;
+  display: block;
+  flex: 0 0 auto;
   width: 10px;
   height: 10px;
-  margin-left: 8px;
   border-radius: 50%;
-  vertical-align: middle;
 }
 
 .ledger-field {

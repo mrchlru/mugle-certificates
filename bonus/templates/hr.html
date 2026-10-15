@@ -49,8 +49,10 @@
       {% for card in cards %}
       <tr>
         <td>
-          <a href="/hr/c/{{ card.id }}">{{ card.public_number }}</a>
-          <span class="swatch" style="background: {{ card.color }}"></span>
+          <span class="cert-ref">
+            <a href="/hr/c/{{ card.id }}">{{ card.public_number }}</a>
+            <span class="swatch" style="background: {{ card.color }}" title="{{ card.color }}"></span>
+          </span>
         </td>
         <td>
           {{ card.holder_name }}
