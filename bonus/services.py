@@ -364,6 +364,28 @@ def update_holder_profile(
     db.commit()
 
 
+def update_certificate_profile(
+    db: Session,
+    certificate: Certificate,
+    *,
+    company: str,
+    birth_date: date | None,
+) -> None:
+    """Обновляет ООО и дату рождения на карте."""
+    from bonus.ledger import ledger_needs_birth_date, parse_ledger_sheet
+
+    cleaned_company = " ".join(company.split())
+    if not cleaned_company:
+        raise BonusError("Укажите ООО")
+    sheet = parse_ledger_sheet(certificate.ledger_sheet)
+    if ledger_needs_birth_date(sheet) and birth_date is None:
+        raise BonusError("Укажите дату рождения")
+    certificate.company = cleaned_company[:200]
+    certificate.birth_date = birth_date
+    db.commit()
+    db.refresh(certificate)
+
+
 def set_certificate_expiry(db: Session, certificate: Certificate, expires_on: date | None) -> None:
     """Задаёт или снимает срок действия сертификата."""
     certificate.expires_on = expires_on

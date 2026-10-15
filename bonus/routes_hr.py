@@ -52,6 +52,7 @@ from bonus.services import (
     set_blocked,
     set_certificate_expiry,
     set_user_active,
+    update_certificate_profile,
     update_holder_profile,
     update_staff,
 )
@@ -509,12 +510,14 @@ def name_submit(
     db: Session = Depends(get_db),
     user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
     full_name: str = Form(""),
+    company: str = Form(""),
     department: str = Form(""),
     job_title: str = Form(""),
+    birth_date: str = Form(""),
     phone: str = Form(""),
     csrf_token: str = Form(""),
 ):
-    """Обновляет ФИО и внутренние поля сотрудника."""
+    """Обновляет ФИО, ООО, дату рождения и внутренние поля сотрудника."""
     certificate = _certificate_or_redirect(db, request, certificate_id)
     if certificate is None:
         return RedirectResponse("/hr", status_code=303)
@@ -523,6 +526,7 @@ def name_submit(
         guard_csrf(request, csrf_token)
         if holder is None:
             raise BonusError("Сотрудник не найден")
+        born = _expires(birth_date)
         update_holder_profile(
             db,
             holder,
@@ -530,6 +534,12 @@ def name_submit(
             department=department,
             job_title=job_title,
             phone=phone,
+        )
+        update_certificate_profile(
+            db,
+            certificate,
+            company=company,
+            birth_date=born,
         )
         db.refresh(certificate)
         db.refresh(holder)

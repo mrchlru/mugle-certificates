@@ -53,6 +53,9 @@ class CardView:
     department: str
     job_title: str
     phone: str
+    company: str
+    birth_date: date | None
+    ledger_sheet: str
     status: CertificateStatus
     can_spend: bool
     color: str
@@ -378,6 +381,9 @@ def _card_view(
         department="" if holder is None else holder.department,
         job_title="" if holder is None else holder.job_title,
         phone="" if holder is None else holder.phone,
+        company=(certificate.company or "").strip(),
+        birth_date=certificate.birth_date,
+        ledger_sheet=certificate.ledger_sheet or "",
         status=certificate.status,
         can_spend=_can_spend(certificate),
         color=certificate.color or "#00A8A8",

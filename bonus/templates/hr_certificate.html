@@ -23,11 +23,17 @@
       <label class="field">ФИО
         <input name="full_name" value="{{ card.holder_name }}" required>
       </label>
-      <label class="field">Отдел
+      <label class="field">ООО
+        <input name="company" value="{{ card.company }}" maxlength="200" required placeholder="Юрлицо">
+      </label>
+      <label class="field">Ресторан / офис
         <input name="department" value="{{ card.department }}" maxlength="120">
       </label>
       <label class="field">Должность
         <input name="job_title" value="{{ card.job_title }}" maxlength="120">
+      </label>
+      <label class="field">Дата рождения
+        <input type="date" name="birth_date" value="{{ card.birth_date.isoformat() if card.birth_date else '' }}" {% if card.ledger_sheet in ['birthday', 'gift_birthday'] %}required{% endif %}>
       </label>
       <label class="field">Телефон
         <input name="phone" value="{{ card.phone }}" maxlength="40" inputmode="tel">
