@@ -74,8 +74,13 @@ def sync_certificate_issued(
             worksheet.title,
             row_index,
         )
-    except Exception:
-        logger.exception("Google Sheets: не удалось записать выпуск %s", certificate.public_number)
+    except Exception as exc:
+        logger.exception(
+            "Google Sheets: не удалось записать выпуск %s (%s). %s",
+            certificate.public_number,
+            exc,
+            _permission_hint() if _is_permission_error(exc) else "",
+        )
 
 
 def sync_certificate_usage(
@@ -131,11 +136,19 @@ def sync_certificate_usage(
             row_index,
             certificate.balance,
         )
-    except Exception:
+    except Exception as exc:
         logger.exception(
-            "Google Sheets: не удалось обновить использование %s",
+            "Google Sheets: не удалось обновить использование %s (%s). %s",
             certificate.public_number,
+            exc,
+            _permission_hint() if _is_permission_error(exc) else "",
         )
+
+
+def _is_permission_error(exc: BaseException) -> bool:
+    """Google ответил 403 / нет прав на таблицу."""
+    text = str(exc).casefold()
+    return "403" in text or "permission" in text or "не удалось создать вкладку" in text
 
 
 def _ensure_certificate_row(
@@ -371,7 +384,18 @@ def _worksheet(kind: LedgerSheet) -> Any:
     book = _spreadsheet()
     worksheet = _find_worksheet(book, title)
     if worksheet is None:
-        worksheet = book.add_worksheet(title=title, rows=2000, cols=len(ledger_headers(kind)))
+        existing = _worksheet_titles(book)
+        try:
+            worksheet = book.add_worksheet(
+                title=title,
+                rows=2000,
+                cols=len(ledger_headers(kind)),
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"Лист «{title}» не найден (в таблице: {existing or 'пусто'}). "
+                f"Не удалось создать вкладку: {exc}. {_permission_hint()}"
+            ) from exc
         worksheet.append_row(list(ledger_headers(kind)), value_input_option="USER_ENTERED")
         return worksheet
     headers = list(ledger_headers(kind))
@@ -383,6 +407,31 @@ def _worksheet(kind: LedgerSheet) -> Any:
         if len(current) == 0:
             worksheet.update("A1", [headers])
     return worksheet
+
+
+def _worksheet_titles(book: Any) -> str:
+    """Список имён вкладок для сообщения об ошибке."""
+    return ", ".join(f"«{(ws.title or '').strip()}»" for ws in book.worksheets())
+
+
+def _permission_hint() -> str:
+    """Подсказка: таблицу нужно расшарить на сервисный аккаунт как редактор."""
+    email = _service_account_email()
+    target = email or "email из GOOGLE_SERVICE_ACCOUNT_JSON (client_email)"
+    return (
+        f"Откройте Google Таблицу → «Настройки доступа» → добавьте {target} "
+        "с правом «Редактор». Viewer / комментирование недостаточно. "
+        "Проверьте также GOOGLE_SHEETS_SPREADSHEET_ID."
+    )
+
+
+def _service_account_email() -> str:
+    """Email сервисного аккаунта из ключа, если ключ читается."""
+    try:
+        info = _service_account_info(get_settings())
+    except Exception:
+        return ""
+    return str(info.get("client_email") or "").strip()
 
 
 def _find_worksheet(book: Any, title: str) -> Any | None:
