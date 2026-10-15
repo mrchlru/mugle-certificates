@@ -191,15 +191,27 @@ def undo_debit(db: Session, tx_id: int, actor: User, reason: str) -> Transaction
 def credit_certificate(
     db: Session,
     certificate: Certificate,
-    actor: User,
+    actor: User | None,
     amount: int,
     comment: str,
+    *,
+    grow_nominal: bool = True,
 ) -> Transaction:
-    """Добавляет бонусы к остатку. Номинал растёт на ту же сумму, чтобы карточка не врала."""
+    """Добавляет бонусы к остатку.
+
+    Для ручного начисления HR номинал растёт вместе с суммой.
+    Автоначисление по сегменту оставляет номинал как первоначальную сумму.
+    """
     if amount <= 0:
         raise BonusError("Сумма начисления должна быть больше нуля")
     text = comment.strip() or "Начисление бонусов"
-    changed = _change_balance(db, certificate.id, amount, require_active=False, grow_nominal=True)
+    changed = _change_balance(
+        db,
+        certificate.id,
+        amount,
+        require_active=False,
+        grow_nominal=grow_nominal,
+    )
     if not changed:
         db.rollback()
         raise BonusError("Не удалось начислить бонусы")
@@ -207,7 +219,7 @@ def credit_certificate(
     tx = _add_transaction(
         db,
         certificate_id=certificate.id,
-        actor_id=actor.id,
+        actor_id=None if actor is None else actor.id,
         tx_type=TxType.credit,
         amount=amount,
         balance_after=certificate.balance,

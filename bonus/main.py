@@ -1,5 +1,6 @@
 """Точка входа: один процесс для карточки, кассы и HR."""
 
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from starlette.responses import Response
 from starlette.types import Scope
 
 from bonus import __version__
+from bonus.accrual import accrual_worker
 from bonus.bootstrap import bootstrap
 from bonus.config import get_settings
 from bonus.db import configure_database, open_session
@@ -30,7 +32,15 @@ async def _lifespan(_app: FastAPI):
     (settings.data_path() / "uploads").mkdir(parents=True, exist_ok=True)
     configure_database(settings.normalized_database_url())
     bootstrap(settings)
-    yield
+    worker = asyncio.create_task(accrual_worker(), name="bonus-accrual")
+    try:
+        yield
+    finally:
+        worker.cancel()
+        try:
+            await worker
+        except asyncio.CancelledError:
+            pass
 
 
 def create_app() -> FastAPI:

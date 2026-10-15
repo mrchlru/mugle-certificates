@@ -70,7 +70,7 @@ CARD_COLORS: tuple[tuple[str, str], ...] = (
 ACCRUAL_CHOICES: tuple[tuple[str, str], ...] = (
     (AccrualPeriod.none.value, "Без начисления"),
     (AccrualPeriod.daily.value, "Ежедневно"),
-    (AccrualPeriod.monthly.value, "Ежемесячно"),
+    (AccrualPeriod.monthly.value, "Ежемесячно (1-го в 04:00 МСК)"),
     (AccrualPeriod.yearly.value, "Раз в год"),
 )
 
