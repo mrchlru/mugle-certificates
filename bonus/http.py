@@ -12,6 +12,7 @@ from bonus.catalog import accrual_label
 from bonus.config import get_settings
 from bonus.db import get_db, open_session
 from bonus.models import Role, User
+from bonus.roles import can_manage_staff, can_view_audit, role_label
 from bonus.security import csrf_ok, ensure_csrf, home_for, login_redirect, pop_flashes
 from bonus.services import BonusError
 from bonus.values import (
@@ -37,6 +38,9 @@ templates.env.globals["tx_label"] = tx_label
 templates.env.globals["format_short_code"] = format_short_code
 templates.env.globals["format_date"] = format_date
 templates.env.globals["accrual_label"] = accrual_label
+templates.env.globals["role_label"] = role_label
+templates.env.globals["can_manage_staff"] = can_manage_staff
+templates.env.globals["can_view_audit"] = can_view_audit
 
 
 class Redirect(Exception):

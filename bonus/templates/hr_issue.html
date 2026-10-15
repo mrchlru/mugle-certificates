@@ -97,6 +97,20 @@
             <span style="background: {{ value }}"></span>
           </label>
           {% endfor %}
+          <label class="color-option color-picker-option" title="Свой цвет">
+            <input type="radio" name="color" id="color-custom" value="#00A8A8">
+            <span class="color-picker-face" id="color-custom-face" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 3a5 5 0 0 1 5 5c0 2.2-1.5 3.5-3 5-.9.9-1.5 1.8-1.5 3a1.5 1.5 0 0 0 3 0"/>
+                <circle cx="7.5" cy="9.5" r="1.2" fill="currentColor" stroke="none"/>
+                <circle cx="10.2" cy="6.8" r="1.2" fill="currentColor" stroke="none"/>
+                <circle cx="13.8" cy="6.8" r="1.2" fill="currentColor" stroke="none"/>
+                <circle cx="16.5" cy="9.5" r="1.2" fill="currentColor" stroke="none"/>
+                <path d="M14.5 14.5l5.2 5.2a1.2 1.2 0 0 1-1.7 1.7L12.8 16.2"/>
+              </svg>
+            </span>
+            <input type="color" id="color-picker" class="color-picker-native" value="#00A8A8" aria-label="Выбрать свой цвет">
+          </label>
         </div>
       </fieldset>
       <label class="field">Шаблон баннера
@@ -251,6 +265,32 @@
   document.querySelectorAll('input[name="color"]').forEach(function (radio) {
     radio.addEventListener("change", syncPreview);
   });
+  var customRadio = document.getElementById("color-custom");
+  var colorPicker = document.getElementById("color-picker");
+  var customFace = document.getElementById("color-custom-face");
+  function applyCustomColor(raw) {
+    if (!customRadio || !colorPicker) return;
+    var value = String(raw || "").toUpperCase();
+    if (!/^#[0-9A-F]{6}$/.test(value)) return;
+    customRadio.value = value;
+    colorPicker.value = value;
+    customRadio.checked = true;
+    if (customFace) customFace.style.background = value;
+    syncPreview();
+  }
+  if (colorPicker) {
+    colorPicker.addEventListener("input", function () {
+      applyCustomColor(colorPicker.value);
+    });
+    colorPicker.addEventListener("change", function () {
+      applyCustomColor(colorPicker.value);
+    });
+  }
+  if (customRadio) {
+    customRadio.addEventListener("change", function () {
+      if (customRadio.checked) applyCustomColor(colorPicker ? colorPicker.value : customRadio.value);
+    });
+  }
   if (templates && discount) {
     templates.addEventListener("change", function () {
       applyDiscountFrom(templates.options[templates.selectedIndex]);

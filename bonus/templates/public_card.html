@@ -2,10 +2,10 @@
 {% block title %}{{ card.public_number }}{% endblock %}
 {% block header %}
 <header class="site-header wallet-header">
-  <a class="brand" href="/">
+  <span class="brand">
     <img src="/static/logo-teams.png" alt="Teams Bonus" width="52" height="52">
-  </a>
-  {% if user and user.role.value == 'hr' %}
+  </span>
+  {% if user and user.role.value in ['admin', 'hr', 'hrd'] %}
   <div class="header-side">
     <a class="text-link" href="/hr">В кабинет</a>
   </div>

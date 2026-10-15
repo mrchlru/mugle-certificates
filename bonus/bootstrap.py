@@ -1,8 +1,9 @@
-"""Первый запуск: пустая база получает HR, управляющего и демо-сертификат."""
+"""Первый запуск: пустая база получает админа, HR, управляющего и демо-сертификат."""
 
 from pathlib import Path
 
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from bonus.catalog import ensure_default_segments, list_segments, optimize_existing_templates
 from bonus.config import Settings
@@ -14,7 +15,7 @@ from bonus.storage import s3_enabled
 
 
 def bootstrap(settings: Settings) -> None:
-    """Создаёт каталог данных, сегменты и стартовые входы."""
+    """Создаёт каталог данных, сегменты, главного админа и стартовые входы."""
     settings.data_path().mkdir(parents=True, exist_ok=True)
     (settings.data_path() / "uploads").mkdir(parents=True, exist_ok=True)
     if s3_enabled(settings):
@@ -30,8 +31,9 @@ def bootstrap(settings: Settings) -> None:
         ensure_default_segments(db)
         optimize_existing_templates(db)
         apply_due_expiries(db)
-        exists = db.scalar(select(User.id).limit(1))
-        if exists is not None:
+        _ensure_admin(db, settings)
+        has_hr = db.scalar(select(User.id).where(User.role == Role.hr).limit(1))
+        if has_hr is not None:
             return
         hr = _staff(
             settings.hr_name,
@@ -53,6 +55,7 @@ def bootstrap(settings: Settings) -> None:
         db.refresh(manager)
         lines = [
             "Teams Bonus — сертификаты",
+            f"Админ: {settings.admin_login} / {settings.admin_password}",
             f"HR: {hr.login} / {settings.hr_password}",
             f"Управляющий: {manager.login} / {settings.manager_password}",
         ]
@@ -79,6 +82,39 @@ def bootstrap(settings: Settings) -> None:
         _write_credentials(settings.data_path() / "CREDENTIALS.txt", lines)
     finally:
         db.close()
+
+
+def _ensure_admin(db: Session, settings: Settings) -> None:
+    """Создаёт или обновляет главного администратора из переменных окружения."""
+    login = settings.admin_login.strip().casefold()
+    password = settings.admin_password.strip()
+    if login == "" or password == "":
+        print("Teams Bonus: ADMIN_LOGIN / ADMIN_PASSWORD пусты — админ не создан", flush=True)
+        return
+    if len(password) < 8:
+        print("Teams Bonus: ADMIN_PASSWORD короче 8 символов — админ не создан", flush=True)
+        return
+    admin = db.scalar(select(User).where(User.login == login))
+    if admin is None:
+        admin = User(
+            full_name=settings.admin_name.strip() or "Главный администратор",
+            login=login,
+            password_hash=hash_password(password),
+            role=Role.admin,
+            restaurant="",
+            is_active=True,
+            must_change_password=False,
+        )
+        db.add(admin)
+        print(f"Teams Bonus: создан главный администратор «{login}»", flush=True)
+    else:
+        admin.full_name = settings.admin_name.strip() or admin.full_name
+        admin.password_hash = hash_password(password)
+        admin.role = Role.admin
+        admin.is_active = True
+        admin.must_change_password = False
+        print(f"Teams Bonus: обновлён главный администратор «{login}»", flush=True)
+    db.commit()
 
 
 def _staff(full_name: str, login: str, password: str, role: Role, restaurant: str) -> User:

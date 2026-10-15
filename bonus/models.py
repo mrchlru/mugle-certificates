@@ -29,6 +29,23 @@ class Role(str, enum.Enum):
     employee = "employee"
     manager = "manager"
     hr = "hr"
+    hrd = "hrd"
+    admin = "admin"
+
+
+class AuditAction(str, enum.Enum):
+    """Действие сотрудника в админке для журнала контроля."""
+
+    staff_create = "staff_create"
+    staff_update = "staff_update"
+    staff_active = "staff_active"
+    certificate_issue = "certificate_issue"
+    certificate_credit = "certificate_credit"
+    certificate_block = "certificate_block"
+    certificate_unblock = "certificate_unblock"
+    certificate_expiry = "certificate_expiry"
+    debit_undo = "debit_undo"
+    import_rows = "import_rows"
 
 
 class CertificateStatus(str, enum.Enum):
@@ -176,6 +193,25 @@ class Transaction(Base):
     order_ref: Mapped[str] = mapped_column(String(80), default="")
     cheque_detail: Mapped[str] = mapped_column(Text, default="")
     reversal_of_id: Mapped[int | None] = mapped_column(ForeignKey("transactions.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: _utcnow(),
+        index=True,
+    )
+
+
+class AuditLog(Base):
+    """Запись о действии сотрудника в админке для контроля admin и HRD."""
+
+    __tablename__ = "audit_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    actor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    action: Mapped[str] = mapped_column(String(40), index=True)
+    target_type: Mapped[str] = mapped_column(String(40), default="")
+    target_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    summary: Mapped[str] = mapped_column(String(400), default="")
+    detail: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: _utcnow(),

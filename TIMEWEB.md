@@ -16,7 +16,9 @@
 | `APP_PUBLIC_URL` | `https://ваш-домен`. Этот адрес попадает в QR |
 | `HTTPS_ONLY` | `true` |
 | `SEED_DEMO` | `true` только для первой проверки. Для боевой базы — `false` |
-| `HR_LOGIN` / `HR_PASSWORD` | Первый вход HR, если база пустая |
+| `ADMIN_LOGIN` / `ADMIN_PASSWORD` | Главный администратор. Создаётся/обновляется при каждом старте из env. Полный доступ + раздел «Доступ» и «Контроль» |
+| `ADMIN_NAME` | Отображаемое имя главного администратора |
+| `HR_LOGIN` / `HR_PASSWORD` | Первый вход HR, если в базе ещё нет HR |
 | `MANAGER_LOGIN` / `MANAGER_PASSWORD` | Первый управляющий |
 | `MANAGER_RESTAURANT` | Ресторан, который пишется в журнал рядом с его именем |
 | `S3_ENDPOINT_URL` | Endpoint Object Storage (Timeweb / MinIO). Можно пустым для AWS |

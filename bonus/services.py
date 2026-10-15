@@ -337,9 +337,13 @@ def create_staff(
     restaurant: str,
     login: str = "",
 ) -> tuple[User, str]:
-    """Заводит управляющего или ещё одного сотрудника HR для ресторана."""
+    """Заводит управляющего, HR или HRD для админки / кассы."""
     if role == Role.employee:
         raise BonusError("Сотрудник появляется вместе с сертификатом")
+    if role == Role.admin:
+        raise BonusError("Главного администратора создают только через переменные окружения")
+    if role not in {Role.manager, Role.hr, Role.hrd}:
+        raise BonusError("Неизвестная роль")
     first = " ".join(first_name.split())
     last = " ".join(last_name.split())
     if len(first) < 1 or len(last) < 1:
@@ -390,11 +394,14 @@ def update_staff(
     login: str,
     password: str = "",
 ) -> User:
-    """Меняет данные управляющего или HR, опционально задаёт новый пароль."""
-    if user.role == Role.employee:
-        raise BonusError("Сотрудник с сертификатом здесь не редактируется")
+    """Меняет данные управляющего, HR или HRD, опционально задаёт новый пароль."""
+    _assert_editable_staff(user)
     if role == Role.employee:
         raise BonusError("Нельзя сделать этого пользователя обычным сотрудником")
+    if role == Role.admin:
+        raise BonusError("Главного администратора создают только через переменные окружения")
+    if role not in {Role.manager, Role.hr, Role.hrd}:
+        raise BonusError("Неизвестная роль")
     first = " ".join(first_name.split())
     last = " ".join(last_name.split())
     if len(first) < 1 or len(last) < 1:
@@ -425,11 +432,21 @@ def update_staff(
 
 
 def set_user_active(db: Session, user: User, active: bool) -> None:
-    """Отключает доступ, не стирая журнал. Последнего HR отключить нельзя."""
+    """Отключает доступ, не стирая журнал. Последнего HR и админа отключить нельзя."""
+    if user.role == Role.admin:
+        raise BonusError("Главного администратора отключают только через переменные окружения")
     if user.role == Role.hr and not active:
         _ensure_other_hr(db, user.id)
     user.is_active = active
     db.commit()
+
+
+def _assert_editable_staff(user: User) -> None:
+    """Запрещает править сотрудника с картой и главного администратора в UI."""
+    if user.role == Role.employee:
+        raise BonusError("Сотрудник с сертификатом здесь не редактируется")
+    if user.role == Role.admin:
+        raise BonusError("Главного администратора меняют только через переменные окружения")
 
 
 def _ensure_other_hr(db: Session, user_id: int) -> None:
@@ -548,7 +565,7 @@ def _ensure_can_debit(certificate: Certificate, amount: int) -> None:
 def _ensure_can_undo(db: Session, tx: Transaction, actor: User) -> None:
     if _is_reversed(db, tx.id):
         raise BonusError("Это списание уже отменено")
-    if actor.role == Role.hr:
+    if actor.role in {Role.admin, Role.hr, Role.hrd}:
         return
     if actor.role != Role.manager or tx.actor_id != actor.id:
         raise BonusError("Можно отменить только своё списание")

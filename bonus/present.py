@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from bonus.catalog import media_url
 from bonus.models import Certificate, CertificateStatus, Role, Segment, Transaction, TxType, User
 from bonus.barcode_draw import barcode_svg
+from bonus.roles import role_label
 from bonus.services import apply_due_expiries, apply_expiry_writeoff
 from bonus.values import MSK, as_utc, format_short_code, today_msk
 
@@ -234,7 +235,7 @@ def ledger(db: Session, actor: User, limit: int = 200) -> list[TxView]:
 
 
 def list_staff(db: Session, query: str = "") -> list[StaffView]:
-    """Управляющие и HR, опционально отфильтрованные поиском."""
+    """Админ, HRD, HR и управляющие, опционально отфильтрованные поиском."""
     users = db.scalars(
         select(User).where(User.role != Role.employee).order_by(User.role, User.full_name)
     ).all()
@@ -271,10 +272,16 @@ def _staff_name_parts(full_name: str) -> tuple[str, str]:
 
 def _staff_search_blob(view: StaffView) -> str:
     """Строка для поиска по полям доступа."""
-    role = "hr" if view.role == Role.hr else "управляющий"
     return " ".join(
         part.casefold()
-        for part in (view.full_name, view.login, view.phone, view.restaurant, role)
+        for part in (
+            view.full_name,
+            view.login,
+            view.phone,
+            view.restaurant,
+            role_label(view.role),
+            view.role.value,
+        )
         if part
     )
 
@@ -402,7 +409,7 @@ def _can_spend(certificate: Certificate) -> bool:
 def _can_undo(tx: Transaction, viewer: User | None, undone: bool) -> bool:
     if viewer is None or undone or tx.tx_type != TxType.debit:
         return False
-    if viewer.role == Role.hr:
+    if viewer.role in {Role.admin, Role.hr, Role.hrd}:
         return True
     if viewer.role != Role.manager or tx.actor_id != viewer.id:
         return False

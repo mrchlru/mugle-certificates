@@ -10,7 +10,7 @@
     <section class="staff-panel">
       <header class="staff-panel-head">
         <h2>Новый доступ</h2>
-        <p class="muted">Управляющий списывает бонусы в своём ресторане. Ресторан попадёт в журнал.</p>
+        <p class="muted">Управляющий списывает бонусы в ресторане. HR ведёт карты. HRD — доступы и контроль.</p>
       </header>
       <form method="post" action="/hr/staff" class="staff-create">
         <input type="hidden" name="csrf_token" value="{{ csrf }}">
@@ -30,6 +30,7 @@
             <select name="role" id="staff-role">
               <option value="manager">Управляющий</option>
               <option value="hr">HR</option>
+              <option value="hrd">HRD</option>
             </select>
           </label>
           <label class="field">Ресторан
@@ -63,12 +64,12 @@
       <ul class="staff-list" id="staff-list">
         {% for person in staff %}
         <li class="staff-card {% if not person.is_active %}is-off{% endif %} {% if edit_id == person.id %}is-editing{% endif %}"
-            data-search="{{ (person.full_name ~ ' ' ~ person.login ~ ' ' ~ person.phone ~ ' ' ~ person.restaurant ~ ' ' ~ ('hr' if person.role.value == 'hr' else 'управляющий'))|lower }}">
+            data-search="{{ (person.full_name ~ ' ' ~ person.login ~ ' ' ~ person.phone ~ ' ' ~ person.restaurant ~ ' ' ~ role_label(person.role))|lower }}">
           <div class="staff-row">
             <div class="staff-info">
               <p class="staff-name">{{ person.full_name }}</p>
               <p class="muted staff-meta">
-                {{ 'HR' if person.role.value == 'hr' else 'Управляющий' }}
+                {{ role_label(person.role) }}
                 {% if person.restaurant %} · {{ person.restaurant }}{% endif %}
                 {% if person.phone %} · {{ person.phone }}{% endif %}
                 · {{ person.login }}
@@ -76,6 +77,7 @@
               </p>
             </div>
             <div class="staff-actions">
+              {% if person.role.value != 'admin' %}
               <button type="button" class="icon-btn" data-edit-toggle="{{ person.id }}" aria-label="Изменить" aria-expanded="{{ 'true' if edit_id == person.id else 'false' }}">
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M12 20h9"/>
@@ -91,9 +93,13 @@
                   <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
                 </label>
               </form>
+              {% else %}
+              <p class="muted staff-locked">из env</p>
+              {% endif %}
             </div>
           </div>
 
+          {% if person.role.value != 'admin' %}
           <form method="post" action="/hr/staff/{{ person.id }}" class="staff-edit" data-edit-panel="{{ person.id }}" {% if edit_id != person.id %}hidden{% endif %}>
             <input type="hidden" name="csrf_token" value="{{ csrf }}">
             <input type="hidden" name="q" value="{{ query or '' }}">
@@ -118,6 +124,7 @@
                 <select name="role" data-edit-role>
                   <option value="manager" {% if person.role.value == 'manager' %}selected{% endif %}>Управляющий</option>
                   <option value="hr" {% if person.role.value == 'hr' %}selected{% endif %}>HR</option>
+                  <option value="hrd" {% if person.role.value == 'hrd' %}selected{% endif %}>HRD</option>
                 </select>
               </label>
               <label class="field">Ресторан
@@ -132,6 +139,7 @@
               <button class="btn soft compact" type="button" data-edit-cancel="{{ person.id }}">Отмена</button>
             </div>
           </form>
+          {% endif %}
         </li>
         {% endfor %}
         {% if not staff %}

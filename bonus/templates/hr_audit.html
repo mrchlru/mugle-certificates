@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Контроль{% endblock %}
+{% block content %}
+<section class="audit-page">
+  <header class="staff-intro">
+    <h1>Контроль</h1>
+    <p class="muted">Действия сотрудников в админке: карты, начисления, доступы и отмены списаний.</p>
+  </header>
+
+  {% if rows %}
+  <div class="table-wrap">
+    <table class="audit-table">
+      <thead>
+        <tr>
+          <th>Когда</th>
+          <th>Кто</th>
+          <th>Действие</th>
+          <th>Что сделали</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in rows %}
+        <tr>
+          <td class="audit-when">{{ item.created_at|when }}</td>
+          <td>
+            <p class="audit-actor">{{ item.actor_name }}</p>
+            {% if item.actor_login %}<p class="muted">{{ item.actor_login }}</p>{% endif %}
+          </td>
+          <td>{{ item.action_label }}</td>
+          <td>
+            <p>{{ item.summary }}</p>
+            {% if item.detail %}<p class="muted">{{ item.detail }}</p>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">Пока записей нет — они появятся после действий сотрудников.</p>
+  {% endif %}
+</section>
+{% endblock %}

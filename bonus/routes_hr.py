@@ -21,6 +21,7 @@ from bonus.catalog import (
     update_segment,
     update_template,
 )
+from bonus.audit import credit_audit_detail, list_audit, write_audit
 from bonus.db import get_db
 from bonus.http import form_money, guard_csrf, optional_money, public_base, render, require
 from dataclasses import replace
@@ -29,7 +30,7 @@ from sqlalchemy import select
 
 from bonus.importer import ImportRowResult, build_sample_workbook, parse_table
 from bonus.storage import s3_enabled
-from bonus.models import CardTemplate, Role, Segment, User
+from bonus.models import AuditAction, CardTemplate, Role, Segment, User
 from bonus.ledger import (
     LEDGER_CHOICES,
     ledger_is_single_use,
@@ -37,6 +38,7 @@ from bonus.ledger import (
     parse_ledger_sheet,
 )
 from bonus.present import dashboard_stats, ledger, list_staff, load_card, search_certificates
+from bonus.roles import AUDIT_ROLES, STAFF_ROLES, parse_staff_role, role_label
 from bonus.security import flash
 from bonus.services import (
     BonusError,
@@ -61,7 +63,7 @@ router = APIRouter()
 def dashboard(
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require(Role.hr)),
+    user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
     q: str = "",
     segment: int = 0,
 ):
@@ -80,7 +82,7 @@ def dashboard(
 
 
 @router.get("/hr/new")
-def issue_form(request: Request, db: Session = Depends(get_db), user: User = Depends(require(Role.hr))):
+def issue_form(request: Request, db: Session = Depends(get_db), user: User = Depends(require(Role.admin, Role.hr, Role.hrd))):
     """Форма нового сертификата."""
     return render(
         request,
@@ -98,7 +100,7 @@ def issue_form(request: Request, db: Session = Depends(get_db), user: User = Dep
 def issue_submit(
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require(Role.hr)),
+    user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
     full_name: str = Form(""),
     department: str = Form(""),
     job_title: str = Form(""),
@@ -170,6 +172,15 @@ def issue_submit(
             ),
             user,
         )
+        write_audit(
+            db,
+            actor=user,
+            action=AuditAction.certificate_issue,
+            summary=f"Карта {issued.certificate.public_number} · {full_name.strip()}",
+            target_type="certificate",
+            target_id=issued.certificate.id,
+            detail=format_money(nominal_value),
+        )
     except BonusError as exc:
         flash(request, exc.message, "bad")
         return RedirectResponse("/hr/new", status_code=303)
@@ -178,7 +189,7 @@ def issue_submit(
 
 
 @router.get("/hr/design")
-def design_page(request: Request, db: Session = Depends(get_db), user: User = Depends(require(Role.hr))):
+def design_page(request: Request, db: Session = Depends(get_db), user: User = Depends(require(Role.admin, Role.hr, Role.hrd))):
     """Сегменты и шаблоны для внешнего вида карточек."""
     return render(
         request,
@@ -196,7 +207,7 @@ def design_page(request: Request, db: Session = Depends(get_db), user: User = De
 def segment_create(
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require(Role.hr)),
+    user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
     name: str = Form(""),
     accrual_period: str = Form("none"),
     requires_expiry: str = Form("0"),
@@ -227,7 +238,7 @@ def segment_update(
     segment_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require(Role.hr)),
+    user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
     name: str = Form(""),
     accrual_period: str = Form("none"),
     requires_expiry: str = Form("0"),
@@ -262,7 +273,7 @@ def segment_active(
     segment_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require(Role.hr)),
+    user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
     active: str = Form("0"),
     csrf_token: str = Form(""),
 ):
@@ -284,7 +295,7 @@ def segment_active(
 def template_create(
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require(Role.hr)),
+    user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
     name: str = Form(""),
     discount_percent: str = Form(""),
     image: UploadFile = File(...),
@@ -314,7 +325,7 @@ async def template_update(
     template_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require(Role.hr)),
+    user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
     name: str = Form(""),
     discount_percent: str = Form(""),
     image: UploadFile | None = File(None),
@@ -354,7 +365,7 @@ def template_active(
     template_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require(Role.hr)),
+    user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
     active: str = Form("0"),
     csrf_token: str = Form(""),
 ):
@@ -377,7 +388,7 @@ def certificate_page(
     certificate_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require(Role.hr)),
+    user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
 ):
     """Карточка, история и действия HR."""
     certificate = _certificate_or_redirect(db, request, certificate_id)
@@ -394,7 +405,7 @@ def credit_submit(
     certificate_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require(Role.hr)),
+    user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
     amount: str = Form(""),
     comment: str = Form(""),
     csrf_token: str = Form(""),
@@ -407,6 +418,15 @@ def credit_submit(
         guard_csrf(request, csrf_token)
         added = form_money(amount)
         credit_certificate(db, certificate, user, added, comment)
+        write_audit(
+            db,
+            actor=user,
+            action=AuditAction.certificate_credit,
+            summary=f"Начисление на {certificate.public_number}",
+            target_type="certificate",
+            target_id=certificate.id,
+            detail=credit_audit_detail(added, comment),
+        )
     except BonusError as exc:
         flash(request, exc.message, "bad")
     else:
@@ -419,7 +439,7 @@ def block_submit(
     certificate_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require(Role.hr)),
+    user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
     blocked: str = Form("1"),
     csrf_token: str = Form(""),
 ):
@@ -429,7 +449,18 @@ def block_submit(
         return RedirectResponse("/hr", status_code=303)
     try:
         guard_csrf(request, csrf_token)
-        set_blocked(db, certificate, user, blocked == "1")
+        do_block = blocked == "1"
+        set_blocked(db, certificate, user, do_block)
+        write_audit(
+            db,
+            actor=user,
+            action=AuditAction.certificate_block if do_block else AuditAction.certificate_unblock,
+            summary=(
+                f"{'Блокировка' if do_block else 'Разблокировка'} {certificate.public_number}"
+            ),
+            target_type="certificate",
+            target_id=certificate.id,
+        )
     except BonusError as exc:
         flash(request, exc.message, "bad")
     else:
@@ -442,7 +473,7 @@ def name_submit(
     certificate_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require(Role.hr)),
+    user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
     full_name: str = Form(""),
     department: str = Form(""),
     job_title: str = Form(""),
@@ -478,7 +509,7 @@ def expires_submit(
     certificate_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require(Role.hr)),
+    user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
     expires_on: str = Form(""),
     csrf_token: str = Form(""),
 ):
@@ -493,6 +524,15 @@ def expires_submit(
         if segment is not None and segment.requires_expiry and expires is None:
             raise BonusError("Укажите срок действия для этого сегмента")
         set_certificate_expiry(db, certificate, expires)
+        write_audit(
+            db,
+            actor=user,
+            action=AuditAction.certificate_expiry,
+            summary=f"Срок {certificate.public_number}",
+            target_type="certificate",
+            target_id=certificate.id,
+            detail="" if expires is None else expires.isoformat(),
+        )
     except BonusError as exc:
         flash(request, exc.message, "bad")
     else:
@@ -501,13 +541,13 @@ def expires_submit(
 
 
 @router.get("/hr/ledger")
-def ledger_page(request: Request, db: Session = Depends(get_db), user: User = Depends(require(Role.hr))):
+def ledger_page(request: Request, db: Session = Depends(get_db), user: User = Depends(require(Role.admin, Role.hr, Role.hrd))):
     """Журнал списаний и остальных операций."""
     return render(request, "hr_ledger.html", section="ledger", rows=ledger(db, user))
 
 
 @router.get("/hr/import")
-def import_form(request: Request, db: Session = Depends(get_db), user: User = Depends(require(Role.hr))):
+def import_form(request: Request, db: Session = Depends(get_db), user: User = Depends(require(Role.admin, Role.hr, Role.hrd))):
     """Загрузка таблицы из старого Statix Bonus."""
     templates = list_templates(db)
     return render(
@@ -524,7 +564,7 @@ def import_form(request: Request, db: Session = Depends(get_db), user: User = De
 def import_submit(
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require(Role.hr)),
+    user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
     table: UploadFile = File(...),
     template_id: int = Form(0),
     csrf_token: str = Form(""),
@@ -542,6 +582,15 @@ def import_submit(
     results = [
         _import_row(db, user, row, public_base(request), shared_template_id) for row in parsed
     ]
+    ok_count = sum(1 for item in results if item.ok)
+    write_audit(
+        db,
+        actor=user,
+        action=AuditAction.import_rows,
+        summary=f"Импорт: успешно {ok_count} из {len(results)}",
+        target_type="import",
+        detail=table.filename or "",
+    )
     return render(
         request,
         "hr_import.html",
@@ -553,7 +602,7 @@ def import_submit(
 
 
 @router.get("/hr/import/sample.xlsx")
-def sample_xlsx(user: User = Depends(require(Role.hr))) -> Response:
+def sample_xlsx(user: User = Depends(require(Role.admin, Role.hr, Role.hrd))) -> Response:
     """Пример таблицы Excel с актуальными колонками и шириной."""
     return Response(
         content=build_sample_workbook(),
@@ -563,7 +612,7 @@ def sample_xlsx(user: User = Depends(require(Role.hr))) -> Response:
 
 
 @router.get("/hr/import/sample.csv")
-def sample_csv(user: User = Depends(require(Role.hr))) -> Response:
+def sample_csv(user: User = Depends(require(Role.admin, Role.hr, Role.hrd))) -> Response:
     """Старый адрес примера — отдаём актуальный Excel."""
     return sample_xlsx(user)
 
@@ -572,11 +621,11 @@ def sample_csv(user: User = Depends(require(Role.hr))) -> Response:
 def staff_page(
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require(Role.hr)),
+    user: User = Depends(require(*STAFF_ROLES)),
     q: str = "",
     edit: int = 0,
 ):
-    """Управляющие и сотрудники HR."""
+    """Создание и правка доступов сотрудников — только admin и HRD."""
     return render(
         request,
         "hr_staff.html",
@@ -584,6 +633,7 @@ def staff_page(
         staff=list_staff(db, q),
         query=q,
         edit_id=edit,
+        role_label=role_label,
     )
 
 
@@ -591,7 +641,7 @@ def staff_page(
 def staff_submit(
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require(Role.hr)),
+    user: User = Depends(require(*STAFF_ROLES)),
     first_name: str = Form(""),
     last_name: str = Form(""),
     phone: str = Form(""),
@@ -600,7 +650,7 @@ def staff_submit(
     restaurant: str = Form(""),
     csrf_token: str = Form(""),
 ):
-    """Создаёт вход для управляющего или HR."""
+    """Создаёт вход для управляющего, HR или HRD."""
     try:
         guard_csrf(request, csrf_token)
         created, plain = create_staff(
@@ -609,8 +659,17 @@ def staff_submit(
             last_name=last_name,
             phone=phone,
             password=password,
-            role=Role.hr if role == "hr" else Role.manager,
+            role=parse_staff_role(role),
             restaurant=restaurant,
+        )
+        write_audit(
+            db,
+            actor=user,
+            action=AuditAction.staff_create,
+            summary=f"Создан доступ {created.full_name} · {role_label(created.role)}",
+            target_type="user",
+            target_id=created.id,
+            detail=created.login,
         )
     except BonusError as exc:
         flash(request, exc.message, "bad")
@@ -625,7 +684,7 @@ def staff_update(
     user_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    actor: User = Depends(require(Role.hr)),
+    actor: User = Depends(require(*STAFF_ROLES)),
     first_name: str = Form(""),
     last_name: str = Form(""),
     phone: str = Form(""),
@@ -642,16 +701,25 @@ def staff_update(
         guard_csrf(request, csrf_token)
         if person is None or person.role == Role.employee:
             raise BonusError("Пользователь не найден")
-        update_staff(
+        updated = update_staff(
             db,
             person,
             first_name=first_name,
             last_name=last_name,
             phone=phone,
-            role=Role.hr if role == "hr" else Role.manager,
+            role=parse_staff_role(role),
             restaurant=restaurant,
             login=login,
             password=password,
+        )
+        write_audit(
+            db,
+            actor=actor,
+            action=AuditAction.staff_update,
+            summary=f"Изменён доступ {updated.full_name} · {role_label(updated.role)}",
+            target_type="user",
+            target_id=updated.id,
+            detail=updated.login,
         )
     except BonusError as exc:
         flash(request, exc.message, "bad")
@@ -667,7 +735,7 @@ def staff_active(
     user_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    actor: User = Depends(require(Role.hr)),
+    actor: User = Depends(require(*STAFF_ROLES)),
     active: str = Form("0"),
     q: str = Form(""),
     csrf_token: str = Form(""),
@@ -678,12 +746,39 @@ def staff_active(
         guard_csrf(request, csrf_token)
         if person is None or person.role == Role.employee:
             raise BonusError("Пользователь не найден")
-        set_user_active(db, person, active == "1")
+        enabled = active == "1"
+        set_user_active(db, person, enabled)
+        write_audit(
+            db,
+            actor=actor,
+            action=AuditAction.staff_active,
+            summary=(
+                f"{'Включён' if enabled else 'Отключён'} доступ {person.full_name}"
+            ),
+            target_type="user",
+            target_id=person.id,
+            detail=person.login,
+        )
     except BonusError as exc:
         flash(request, exc.message, "bad")
     else:
         flash(request, "Доступ обновлён")
     return RedirectResponse(_staff_redirect(q), status_code=303)
+
+
+@router.get("/hr/audit")
+def audit_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(*AUDIT_ROLES)),
+):
+    """Журнал действий сотрудников для admin и HRD."""
+    return render(
+        request,
+        "hr_audit.html",
+        section="audit",
+        rows=list_audit(db),
+    )
 
 
 def _staff_redirect(query: str = "", edit_id: int = 0) -> str:

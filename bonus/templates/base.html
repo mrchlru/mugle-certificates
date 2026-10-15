@@ -29,7 +29,9 @@
     {% endif %}
   </header>
   {% endblock %}
-  {% if user and user.role.value == 'hr' and section is defined %}
+  {% set panel_role = user and user.role.value in ['admin', 'hr', 'hrd'] %}
+  {% set staff_role = user and user.role.value in ['admin', 'hrd'] %}
+  {% if panel_role and section is defined %}
   <div class="wrap nav-wrap">
     {% if warn_secret %}
     <p class="flash bad">Перед реальными сертификатами задайте свой SECRET_KEY в настройках Timeweb.</p>
@@ -49,13 +51,16 @@
       <a href="/hr/design" {% if section == 'design' %}class="is-on"{% endif %}>Оформление</a>
       <a href="/hr/ledger" {% if section == 'ledger' %}class="is-on"{% endif %}>Журнал</a>
       <a href="/hr/import" {% if section == 'import' %}class="is-on"{% endif %}>Импорт</a>
+      {% if staff_role %}
       <a href="/hr/staff" {% if section == 'staff' %}class="is-on"{% endif %}>Доступ</a>
+      <a href="/hr/audit" {% if section == 'audit' %}class="is-on"{% endif %}>Контроль</a>
+      {% endif %}
     </nav>
   </div>
   {% endif %}
   <main class="{% block main_class %}wrap{% endblock %}">
-    {% if not (user and user.role.value == 'hr' and section is defined) %}
-    {% if user and user.role.value == 'hr' and warn_secret %}
+    {% if not (panel_role and section is defined) %}
+    {% if panel_role and warn_secret %}
     <p class="flash bad">Перед реальными сертификатами задайте свой SECRET_KEY в настройках Timeweb.</p>
     {% endif %}
     {% for item in flashes %}

@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     app_public_url: str = ""
     https_only: bool = False
     seed_demo: bool = True
+    admin_login: str = "admin"
+    admin_password: str = "teams-admin"
+    admin_name: str = "Главный администратор"
     hr_login: str = "hr"
     hr_password: str = "mugle-hr"
     hr_name: str = "HR Teams Bonus"

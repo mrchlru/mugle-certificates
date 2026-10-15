@@ -4,12 +4,15 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
+from bonus.audit import write_audit
 from bonus.db import get_db
 from bonus.http import form_money, guard_csrf, public_base, render, require
-from bonus.models import Role, User
+from bonus.models import AuditAction, User
 from bonus.present import load_card, recent_debits
+from bonus.roles import DESK_ROLES
 from bonus.security import flash, safe_next
 from bonus.services import BonusError, debit_certificate, find_certificate, undo_debit
+from bonus.values import format_money
 
 router = APIRouter()
 
@@ -18,7 +21,7 @@ router = APIRouter()
 def desk(
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require(Role.manager, Role.hr)),
+    user: User = Depends(require(*DESK_ROLES)),
     code: str = "",
 ):
     """Поле и камера. Код из QR открывает экран списания."""
@@ -36,7 +39,7 @@ def debit_form(
     token: str,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require(Role.manager, Role.hr)),
+    user: User = Depends(require(*DESK_ROLES)),
     done: int = 0,
 ):
     """Экран списания после сканирования."""
@@ -53,7 +56,7 @@ def debit_submit(
     token: str,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require(Role.manager, Role.hr)),
+    user: User = Depends(require(*DESK_ROLES)),
     amount: str = Form(""),
     comment: str = Form(""),
     csrf_token: str = Form(""),
@@ -87,7 +90,7 @@ def undo(
     tx_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require(Role.manager, Role.hr)),
+    user: User = Depends(require(*DESK_ROLES)),
     csrf_token: str = Form(""),
     next: str = Form("/desk"),
 ):
@@ -95,7 +98,16 @@ def undo(
     target = safe_next(next, "/desk")
     try:
         guard_csrf(request, csrf_token)
-        undo_debit(db, tx_id, user, "Отмена списания")
+        reversal = undo_debit(db, tx_id, user, "Отмена списания")
+        write_audit(
+            db,
+            actor=user,
+            action=AuditAction.debit_undo,
+            summary=f"Отмена списания #{tx_id}",
+            target_type="transaction",
+            target_id=tx_id,
+            detail=format_money(abs(reversal.amount)),
+        )
     except BonusError as exc:
         flash(request, exc.message, "bad")
         return RedirectResponse(target, status_code=303)

@@ -114,7 +114,7 @@ def pop_flashes(request: Request) -> list[dict[str, str]]:
 
 def home_for(role: Role) -> str:
     """Куда попадает человек сразу после входа."""
-    if role == Role.hr:
+    if role in {Role.admin, Role.hr, Role.hrd}:
         return "/hr"
     if role == Role.manager:
         return "/desk"
