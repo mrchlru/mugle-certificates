@@ -90,15 +90,15 @@
       </label>
       <fieldset class="color-field">
         <legend>Цвет карточки</legend>
-        <div class="color-grid">
+        <div class="color-grid" id="color-grid">
           {% for value, title in colors %}
           <label class="color-option" title="{{ title }}">
             <input type="radio" name="color" value="{{ value }}" {% if loop.first %}checked{% endif %}>
             <span style="background: {{ value }}"></span>
           </label>
           {% endfor %}
-          <label class="color-option color-picker-option" title="Свой цвет">
-            <input type="radio" name="color" id="color-custom" value="#00A8A8">
+          <div class="color-saved" id="color-saved" aria-label="Сохранённые цвета"></div>
+          <label class="color-option color-picker-option" title="Свой цвет — сохранится в подборку">
             <span class="color-picker-face" id="color-custom-face" aria-hidden="true">
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M12 3a5 5 0 0 1 5 5c0 2.2-1.5 3.5-3 5-.9.9-1.5 1.8-1.5 3a1.5 1.5 0 0 0 3 0"/>
@@ -109,7 +109,7 @@
                 <path d="M14.5 14.5l5.2 5.2a1.2 1.2 0 0 1-1.7 1.7L12.8 16.2"/>
               </svg>
             </span>
-            <input type="color" id="color-picker" class="color-picker-native" value="#00A8A8" aria-label="Выбрать свой цвет">
+            <input type="color" id="color-picker" class="color-picker-native" value="#00A8A8" aria-label="Выбрать и сохранить свой цвет">
           </label>
         </div>
       </fieldset>
@@ -265,32 +265,131 @@
   document.querySelectorAll('input[name="color"]').forEach(function (radio) {
     radio.addEventListener("change", syncPreview);
   });
-  var customRadio = document.getElementById("color-custom");
   var colorPicker = document.getElementById("color-picker");
   var customFace = document.getElementById("color-custom-face");
-  function applyCustomColor(raw) {
-    if (!customRadio || !colorPicker) return;
-    var value = String(raw || "").toUpperCase();
-    if (!/^#[0-9A-F]{6}$/.test(value)) return;
-    customRadio.value = value;
-    colorPicker.value = value;
-    customRadio.checked = true;
-    if (customFace) customFace.style.background = value;
+  var savedWrap = document.getElementById("color-saved");
+  var COLOR_STORE = "teams-bonus-card-colors";
+
+  function normalizeHex(raw) {
+    var value = String(raw || "").trim().toUpperCase();
+    return /^#[0-9A-F]{6}$/.test(value) ? value : "";
+  }
+
+  function loadSavedColors() {
+    try {
+      var raw = localStorage.getItem(COLOR_STORE);
+      var list = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(list)) return [];
+      return list.map(normalizeHex).filter(Boolean);
+    } catch (err) {
+      return [];
+    }
+  }
+
+  function writeSavedColors(list) {
+    localStorage.setItem(COLOR_STORE, JSON.stringify(list));
+  }
+
+  function presetValues() {
+    return Array.prototype.map.call(
+      document.querySelectorAll('#color-grid > .color-option:not(.color-picker-option) input[name="color"]'),
+      function (input) { return normalizeHex(input.value); }
+    ).filter(Boolean);
+  }
+
+  function selectColor(value) {
+    var hex = normalizeHex(value);
+    if (!hex) return;
+    var radio = document.querySelector('#color-grid input[name="color"][value="' + hex + '"]');
+    if (!radio) return;
+    radio.checked = true;
+    if (colorPicker) colorPicker.value = hex;
     syncPreview();
   }
+
+  function bindColorRadio(radio) {
+    radio.addEventListener("change", syncPreview);
+  }
+
+  function renderSavedColors(selectHex) {
+    if (!savedWrap) return;
+    var list = loadSavedColors();
+    savedWrap.innerHTML = "";
+    list.forEach(function (hex) {
+      var label = document.createElement("label");
+      label.className = "color-option color-saved-option";
+      label.title = hex;
+      var radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = "color";
+      radio.value = hex;
+      bindColorRadio(radio);
+      var swatch = document.createElement("span");
+      swatch.style.background = hex;
+      var remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "color-remove";
+      remove.setAttribute("aria-label", "Удалить цвет " + hex);
+      remove.textContent = "×";
+      remove.addEventListener("click", function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        removeSavedColor(hex);
+      });
+      label.appendChild(radio);
+      label.appendChild(swatch);
+      label.appendChild(remove);
+      savedWrap.appendChild(label);
+    });
+    if (selectHex) selectColor(selectHex);
+  }
+
+  function saveCustomColor(raw) {
+    var hex = normalizeHex(raw);
+    if (!hex || !colorPicker) return;
+    colorPicker.value = hex;
+    if (customFace) customFace.style.background = hex;
+    var presets = presetValues();
+    if (presets.indexOf(hex) !== -1) {
+      selectColor(hex);
+      return;
+    }
+    var list = loadSavedColors();
+    if (list.indexOf(hex) === -1) {
+      list.push(hex);
+      writeSavedColors(list);
+    }
+    renderSavedColors(hex);
+  }
+
+  function removeSavedColor(hex) {
+    var cleaned = normalizeHex(hex);
+    var list = loadSavedColors().filter(function (item) { return item !== cleaned; });
+    writeSavedColors(list);
+    var wasSelected = !!(document.querySelector('#color-grid input[name="color"]:checked') &&
+      document.querySelector('#color-grid input[name="color"]:checked').value === cleaned);
+    renderSavedColors();
+    if (wasSelected) {
+      var first = document.querySelector('#color-grid > .color-option:not(.color-picker-option) input[name="color"]');
+      if (first) {
+        first.checked = true;
+        syncPreview();
+      }
+    }
+  }
+
   if (colorPicker) {
     colorPicker.addEventListener("input", function () {
-      applyCustomColor(colorPicker.value);
+      var hex = normalizeHex(colorPicker.value);
+      if (!hex) return;
+      if (customFace) customFace.style.background = hex;
+      if (card) card.style.setProperty("--card", hex);
     });
     colorPicker.addEventListener("change", function () {
-      applyCustomColor(colorPicker.value);
+      saveCustomColor(colorPicker.value);
     });
   }
-  if (customRadio) {
-    customRadio.addEventListener("change", function () {
-      if (customRadio.checked) applyCustomColor(colorPicker ? colorPicker.value : customRadio.value);
-    });
-  }
+  renderSavedColors();
   if (templates && discount) {
     templates.addEventListener("change", function () {
       applyDiscountFrom(templates.options[templates.selectedIndex]);

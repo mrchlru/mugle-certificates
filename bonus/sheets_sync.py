@@ -35,6 +35,7 @@ class SheetUsageEntry:
     used_on: date
     amount_kopecks: int
     restaurant: str
+    order_ref: str = ""
 
 
 def sheets_enabled() -> bool:
@@ -49,8 +50,12 @@ def sync_certificate_issued(
     *,
     segment_name: str = "",
 ) -> None:
-    """Добавляет строку карты на нужный лист после выпуска (без дублей)."""
+    """Добавляет строку карты на нужный лист сразу после выпуска (без дублей)."""
     if not sheets_enabled():
+        logger.warning(
+            "Google Sheets: выпуск %s не записан — нет spreadsheet id или ключа SA",
+            certificate.public_number,
+        )
         return
     try:
         kind = parse_ledger_sheet(certificate.ledger_sheet)
@@ -62,6 +67,7 @@ def sync_certificate_issued(
             holder,
             segment_name=segment_name,
         )
+        _write_balance_cell(worksheet, kind, row_index, certificate.balance)
         logger.info(
             "Google Sheets: выпуск %s → лист «%s», строка %s",
             certificate.public_number,
@@ -82,6 +88,10 @@ def sync_certificate_usage(
 ) -> None:
     """Пишет строку карты и колонки использования по журналу списаний."""
     if not sheets_enabled():
+        logger.warning(
+            "Google Sheets: использование %s не записано — нет spreadsheet id или ключа SA",
+            certificate.public_number,
+        )
         return
     try:
         kind = parse_ledger_sheet(certificate.ledger_sheet)
@@ -96,6 +106,7 @@ def sync_certificate_usage(
         date_col, amount_col, place_col = _usage_columns(kind)
         if expired:
             _set_cell(worksheet, row_index, date_col, _EXPIRED_MARK)
+            _set_cell(worksheet, row_index, amount_col, format_money_plain(certificate.balance))
             logger.info(
                 "Google Sheets: %s помечена «истек» на листе «%s»",
                 certificate.public_number,
@@ -110,13 +121,15 @@ def sync_certificate_usage(
             amount_col,
             place_col,
             usages,
+            remaining_kopecks=certificate.balance,
         )
         logger.info(
-            "Google Sheets: %s — %s списаний на листе «%s», строка %s",
+            "Google Sheets: %s — %s списаний на листе «%s», строка %s, остаток %s",
             certificate.public_number,
             len(usages),
             worksheet.title,
             row_index,
+            certificate.balance,
         )
     except Exception:
         logger.exception(
@@ -138,18 +151,55 @@ def _ensure_certificate_row(
     if row_index is not None:
         return row_index
     row = _issue_row(kind, certificate, holder, segment_name=segment_name)
-    worksheet.append_row(row, value_input_option="USER_ENTERED")
+    appended = _append_row(worksheet, row)
     logger.info(
-        "Google Sheets: добавлена карта %s на лист «%s»",
+        "Google Sheets: добавлена карта %s на лист «%s», строка %s",
         certificate.public_number,
         worksheet.title,
+        appended,
     )
     found = _find_row(worksheet, certificate.public_number)
-    if found is None:
-        raise RuntimeError(
-            f"Не удалось найти карту {certificate.public_number} после добавления строки"
-        )
-    return found
+    return found if found is not None else appended
+
+
+def _append_row(worksheet: Any, row: list[str]) -> int:
+    """Дописывает строку и возвращает её номер (1-based)."""
+    response = worksheet.append_row(
+        row,
+        value_input_option="USER_ENTERED",
+        table_range="A1",
+    )
+    parsed = _row_from_append_response(response)
+    if parsed is not None:
+        return parsed
+    return max(len(worksheet.col_values(1)), 2)
+
+
+def _row_from_append_response(response: Any) -> int | None:
+    """Достаёт номер строки из ответа Sheets API после append."""
+    if not isinstance(response, dict):
+        return None
+    updates = response.get("updates")
+    if not isinstance(updates, dict):
+        return None
+    updated_range = str(updates.get("updatedRange") or "")
+    if "!" not in updated_range:
+        return None
+    cells = updated_range.split("!", 1)[1]
+    start = cells.split(":", 1)[0]
+    digits = "".join(char for char in start if char.isdigit())
+    return int(digits) if digits.isdigit() else None
+
+
+def _write_balance_cell(
+    worksheet: Any,
+    kind: LedgerSheet,
+    row_index: int,
+    remaining_kopecks: int,
+) -> None:
+    """Пишет текущий остаток бонусов в колонку «Сумма» использования."""
+    _, amount_col, _ = _usage_columns(kind)
+    _set_cell(worksheet, row_index, amount_col, format_money_plain(remaining_kopecks))
 
 
 def _write_usage_columns(
@@ -160,30 +210,39 @@ def _write_usage_columns(
     amount_col: int,
     place_col: int,
     usages: list[SheetUsageEntry],
+    *,
+    remaining_kopecks: int,
 ) -> None:
-    """Перезаписывает колонки использования по полному списку из журнала."""
+    """Перезаписывает даты, остаток и ресторан/заказ по журналу списаний."""
     if not usages:
         _set_cell(worksheet, row_index, date_col, "")
-        _set_cell(worksheet, row_index, amount_col, "")
+        _set_cell(worksheet, row_index, amount_col, format_money_plain(remaining_kopecks))
         _set_cell(worksheet, row_index, place_col, "")
         return
     if ledger_is_single_use(kind):
         last = usages[-1]
         _set_cell(worksheet, row_index, date_col, format_date(last.used_on))
-        _set_cell(worksheet, row_index, amount_col, format_money_plain(last.amount_kopecks))
-        _set_cell(
-            worksheet,
-            row_index,
-            place_col,
-            (last.restaurant or "").strip() or "—",
-        )
+        _set_cell(worksheet, row_index, amount_col, format_money_plain(remaining_kopecks))
+        _set_cell(worksheet, row_index, place_col, _usage_place_label(last))
         return
     dates = ", ".join(format_date(item.used_on) for item in usages)
-    amounts = ", ".join(format_money_plain(item.amount_kopecks) for item in usages)
-    places = ", ".join((item.restaurant or "").strip() or "—" for item in usages)
+    places = ", ".join(_usage_place_label(item) for item in usages)
     _set_cell(worksheet, row_index, date_col, dates)
-    _set_cell(worksheet, row_index, amount_col, amounts)
+    _set_cell(worksheet, row_index, amount_col, format_money_plain(remaining_kopecks))
     _set_cell(worksheet, row_index, place_col, places)
+
+
+def _usage_place_label(entry: SheetUsageEntry) -> str:
+    """Ресторан и заказ одной фразой для ячейки подборки."""
+    place = (entry.restaurant or "").strip()
+    order = (entry.order_ref or "").strip()
+    if place and order:
+        return f"{place} ({order})"
+    if place:
+        return place
+    if order:
+        return f"заказ {order}"
+    return "—"
 
 
 def ensure_ledger_worksheets() -> list[str]:
@@ -205,8 +264,10 @@ def ensure_ledger_worksheets() -> list[str]:
 
 
 def _has_credentials(settings: Any) -> bool:
-    if settings.google_service_account_file.strip():
-        return Path(settings.google_service_account_file).is_file()
+    """Ключ есть, если файл на диске или JSON задан в переменной окружения."""
+    path = settings.google_service_account_file.strip()
+    if path and Path(path).is_file():
+        return True
     return bool(settings.google_service_account_json.strip())
 
 
@@ -226,11 +287,14 @@ def _client() -> Any:
 
 def _service_account_info(settings: Any) -> dict[str, Any]:
     path = settings.google_service_account_file.strip()
-    if path:
+    if path and Path(path).is_file():
         return json.loads(Path(path).read_text(encoding="utf-8"))
     raw = settings.google_service_account_json.strip()
     if not raw:
-        raise RuntimeError("Нет GOOGLE_SERVICE_ACCOUNT_JSON или GOOGLE_SERVICE_ACCOUNT_FILE")
+        raise RuntimeError(
+            "Нет ключа Google: задайте GOOGLE_SERVICE_ACCOUNT_JSON "
+            "или положите файл по GOOGLE_SERVICE_ACCOUNT_FILE"
+        )
     return _parse_service_account_json(raw)
 
 
@@ -366,6 +430,7 @@ def _issue_row(
     reason = segment_name or ""
     number = certificate.public_number
 
+    remaining = format_money_plain(certificate.balance)
     if kind in {LedgerSheet.birthday, LedgerSheet.gift_birthday}:
         return [
             number,
@@ -376,7 +441,7 @@ def _issue_row(
             birth,
             nominal,
             "",
-            "",
+            remaining,
             "",
             note,
         ]
@@ -391,7 +456,7 @@ def _issue_row(
         expires,
         nominal,
         "",
-        "",
+        remaining,
         "",
         note,
     ]

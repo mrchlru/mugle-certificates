@@ -215,6 +215,8 @@ def credit_certificate(
     )
     db.commit()
     db.refresh(tx)
+    db.refresh(certificate)
+    _sync_usage(db, certificate)
     return tx
 
 
@@ -998,6 +1000,7 @@ def _sheet_usages(db: Session, certificate_id: int) -> list:
             used_on=as_utc(tx.created_at).astimezone(MSK).date(),
             amount_kopecks=tx.amount,
             restaurant=tx.restaurant or "",
+            order_ref=(tx.order_ref or "").strip(),
         )
         for tx in rows
     ]

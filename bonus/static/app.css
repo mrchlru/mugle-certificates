@@ -1062,6 +1062,37 @@ body:has(.wallet-wrap) .flash {
   outline-offset: 2px;
 }
 
+.color-saved {
+  display: contents;
+}
+
+.color-saved-option {
+  overflow: visible;
+}
+
+.color-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  z-index: 2;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: #111;
+  color: #fff;
+  font-size: 12px;
+  line-height: 16px;
+  text-align: center;
+  cursor: pointer;
+  box-shadow: 0 0 0 1px #fff;
+}
+
+.color-remove:hover {
+  background: #9d2c2c;
+}
+
 .color-picker-option {
   overflow: hidden;
 }
