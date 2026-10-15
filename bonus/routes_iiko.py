@@ -85,11 +85,34 @@ class RefundResponse(BaseModel):
     refunded_rub: str
 
 
+class PluginConfigResponse(BaseModel):
+    """Удалённые настройки плагина iiko (локально остаются BaseUrl и ключ)."""
+
+    payment_type_name: str
+    payment_system_key: str
+    payment_system_name: str
+    counteragent_user_name: str = ""
+
+
 def require_iiko_key(x_iiko_key: Annotated[str, Header(alias="X-Iiko-Key")] = "") -> None:
     """Проверяет ключ плагина. Пустой ключ в настройках = API выключен."""
     expected = get_settings().iiko_api_key.strip()
     if expected == "" or x_iiko_key.strip() != expected:
         raise HTTPException(status_code=401, detail="Неверный или не заданный ключ iiko")
+
+
+@router.get("/plugin-config", response_model=PluginConfigResponse)
+def iiko_plugin_config(
+    _: None = Depends(require_iiko_key),
+) -> PluginConfigResponse:
+    """Отдаёт имена типа оплаты/ПС для касс без переустановки DLL."""
+    settings = get_settings()
+    return PluginConfigResponse(
+        payment_type_name=settings.iiko_plugin_payment_type_name.strip() or "Statix Pro Bonus",
+        payment_system_key=settings.iiko_plugin_payment_system_key.strip() or "StatixProBonus",
+        payment_system_name=settings.iiko_plugin_payment_system_name.strip() or "Statix Pro",
+        counteragent_user_name="",
+    )
 
 
 @router.post("/lookup", response_model=LookupResponse)
