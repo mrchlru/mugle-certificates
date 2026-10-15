@@ -4,8 +4,6 @@
 <section class="stack narrow-block">
   <p class="eyebrow">Старая таблица</p>
   <h1>Импорт сертификатов</h1>
-  <p class="lede">Подойдёт Excel или CSV. Колонки: ФИО, отдел, должность, телефон, номинал, процент, сегмент, комментарий, срок, остаток. Логин не нужен. На каждую строку появится ссылка сотруднику.</p>
-  <p class="lede">Оформление у всех импортируемых карточек одно — выбранный шаблон баннера.</p>
   <p><a class="text-link" href="/hr/import/sample.xlsx">Скачать пример Excel</a></p>
   <form method="post" action="/hr/import" enctype="multipart/form-data" class="stack">
     <input type="hidden" name="csrf_token" value="{{ csrf }}">
@@ -17,9 +15,6 @@
         {% endfor %}
       </select>
     </label>
-    {% if not templates %}
-    <p class="muted">Нет активных шаблонов — сначала загрузите картинку в «Оформление», либо импортируйте без баннера.</p>
-    {% endif %}
     <label class="field">Файл
       <input type="file" name="table" accept=".csv,.xlsx,text/csv" required>
     </label>

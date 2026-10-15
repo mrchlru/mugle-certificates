@@ -40,7 +40,6 @@
   <section class="stack issue-form">
     <p class="eyebrow">Новый сертификат</p>
     <h1>Выписать</h1>
-    <p class="lede">После выпуска появится ссылка. Её нужно отправить сотруднику — это и есть его сертификат. Учёт уйдёт в Google Таблицу на выбранный лист.</p>
     <form method="post" action="/hr/new" class="stack" id="issue-form">
       <input type="hidden" name="csrf_token" value="{{ csrf }}">
       <fieldset class="ledger-field">
@@ -82,9 +81,7 @@
       </label>
       <label class="field" id="expires-field">Срок действия
         <input type="date" name="expires_on" id="expires-on">
-        <span class="muted field-hint" id="expires-hint">Для бартера и дня рождения обязателен</span>
       </label>
-      <p class="muted" id="single-use-hint" hidden>Разовый: после первого списания остаток сгорает (полная сумма или часть — не важно). В таблице появится дата, сумма и ресторан использования.</p>
       <label class="field">Номинал, ₽
         <input name="nominal" id="field-nominal" inputmode="decimal" required placeholder="10000">
       </label>
@@ -121,13 +118,9 @@
           {% endfor %}
         </select>
       </label>
-      {% if not templates %}
-      <p class="muted">Сначала загрузите картинку в разделе «Оформление».</p>
-      {% endif %}
       <label class="field">Процент на карточке
         <input name="discount_percent" id="discount-percent" inputmode="numeric" placeholder="например 30" maxlength="3">
       </label>
-      <p class="muted">Только отображение на карточке. Скидку в чеке управляющий ставит вручную.</p>
       <label class="field">Комментарий
         <input name="note" maxlength="500">
       </label>
@@ -141,7 +134,6 @@
 (function () {
   var select = document.getElementById("segment-select");
   var expires = document.getElementById("expires-on");
-  var hint = document.getElementById("expires-hint");
   var templates = document.getElementById("template-select");
   var discount = document.getElementById("discount-percent");
   var nameInput = document.getElementById("field-name");
@@ -154,7 +146,6 @@
   var banner = document.getElementById("preview-banner");
   var bannerImg = document.getElementById("preview-banner-img");
   var bannerEmpty = document.getElementById("preview-banner-empty");
-  var singleHint = document.getElementById("single-use-hint");
   var birthField = document.getElementById("birth-field");
   var birthInput = document.getElementById("birth-date");
 
@@ -175,11 +166,6 @@
     var option = select.options[select.selectedIndex];
     var needed = option && option.getAttribute("data-requires-expiry") === "1";
     expires.required = needed;
-    if (hint) hint.hidden = !needed;
-    var ledger = selectedLedger();
-    var single = (option && option.getAttribute("data-single-use") === "1") ||
-      (ledger && ledger.getAttribute("data-single") === "1");
-    if (singleHint) singleHint.hidden = !single;
   }
 
   function formatMoney(raw) {

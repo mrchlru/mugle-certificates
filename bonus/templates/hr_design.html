@@ -4,9 +4,7 @@
 <section class="design-page">
   <header class="design-intro">
     <h1>Оформление</h1>
-    {% if media_on_s3 %}
-    <p class="muted lede">Обложки пишутся в S3 — после деплоя не пропадают.</p>
-    {% else %}
+    {% if not media_on_s3 %}
     <p class="flash bad">S3 не настроен: картинки лежат в контейнере и пропадут при деплое. В Timeweb задайте все <code>S3_*</code> (включая <code>S3_PUBLIC_BASE_URL</code>), затем заново загрузите шаблон ниже.</p>
     {% endif %}
   </header>
@@ -15,7 +13,6 @@
     <section class="design-panel">
       <header class="design-panel-head">
         <h2>Сегменты</h2>
-        <p class="muted">Ежемесячно — 1-го в 04:00 МСК неиспользованный остаток сгорает, баланс снова равен номиналу. Карта, выпущенная mid-month, живёт до следующего 1-го. Срок — «годен до». Разовый — одно списание, остаток сгорает.</p>
       </header>
 
       <form method="post" action="/hr/design/segments" class="design-create">
@@ -99,7 +96,6 @@
     <section class="design-panel">
       <header class="design-panel-head">
         <h2>Шаблоны</h2>
-        <p class="muted">Картинка в середине карточки. Процент с шаблона — тоже только подпись на карточке, не автоскидка.</p>
       </header>
 
       <form method="post" action="/hr/design/templates" enctype="multipart/form-data" class="design-create">
