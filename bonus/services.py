@@ -233,6 +233,8 @@ def set_blocked(db: Session, certificate: Certificate, actor: User, blocked: boo
         comment="Сертификат заблокирован" if blocked else "Сертификат снова активен",
     )
     db.commit()
+    db.refresh(certificate)
+    _sync_usage(db, certificate)
 
 
 def rename_holder(db: Session, user: User, full_name: str) -> None:
@@ -267,8 +269,7 @@ def set_certificate_expiry(db: Session, certificate: Certificate, expires_on: da
     expired = apply_expiry_writeoff(db, certificate)
     db.commit()
     db.refresh(certificate)
-    if expired:
-        _sync_usage(db, certificate, expired=True)
+    _sync_usage(db, certificate, expired=expired)
 
 
 def apply_expiry_writeoff(db: Session, certificate: Certificate) -> bool:

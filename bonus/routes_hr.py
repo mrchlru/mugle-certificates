@@ -497,6 +497,9 @@ def name_submit(
             job_title=job_title,
             phone=phone,
         )
+        db.refresh(certificate)
+        db.refresh(holder)
+        push_certificate_to_sheets(db, certificate)
     except BonusError as exc:
         flash(request, exc.message, "bad")
     else:

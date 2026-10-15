@@ -26,6 +26,8 @@ from bonus.values import format_date, format_money_plain, today_msk
 logger = logging.getLogger("bonus.sheets")
 
 _EXPIRED_MARK = "истек"
+_ROW_ALERT_COLOR = {"red": 0.96, "green": 0.80, "blue": 0.80}
+_ROW_CLEAR_COLOR = {"red": 1.0, "green": 1.0, "blue": 1.0}
 
 
 @dataclass(frozen=True)
@@ -67,7 +69,22 @@ def sync_certificate_issued(
             holder,
             segment_name=segment_name,
         )
-        _write_balance_cell(worksheet, kind, row_index, certificate.balance)
+        _write_profile_columns(
+            worksheet,
+            kind,
+            row_index,
+            certificate,
+            holder,
+            segment_name=segment_name,
+        )
+        _paint_certificate_row(
+            worksheet,
+            kind,
+            row_index,
+            certificate,
+            usages=[],
+            expired=False,
+        )
         logger.info(
             "Google Sheets: выпуск %s → лист «%s», строка %s",
             certificate.public_number,
@@ -108,10 +125,26 @@ def sync_certificate_usage(
             holder,
             segment_name=segment_name,
         )
+        _write_profile_columns(
+            worksheet,
+            kind,
+            row_index,
+            certificate,
+            holder,
+            segment_name=segment_name,
+        )
         date_col, amount_col, place_col = _usage_columns(kind)
         if expired:
             _set_cell(worksheet, row_index, date_col, _EXPIRED_MARK)
             _set_cell(worksheet, row_index, amount_col, format_money_plain(certificate.balance))
+            _paint_certificate_row(
+                worksheet,
+                kind,
+                row_index,
+                certificate,
+                usages=usages,
+                expired=True,
+            )
             logger.info(
                 "Google Sheets: %s помечена «истек» на листе «%s»",
                 certificate.public_number,
@@ -127,6 +160,14 @@ def sync_certificate_usage(
             place_col,
             usages,
             remaining_kopecks=certificate.balance,
+        )
+        _paint_certificate_row(
+            worksheet,
+            kind,
+            row_index,
+            certificate,
+            usages=usages,
+            expired=False,
         )
         logger.info(
             "Google Sheets: %s — %s списаний на листе «%s», строка %s, остаток %s",
@@ -213,6 +254,87 @@ def _write_balance_cell(
     """Пишет текущий остаток бонусов в колонку «Сумма» использования."""
     _, amount_col, _ = _usage_columns(kind)
     _set_cell(worksheet, row_index, amount_col, format_money_plain(remaining_kopecks))
+
+
+def _paint_certificate_row(
+    worksheet: Any,
+    kind: LedgerSheet,
+    row_index: int,
+    certificate: Certificate,
+    *,
+    usages: list[SheetUsageEntry],
+    expired: bool,
+) -> None:
+    """Красит строку красным, если карта использована, закончилась или истекла."""
+    alert = _certificate_row_alert(certificate, usages, expired)
+    last_col = _column_letter(len(ledger_headers(kind)))
+    a1 = f"A{row_index}:{last_col}{row_index}"
+    color = _ROW_ALERT_COLOR if alert else _ROW_CLEAR_COLOR
+    worksheet.format(a1, {"backgroundColor": color})
+
+
+def _certificate_row_alert(
+    certificate: Certificate,
+    usages: list[SheetUsageEntry],
+    expired: bool,
+) -> bool:
+    """Нужно ли подсветить строку как закрытую / использованную."""
+    if expired:
+        return True
+    if certificate.expires_on is not None and certificate.expires_on < today_msk():
+        return True
+    if usages:
+        return True
+    if certificate.balance <= 0:
+        return True
+    return False
+
+
+def _column_letter(index: int) -> str:
+    """1 → A, 13 → M."""
+    if index <= 0:
+        return "A"
+    letters = ""
+    current = index
+    while current > 0:
+        current, remainder = divmod(current - 1, 26)
+        letters = chr(65 + remainder) + letters
+    return letters
+
+
+def _write_profile_columns(
+    worksheet: Any,
+    kind: LedgerSheet,
+    row_index: int,
+    certificate: Certificate,
+    holder: User,
+    *,
+    segment_name: str,
+) -> None:
+    """Обновляет поля карты в строке (ФИО, срок, номинал, остаток и т.д.)."""
+    headers = ledger_headers(kind)
+    expires = format_date(certificate.expires_on) if certificate.expires_on else ""
+    birth = format_date(certificate.birth_date) if certificate.birth_date else ""
+    reason = (segment_name or "").strip()
+    values: dict[str, str] = {
+        "ФИО Сотрудника": holder.full_name.strip(),
+        "ФИО": holder.full_name.strip(),
+        "ООО": (certificate.company or "").strip(),
+        "Ресторан/офис": (holder.department or "").strip(),
+        "Должность": (holder.job_title or "").strip(),
+        "повод/бартер": reason,
+        "повод": reason,
+        "сегмент": reason,
+        "срок действия до": expires,
+        "Дата рождения": birth,
+        "Сумма сертификата": format_money_plain(certificate.nominal),
+        "Комментарии": (certificate.note or "").strip(),
+    }
+    for index, header in enumerate(headers, start=1):
+        if header not in values:
+            continue
+        _set_cell(worksheet, row_index, index, values[header])
+    _write_balance_cell(worksheet, kind, row_index, certificate.balance)
 
 
 def _write_usage_columns(
