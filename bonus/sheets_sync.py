@@ -277,11 +277,11 @@ def ensure_ledger_worksheets() -> list[str]:
 
 
 def _has_credentials(settings: Any) -> bool:
-    """Ключ есть, если файл на диске или JSON задан в переменной окружения."""
-    path = settings.google_service_account_file.strip()
-    if path and Path(path).is_file():
+    """Ключ есть, если JSON в env или файл на диске."""
+    if settings.google_service_account_json.strip():
         return True
-    return bool(settings.google_service_account_json.strip())
+    path = settings.google_service_account_file.strip()
+    return bool(path) and Path(path).is_file()
 
 
 def _client() -> Any:
@@ -299,16 +299,62 @@ def _client() -> Any:
 
 
 def _service_account_info(settings: Any) -> dict[str, Any]:
+    """JSON из env важнее файла: на Timeweb файла обычно нет, а путь в env может быть битым."""
+    raw = settings.google_service_account_json.strip()
+    if raw:
+        return _parse_service_account_json(raw)
     path = settings.google_service_account_file.strip()
     if path and Path(path).is_file():
         return json.loads(Path(path).read_text(encoding="utf-8"))
-    raw = settings.google_service_account_json.strip()
-    if not raw:
-        raise RuntimeError(
-            "Нет ключа Google: задайте GOOGLE_SERVICE_ACCOUNT_JSON "
-            "или положите файл по GOOGLE_SERVICE_ACCOUNT_FILE"
+    raise RuntimeError(
+        "Нет ключа Google: задайте GOOGLE_SERVICE_ACCOUNT_JSON "
+        "или положите файл по GOOGLE_SERVICE_ACCOUNT_FILE"
+    )
+
+
+def log_sheets_status() -> None:
+    """Пишет в лог старта, каким SA и какими листами реально пользуемся."""
+    settings = get_settings()
+    if not settings.google_sheets_spreadsheet_id.strip():
+        print("Teams Bonus: Google Sheets выключен — нет GOOGLE_SHEETS_SPREADSHEET_ID", flush=True)
+        return
+    if not _has_credentials(settings):
+        print(
+            "Teams Bonus: Google Sheets выключен — нет GOOGLE_SERVICE_ACCOUNT_JSON / FILE",
+            flush=True,
         )
-    return _parse_service_account_json(raw)
+        return
+    try:
+        info = _service_account_info(settings)
+        email = str(info.get("client_email") or "").strip()
+        book = _spreadsheet()
+        titles = [str(ws.title or "").strip() for ws in book.worksheets()]
+        missing = [
+            ledger_title(kind)
+            for kind in LedgerSheet
+            if _find_worksheet(book, ledger_title(kind)) is None
+        ]
+        print(
+            f"Teams Bonus: Google Sheets SA={email} "
+            f"id={settings.google_sheets_spreadsheet_id.strip()} "
+            f"«{book.title}» листы={titles}",
+            flush=True,
+        )
+        if missing:
+            print(
+                f"Teams Bonus: Google Sheets нет вкладок: {missing}",
+                flush=True,
+            )
+        else:
+            probe = _find_worksheet(book, ledger_title(LedgerSheet.employee))
+            if probe is not None:
+                probe.update_cell(1, 1, probe.cell(1, 1).value)
+            print("Teams Bonus: Google Sheets запись OK", flush=True)
+    except Exception as exc:
+        print(
+            f"Teams Bonus: Google Sheets проверка не удалась: {exc}. {_permission_hint()}",
+            flush=True,
+        )
 
 
 def _parse_service_account_json(raw: str) -> dict[str, Any]:
@@ -385,6 +431,12 @@ def _worksheet(kind: LedgerSheet) -> Any:
     worksheet = _find_worksheet(book, title)
     if worksheet is None:
         existing = _worksheet_titles(book)
+        if existing:
+            raise RuntimeError(
+                f"Лист «{title}» не найден. В таблице есть: {existing}. "
+                "Переименуйте вкладку или выберите другой лист учёта при выпуске. "
+                f"{_permission_hint()}"
+            )
         try:
             worksheet = book.add_worksheet(
                 title=title,
@@ -393,8 +445,8 @@ def _worksheet(kind: LedgerSheet) -> Any:
             )
         except Exception as exc:
             raise RuntimeError(
-                f"Лист «{title}» не найден (в таблице: {existing or 'пусто'}). "
-                f"Не удалось создать вкладку: {exc}. {_permission_hint()}"
+                f"Пустая таблица: не удалось создать лист «{title}»: {exc}. "
+                f"{_permission_hint()}"
             ) from exc
         worksheet.append_row(list(ledger_headers(kind)), value_input_option="USER_ENTERED")
         return worksheet

@@ -26,6 +26,9 @@ def bootstrap(settings: Settings) -> None:
             "при деплое без тома пропадут",
             flush=True,
         )
+    from bonus.sheets_sync import log_sheets_status
+
+    log_sheets_status()
     db = open_session()
     try:
         ensure_default_segments(db)
