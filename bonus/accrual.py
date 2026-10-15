@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from bonus.db import open_session
 from bonus.models import AccrualPeriod, Certificate, CertificateStatus, Segment, Transaction, TxType
 from bonus.services import BonusError, credit_certificate
-from bonus.values import MSK, today_msk
+from bonus.values import MSK, as_utc, today_msk
 
 logger = logging.getLogger("bonus.accrual")
 
@@ -50,7 +50,7 @@ def apply_monthly_accruals(db: Session, now: datetime | None = None) -> int:
     ).all()
     done = 0
     for certificate in certificates:
-        if not _certificate_accepts_accrual(certificate):
+        if not _certificate_accepts_accrual(certificate, moment):
             continue
         if _has_marker_credit(db, certificate.id, marker):
             continue
@@ -113,8 +113,12 @@ def _monthly_marker(year: int, month: int) -> str:
     return f"{_MONTHLY_PREFIX} {year:04d}-{month:02d}"
 
 
-def _certificate_accepts_accrual(certificate: Certificate) -> bool:
+def _certificate_accepts_accrual(certificate: Certificate, moment: datetime) -> bool:
+    """Активная карта, не просрочена и выпущена до текущего месяца начисления."""
     if certificate.expires_on is not None and certificate.expires_on < today_msk():
+        return False
+    created = as_utc(certificate.created_at).astimezone(MSK)
+    if (created.year, created.month) >= (moment.year, moment.month):
         return False
     return True
 
