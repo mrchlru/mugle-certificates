@@ -37,6 +37,7 @@ _ACTION_LABELS: dict[str, str] = {
     AuditAction.certificate_expiry.value: "Срок действия карты",
     AuditAction.debit_undo.value: "Отмена списания",
     AuditAction.import_rows.value: "Импорт карт",
+    AuditAction.certificate_delete.value: "Удаление карты",
 }
 
 

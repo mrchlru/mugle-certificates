@@ -45,6 +45,7 @@ from bonus.services import (
     IssueDraft,
     create_staff,
     credit_certificate,
+    delete_certificate,
     issue_certificate,
     normalize_discount,
     push_certificate_to_sheets,
@@ -466,6 +467,40 @@ def block_submit(
     else:
         flash(request, "Блокировка снята" if blocked != "1" else "Сертификат заблокирован")
     return RedirectResponse(f"/hr/c/{certificate_id}", status_code=303)
+
+
+@router.post("/hr/c/{certificate_id}/delete")
+def delete_submit(
+    certificate_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin)),
+    csrf_token: str = Form(""),
+    confirm: str = Form(""),
+):
+    """Полностью удаляет карту из БД и строку из Google Sheets. Только admin."""
+    certificate = _certificate_or_redirect(db, request, certificate_id)
+    if certificate is None:
+        return RedirectResponse("/hr", status_code=303)
+    try:
+        guard_csrf(request, csrf_token)
+        if confirm.strip().upper() != "УДАЛИТЬ":
+            raise BonusError('Чтобы удалить карту, введите слово УДАЛИТЬ')
+        public_number = delete_certificate(db, certificate, user)
+        write_audit(
+            db,
+            actor=user,
+            action=AuditAction.certificate_delete,
+            summary=f"Удаление карты {public_number}",
+            target_type="certificate",
+            target_id=certificate_id,
+            detail=public_number,
+        )
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+        return RedirectResponse(f"/hr/c/{certificate_id}", status_code=303)
+    flash(request, f"Карта {public_number} удалена из системы и Google Sheets")
+    return RedirectResponse("/hr", status_code=303)
 
 
 @router.post("/hr/c/{certificate_id}/name")

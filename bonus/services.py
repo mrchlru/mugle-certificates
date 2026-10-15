@@ -188,6 +188,96 @@ def undo_debit(db: Session, tx_id: int, actor: User, reason: str) -> Transaction
     return reversal
 
 
+def reset_monthly_balance(db: Session, certificate: Certificate, comment: str) -> None:
+    """Сжигает неиспользованный остаток и выставляет баланс равным номиналу.
+
+    Маркер в journal (credit с comment) пишется всегда — иначе 2-го числа
+    снова сгорит остаток, потраченный после 1-го.
+    """
+    text = comment.strip()[:300] or "Автоначисление: ежемесячно"
+    leftover = certificate.balance
+    if leftover > 0:
+        changed = _change_balance(
+            db,
+            certificate.id,
+            -leftover,
+            require_active=False,
+        )
+        if not changed:
+            db.rollback()
+            raise BonusError("Не удалось списать остаток перед ежемесячным обновлением")
+        db.refresh(certificate)
+        _add_transaction(
+            db,
+            certificate_id=certificate.id,
+            actor_id=None,
+            tx_type=TxType.burn,
+            amount=leftover,
+            balance_after=certificate.balance,
+            comment="Сгорание остатка перед ежемесячным начислением",
+        )
+    target = max(0, certificate.nominal)
+    if certificate.balance != target:
+        delta = target - certificate.balance
+        changed = _change_balance(
+            db,
+            certificate.id,
+            delta,
+            require_active=False,
+            grow_nominal=False,
+        )
+        if not changed:
+            db.rollback()
+            raise BonusError("Не удалось выставить ежемесячный лимит")
+        db.refresh(certificate)
+    _add_transaction(
+        db,
+        certificate_id=certificate.id,
+        actor_id=None,
+        tx_type=TxType.credit,
+        amount=target,
+        balance_after=certificate.balance,
+        comment=text,
+    )
+    db.commit()
+    db.refresh(certificate)
+    _sync_usage(db, certificate)
+
+
+def delete_certificate(db: Session, certificate: Certificate, actor: User) -> str:
+    """Полностью удаляет карту, журнал и строку в Google Sheets. Только admin."""
+    if actor.role != Role.admin:
+        raise BonusError("Удалять карты может только главный администратор")
+    public_number = certificate.public_number
+    ledger_sheet = certificate.ledger_sheet
+    holder_id = certificate.holder_id
+    certificate_id = certificate.id
+    from sqlalchemy import delete as sa_delete
+
+    db.execute(
+        update(Transaction)
+        .where(Transaction.certificate_id == certificate_id)
+        .values(reversal_of_id=None)
+    )
+    db.execute(sa_delete(Transaction).where(Transaction.certificate_id == certificate_id))
+    db.delete(certificate)
+    holder = db.get(User, holder_id)
+    if holder is not None and holder.role == Role.employee:
+        other = db.scalar(
+            select(Certificate.id).where(
+                Certificate.holder_id == holder_id,
+                Certificate.id != certificate_id,
+            )
+        )
+        if other is None:
+            db.delete(holder)
+    db.commit()
+    from bonus.sheets_sync import delete_certificate_row
+
+    delete_certificate_row(public_number, ledger_sheet)
+    return public_number
+
+
 def credit_certificate(
     db: Session,
     certificate: Certificate,

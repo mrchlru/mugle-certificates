@@ -19,8 +19,9 @@ from bonus.catalog import (
 )
 from bonus.config import get_settings
 from bonus.importer import parse_table
-from bonus.models import AccrualPeriod, Base, Role, Transaction, TxType, User
+from bonus.models import AccrualPeriod, Base, Certificate, Role, Transaction, TxType, User
 from bonus.security import hash_password
+from bonus.accrual import apply_monthly_accruals
 from bonus.services import (
     BonusError,
     IssueDraft,
@@ -28,8 +29,10 @@ from bonus.services import (
     create_staff,
     credit_certificate,
     debit_certificate,
+    delete_certificate,
     find_certificate,
     issue_certificate,
+    reset_monthly_balance,
     set_blocked,
     set_certificate_expiry,
     undo_debit,
@@ -98,6 +101,80 @@ def test_segment_edit_and_accrual_period() -> None:
     assert updated.accrual_period == AccrualPeriod.monthly
     assert updated.requires_expiry is False
     assert updated.discount_percent == 15
+
+
+def test_monthly_reset_burns_leftover_and_restores_nominal() -> None:
+    db = _db()
+    hr = _person(db, "hr", Role.hr)
+    manager = _person(db, "manager", Role.manager)
+    issued = issue_certificate(db, _draft(1_000_000), hr)
+    debit_certificate(db, issued.certificate, manager, 400_000, "обед")
+    assert issued.certificate.balance == 600_000
+    reset_monthly_balance(db, issued.certificate, "Автоначисление: ежемесячно 2026-11")
+    assert issued.certificate.balance == 1_000_000
+    assert issued.certificate.nominal == 1_000_000
+    burns = db.scalars(
+        select(Transaction).where(
+            Transaction.certificate_id == issued.certificate.id,
+            Transaction.tx_type == TxType.burn,
+        )
+    ).all()
+    assert any(row.amount == 600_000 for row in burns)
+    markers = db.scalars(
+        select(Transaction).where(
+            Transaction.certificate_id == issued.certificate.id,
+            Transaction.tx_type == TxType.credit,
+            Transaction.comment == "Автоначисление: ежемесячно 2026-11",
+        )
+    ).all()
+    assert len(markers) == 1
+
+
+def test_monthly_accrual_skips_issue_month() -> None:
+    db = _db()
+    hr = _person(db, "hr", Role.hr)
+    ensure_default_segments(db)
+    segment = next(
+        item for item in list_segments(db) if item.accrual_period == AccrualPeriod.monthly
+    )
+    issued = issue_certificate(
+        db,
+        IssueDraft(
+            full_name="Сотрудник",
+            login="",
+            password="",
+            nominal=500_000,
+            balance=None,
+            note="",
+            expires_on=None,
+            segment_id=segment.id,
+        ),
+        hr,
+    )
+    now = datetime.now().astimezone()
+    assert apply_monthly_accruals(db, now) == 0
+    issued.certificate.created_at = datetime(
+        now.year, now.month, 1, tzinfo=timezone.utc
+    ) - timedelta(days=32)
+    db.commit()
+    db.refresh(issued.certificate)
+    done = apply_monthly_accruals(db, now)
+    assert done == 1
+    assert issued.certificate.balance == 500_000
+    assert apply_monthly_accruals(db, now) == 0
+
+
+def test_admin_can_hard_delete_certificate() -> None:
+    db = _db()
+    admin = _person(db, "admin", Role.admin)
+    hr = _person(db, "hr", Role.hr)
+    issued = issue_certificate(db, _draft(200_000), hr)
+    cert_id = issued.certificate.id
+    public_number = delete_certificate(db, issued.certificate, admin)
+    assert public_number
+    assert db.get(Certificate, cert_id) is None
+    with pytest.raises(BonusError):
+        delete_certificate(db, issue_certificate(db, _draft(100_000), hr).certificate, hr)
 
 
 def test_single_use_burns_remainder_after_first_debit() -> None:

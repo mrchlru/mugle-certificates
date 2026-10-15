@@ -60,6 +60,17 @@
         <button class="btn ghost" type="submit">{{ 'Разблокировать' if card.status.value == 'blocked' else 'Заблокировать' }}</button>
       </form>
     </div>
+    {% if user and user.role.value == 'admin' %}
+    <form method="post" action="/hr/c/{{ card.id }}/delete" class="stack danger-zone" onsubmit="return confirm('Карта будет удалена безвозвратно, в том числе строка в Google Sheets. Продолжить?');">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <p class="eyebrow">Удаление (только админ)</p>
+      <p class="muted">Карта, история операций и строка в таблице удаляются без восстановления.</p>
+      <label class="field">Введите УДАЛИТЬ
+        <input name="confirm" autocomplete="off" required placeholder="УДАЛИТЬ">
+      </label>
+      <button class="btn danger" type="submit">Удалить карту навсегда</button>
+    </form>
+    {% endif %}
   </section>
 </div>
 {% set next_path = '/hr/c/' ~ card.id %}

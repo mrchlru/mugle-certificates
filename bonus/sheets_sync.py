@@ -192,6 +192,40 @@ def _is_permission_error(exc: BaseException) -> bool:
     return "403" in text or "permission" in text or "не удалось создать вкладку" in text
 
 
+def delete_certificate_row(public_number: str, ledger_sheet: str) -> None:
+    """Удаляет строку карты из Google Sheets целиком."""
+    if not sheets_enabled():
+        logger.warning(
+            "Google Sheets: удаление %s пропущено — нет spreadsheet id или ключа SA",
+            public_number,
+        )
+        return
+    try:
+        kind = parse_ledger_sheet(ledger_sheet)
+        worksheet = _worksheet(kind)
+        row_index = _find_row(worksheet, public_number)
+        if row_index is None:
+            logger.info(
+                "Google Sheets: строка %s уже отсутствует на листе «%s»",
+                public_number,
+                worksheet.title,
+            )
+            return
+        worksheet.delete_rows(row_index)
+        logger.info(
+            "Google Sheets: удалена строка %s с листа «%s»",
+            public_number,
+            worksheet.title,
+        )
+    except Exception as exc:
+        logger.exception(
+            "Google Sheets: не удалось удалить %s (%s). %s",
+            public_number,
+            exc,
+            _permission_hint() if _is_permission_error(exc) else "",
+        )
+
+
 def _ensure_certificate_row(
     worksheet: Any,
     kind: LedgerSheet,

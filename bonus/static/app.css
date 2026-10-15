@@ -192,6 +192,18 @@ select:focus {
 
 .btn.wide { width: 100%; }
 
+.btn.danger {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #fff;
+}
+
+.danger-zone {
+  margin-top: 8px;
+  padding-top: 16px;
+  border-top: 1px solid #f0d6d6;
+}
+
 .text-link {
   padding: 0;
   border: 0;

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from bonus.db import open_session
 from bonus.models import AccrualPeriod, Certificate, CertificateStatus, Segment, Transaction, TxType
-from bonus.services import BonusError, credit_certificate
+from bonus.services import BonusError, reset_monthly_balance
 from bonus.values import MSK, as_utc, today_msk
 
 logger = logging.getLogger("bonus.accrual")
@@ -33,7 +33,11 @@ def run_scheduled_accruals() -> int:
 
 
 def apply_monthly_accruals(db: Session, now: datetime | None = None) -> int:
-    """Начисляет номинал картам с сегментом «ежемесячно», один раз за календарный месяц."""
+    """Сбрасывает остаток и ставит номинал картам с «ежемесячно», раз в календарный месяц.
+
+    Карта, выпущенная внутри месяца (например 20.10), живёт до 1-го следующего месяца —
+    тогда лимит обновляется. В месяц выпуска повторного начисления нет.
+    """
     moment = now or datetime.now(MSK)
     marker = _monthly_marker(moment.year, moment.month)
     certificates = db.scalars(
@@ -55,14 +59,7 @@ def apply_monthly_accruals(db: Session, now: datetime | None = None) -> int:
         if _has_marker_credit(db, certificate.id, marker):
             continue
         try:
-            credit_certificate(
-                db,
-                certificate,
-                None,
-                certificate.nominal,
-                marker,
-                grow_nominal=False,
-            )
+            reset_monthly_balance(db, certificate, marker)
         except BonusError as exc:
             logger.warning(
                 "Ежемесячное начисление %s пропущено: %s",
@@ -72,7 +69,7 @@ def apply_monthly_accruals(db: Session, now: datetime | None = None) -> int:
             continue
         done += 1
         logger.info(
-            "Ежемесячное начисление %s на %s коп.",
+            "Ежемесячный сброс %s → номинал %s коп.",
             certificate.public_number,
             certificate.nominal,
         )
@@ -114,7 +111,7 @@ def _monthly_marker(year: int, month: int) -> str:
 
 
 def _certificate_accepts_accrual(certificate: Certificate, moment: datetime) -> bool:
-    """Активная карта, не просрочена и выпущена до текущего месяца начисления."""
+    """Не просрочена; в месяц выпуска автосброс не делается — лимит уже выдан при выпуске."""
     if certificate.expires_on is not None and certificate.expires_on < today_msk():
         return False
     created = as_utc(certificate.created_at).astimezone(MSK)
