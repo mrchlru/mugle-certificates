@@ -108,19 +108,20 @@
             <input name="discount_percent" inputmode="numeric" placeholder="30" maxlength="3" title="Только отображение">
           </label>
         </div>
-        <div class="design-form-row">
-          <label class="field">Цвет карты
-            <input type="color" name="color" value="#00A8A8" title="Подставится при выборе шаблона">
-          </label>
-          <label class="field">Сегмент
-            <select name="segment_id">
-              <option value="0">Без привязки</option>
-              {% for segment in segments if segment.is_active %}
-              <option value="{{ segment.id }}">{{ segment.name }}</option>
-              {% endfor %}
-            </select>
-          </label>
-        </div>
+        <fieldset class="color-field">
+          <legend>Цвет карты</legend>
+          {% with colors=colors, selected_color='#00A8A8', color_name='color', color_uid='template-new' %}
+            {% include "_color_picker.html" %}
+          {% endwith %}
+        </fieldset>
+        <label class="field">Сегмент
+          <select name="segment_id">
+            <option value="0">Без привязки</option>
+            {% for segment in segments if segment.is_active %}
+            <option value="{{ segment.id }}">{{ segment.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
         <label class="field">Баннер
           <span class="file-pick">
             <input type="file" name="image" accept="image/jpeg,image/png,image/webp" required data-file-pick>
@@ -162,22 +163,20 @@
                   <input name="discount_percent" value="{{ item.discount_percent or '' }}" inputmode="numeric" maxlength="3" placeholder="0" title="Только отображение">
                 </label>
               </div>
-              <div class="design-form-row">
-                <label class="field">Цвет карты
-                  <span class="design-color-row">
-                    <input type="color" name="color" value="{{ item.color or '#00A8A8' }}">
-                    <span class="design-color-swatch" style="background: {{ item.color or '#00A8A8' }}"></span>
-                  </span>
-                </label>
-                <label class="field">Сегмент
-                  <select name="segment_id">
-                    <option value="0">Без привязки</option>
-                    {% for segment in segments if segment.is_active %}
-                    <option value="{{ segment.id }}" {% if item.segment_id == segment.id %}selected{% endif %}>{{ segment.name }}</option>
-                    {% endfor %}
-                  </select>
-                </label>
-              </div>
+              <fieldset class="color-field">
+                <legend>Цвет карты</legend>
+                {% with colors=colors, selected_color=item.color or '#00A8A8', color_name='color', color_uid='template-' ~ item.id %}
+                  {% include "_color_picker.html" %}
+                {% endwith %}
+              </fieldset>
+              <label class="field">Сегмент
+                <select name="segment_id">
+                  <option value="0">Без привязки</option>
+                  {% for segment in segments if segment.is_active %}
+                  <option value="{{ segment.id }}" {% if item.segment_id == segment.id %}selected{% endif %}>{{ segment.name }}</option>
+                  {% endfor %}
+                </select>
+              </label>
               <label class="field">Заменить баннер
                 <span class="file-pick">
                   <input type="file" name="image" accept="image/jpeg,image/png,image/webp" data-file-pick>
@@ -232,6 +231,7 @@
 </section>
 {% endblock %}
 {% block scripts %}
+<script src="/static/color-picker.js?v={{ asset_v }}"></script>
 <script>
 (function () {
   function bindFilePick(input) {
@@ -249,6 +249,9 @@
     sync();
   }
   document.querySelectorAll("[data-file-pick]").forEach(bindFilePick);
+  if (window.TeamsBonusColorPicker) {
+    window.TeamsBonusColorPicker.initAll();
+  }
 })();
 </script>
 {% endblock %}
