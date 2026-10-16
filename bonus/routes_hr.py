@@ -301,18 +301,23 @@ def template_create(
     name: str = Form(""),
     discount_percent: str = Form(""),
     image: UploadFile = File(...),
+    logo: UploadFile = File(...),
     csrf_token: str = Form(""),
 ):
-    """Загружает картинку шаблона для баннера карточки."""
+    """Загружает баннер и логотип шаблона карточки."""
     try:
         guard_csrf(request, csrf_token)
         payload = image.file.read()
+        logo_payload = logo.file.read()
         save_template(
             db,
             name=name,
             filename=image.filename or "template.png",
             payload=payload,
             content_type=image.content_type or "",
+            logo_filename=logo.filename or "logo.png",
+            logo_payload=logo_payload,
+            logo_content_type=logo.content_type or "",
             discount_percent=_discount(discount_percent),
         )
     except BonusError as exc:
@@ -331,9 +336,10 @@ async def template_update(
     name: str = Form(""),
     discount_percent: str = Form(""),
     image: UploadFile | None = File(None),
+    logo: UploadFile | None = File(None),
     csrf_token: str = Form(""),
 ):
-    """Меняет название шаблона и при желании заменяет картинку."""
+    """Меняет название шаблона и при желании заменяет баннер или логотип."""
     template = db.get(CardTemplate, template_id)
     try:
         guard_csrf(request, csrf_token)
@@ -346,6 +352,13 @@ async def template_update(
             payload = await image.read()
             content_type = image.content_type or ""
             filename = image.filename
+        logo_payload: bytes | None = None
+        logo_content_type = ""
+        logo_filename = ""
+        if logo is not None and logo.filename:
+            logo_payload = await logo.read()
+            logo_content_type = logo.content_type or ""
+            logo_filename = logo.filename
         update_template(
             db,
             template,
@@ -354,6 +367,9 @@ async def template_update(
             filename=filename,
             payload=payload,
             content_type=content_type,
+            logo_filename=logo_filename,
+            logo_payload=logo_payload,
+            logo_content_type=logo_content_type,
         )
     except BonusError as exc:
         flash(request, exc.message, "bad")

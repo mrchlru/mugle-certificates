@@ -35,6 +35,10 @@ def ensure_schema(engine: Engine) -> None:
             statements.append(
                 "ALTER TABLE card_templates ADD COLUMN discount_percent INTEGER DEFAULT 0"
             )
+        if "logo_path" not in columns:
+            statements.append(
+                "ALTER TABLE card_templates ADD COLUMN logo_path VARCHAR(200) DEFAULT ''"
+            )
     if "transactions" in tables:
         columns = {column["name"] for column in inspector.get_columns("transactions")}
         if "restaurant" not in columns:

@@ -791,6 +791,12 @@ body:has(.wallet-wrap) .flash {
 
 .wallet-logo {
   width: 58px;
+  height: 47px;
+  object-fit: contain;
+  object-position: left center;
+}
+
+.wallet-logo.is-default {
   height: auto;
   filter: brightness(0) invert(1);
 }
@@ -1278,17 +1284,31 @@ body:has(.wallet-wrap) .flash {
 }
 
 .design-thumb {
+  position: relative;
   overflow: hidden;
   border-radius: 12px;
   background: #111;
   aspect-ratio: 5 / 3;
 }
 
-.design-thumb img {
+.design-thumb > img:first-child {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
+}
+
+.design-thumb-logo {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  width: 29px;
+  height: 24px;
+  object-fit: contain;
+  display: block;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 4px;
+  padding: 2px;
 }
 
 .design-card-body {

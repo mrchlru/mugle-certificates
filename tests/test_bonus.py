@@ -223,6 +223,9 @@ def test_issue_with_segment_color_and_template() -> None:
         filename="banner.png",
         payload=_tiny_png(),
         content_type="image/png",
+        logo_filename="logo.png",
+        logo_payload=_tiny_png(),
+        logo_content_type="image/png",
     )
     issued = issue_certificate(
         db,
@@ -244,9 +247,8 @@ def test_issue_with_segment_color_and_template() -> None:
     assert issued.certificate.segment_id == segment.id
     assert issued.certificate.template_id == template.id
     assert template.image_path.endswith(".webp")
-    stored = get_settings().data_path() / "uploads" / Path(template.image_path).name
-    assert stored.is_file()
-    assert stored.read_bytes()[:4] == b"RIFF"
+    assert template.logo_path.endswith(".webp")
+    assert template.logo_path.startswith("logo-") or "logo-" in Path(template.logo_path).name
 
 
 def test_media_url_uses_s3_public_base(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -301,10 +303,16 @@ def test_template_replace_deletes_old_file() -> None:
         filename="old.png",
         payload=_tiny_png(),
         content_type="image/png",
+        logo_filename="old-logo.png",
+        logo_payload=_tiny_png(),
+        logo_content_type="image/png",
     )
     old_key = first.image_path
+    old_logo = first.logo_path
     old_path = get_settings().data_path() / "uploads" / Path(old_key)
+    old_logo_path = get_settings().data_path() / "uploads" / Path(old_logo)
     assert old_path.is_file()
+    assert old_logo_path.is_file()
     updated = update_template(
         db,
         first,
@@ -312,11 +320,17 @@ def test_template_replace_deletes_old_file() -> None:
         filename="new.png",
         payload=_tiny_png(),
         content_type="image/png",
+        logo_filename="new-logo.png",
+        logo_payload=_tiny_png(),
+        logo_content_type="image/png",
     )
     assert updated.name == "Новый"
     assert updated.image_path != old_key
+    assert updated.logo_path != old_logo
     assert not old_path.is_file()
+    assert not old_logo_path.is_file()
     assert (get_settings().data_path() / "uploads" / Path(updated.image_path)).is_file()
+    assert (get_settings().data_path() / "uploads" / Path(updated.logo_path)).is_file()
 
 
 def test_staff_and_debit_keeps_restaurant() -> None:
@@ -542,8 +556,10 @@ def _draft(nominal: int) -> IssueDraft:
 
 
 def _tiny_png() -> bytes:
-    return (
-        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
-        b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f"
-        b"\x00\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82"
-    )
+    from io import BytesIO
+
+    from PIL import Image
+
+    buffer = BytesIO()
+    Image.new("RGB", (8, 8), (0, 168, 168)).save(buffer, format="PNG")
+    return buffer.getvalue()

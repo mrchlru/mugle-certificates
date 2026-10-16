@@ -7,7 +7,7 @@
     <p class="eyebrow">Как увидит сотрудник</p>
     <article class="wallet-card" id="card-preview" style="--card: {{ colors[0][0] }};">
       <div class="wallet-top">
-        <img class="wallet-logo" src="/static/logo.svg" alt="Mugle Rest" width="58" height="47">
+        <img class="wallet-logo is-default" id="preview-logo" src="/static/logo.svg" alt="" width="58" height="47">
         <div class="wallet-balance">
           <p class="wallet-label">Баланс</p>
           <p class="wallet-amount" id="preview-amount">0</p>
@@ -112,9 +112,9 @@
       </fieldset>
       <label class="field">Шаблон баннера
         <select name="template_id" id="template-select">
-          <option value="0" data-discount="0" data-image="">Без картинки</option>
+          <option value="0" data-discount="0" data-image="" data-logo="">Без картинки</option>
           {% for item in templates %}
-          <option value="{{ item.id }}" data-discount="{{ item.discount_percent or 0 }}" data-image="{{ media_url(item.image_path) }}">{{ item.name }}{% if item.discount_percent %} · {{ item.discount_percent }}%{% endif %}</option>
+          <option value="{{ item.id }}" data-discount="{{ item.discount_percent or 0 }}" data-image="{{ media_url(item.image_path) }}" data-logo="{% if item.logo_path %}{{ media_url(item.logo_path) }}{% endif %}">{{ item.name }}{% if item.discount_percent %} · {{ item.discount_percent }}%{% endif %}</option>
           {% endfor %}
         </select>
       </label>
@@ -146,8 +146,10 @@
   var banner = document.getElementById("preview-banner");
   var bannerImg = document.getElementById("preview-banner-img");
   var bannerEmpty = document.getElementById("preview-banner-empty");
+  var logoImg = document.getElementById("preview-logo");
   var birthField = document.getElementById("birth-field");
   var birthInput = document.getElementById("birth-date");
+  var defaultLogo = "/static/logo.svg";
 
   function selectedLedger() {
     return document.querySelector('input[name="ledger_sheet"]:checked');
@@ -211,8 +213,11 @@
       expiryEl.textContent = "";
     }
     var image = "";
+    var logo = "";
     if (templates && templates.selectedIndex >= 0) {
-      image = templates.options[templates.selectedIndex].getAttribute("data-image") || "";
+      var opt = templates.options[templates.selectedIndex];
+      image = opt.getAttribute("data-image") || "";
+      logo = opt.getAttribute("data-logo") || "";
     }
     if (image) {
       banner.classList.remove("is-empty");
@@ -224,6 +229,15 @@
       bannerImg.hidden = true;
       bannerImg.removeAttribute("src");
       bannerEmpty.hidden = false;
+    }
+    if (logoImg) {
+      if (logo) {
+        logoImg.src = logo;
+        logoImg.classList.remove("is-default");
+      } else {
+        logoImg.src = defaultLogo;
+        logoImg.classList.add("is-default");
+      }
     }
   }
 

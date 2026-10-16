@@ -22,7 +22,11 @@ from bonus.storage import (
 
 # Натуральный макет баннера 1672×763 — храним половину, та же пропорция.
 _BANNER_SIZE = (836, 382)
+# На карточке лого 58×47 — храним 2× для Retina.
+_LOGO_SIZE = (116, 94)
+_DEFAULT_LOGO_URL = "/static/logo.svg"
 _WEBP_QUALITY = 78
+_LOGO_WEBP_QUALITY = 90
 _MAX_UPLOAD_BYTES = 8_000_000
 
 # name, начисление, нужен ли срок, одноразовый
@@ -231,19 +235,19 @@ def save_template(
     filename: str,
     payload: bytes,
     content_type: str,
+    logo_filename: str,
+    logo_payload: bytes,
+    logo_content_type: str,
     discount_percent: int = 0,
 ) -> CardTemplate:
-    """Сохраняет картинку шаблона на диск или в S3 и пишет путь в базу."""
+    """Сохраняет баннер и логотип шаблона на диск или в S3."""
     cleaned = " ".join(name.split()) or Path(filename).stem or "Шаблон"
-    if content_type not in _IMAGE_TYPES:
-        raise BonusError("Нужен JPEG, PNG или WebP")
-    if len(payload) > _MAX_UPLOAD_BYTES:
-        raise BonusError("Картинка больше 8 МБ")
-    optimized = _optimize_template_image(payload)
-    stored = store_template_bytes(optimized, f"{secrets.token_hex(12)}.webp")
+    banner_path = _store_banner_upload(filename, payload, content_type)
+    logo_path = _store_logo_upload(logo_filename, logo_payload, logo_content_type)
     template = CardTemplate(
         name=cleaned[:120],
-        image_path=stored,
+        image_path=banner_path,
+        logo_path=logo_path,
         discount_percent=normalize_discount(discount_percent),
         is_active=True,
     )
@@ -268,30 +272,48 @@ def update_template(
     filename: str = "",
     payload: bytes | None = None,
     content_type: str = "",
+    logo_filename: str = "",
+    logo_payload: bytes | None = None,
+    logo_content_type: str = "",
 ) -> CardTemplate:
-    """Меняет название, процент и при необходимости заменяет картинку, удаляя старую."""
+    """Меняет название, процент и при необходимости заменяет баннер/логотип."""
     cleaned = " ".join(name.split()) or template.name
     if len(cleaned) < 1:
         raise BonusError("Укажите название шаблона")
     template.name = cleaned[:120]
     template.discount_percent = normalize_discount(discount_percent)
+    old_banner = ""
+    old_logo = ""
     if payload is not None and len(payload) > 0:
-        if content_type not in _IMAGE_TYPES:
-            raise BonusError("Нужен JPEG, PNG или WebP")
-        if len(payload) > _MAX_UPLOAD_BYTES:
-            raise BonusError("Картинка больше 8 МБ")
-        optimized = _optimize_template_image(payload)
-        stored = store_template_bytes(optimized, f"{secrets.token_hex(12)}.webp")
-        old_path = template.image_path
+        stored = _store_banner_upload(filename, payload, content_type)
+        old_banner = template.image_path
         template.image_path = stored
-        db.commit()
-        db.refresh(template)
-        if old_path and old_path != stored:
-            delete_template_object(old_path)
-        return template
+    if logo_payload is not None and len(logo_payload) > 0:
+        stored_logo = _store_logo_upload(logo_filename, logo_payload, logo_content_type)
+        old_logo = template.logo_path or ""
+        template.logo_path = stored_logo
     db.commit()
     db.refresh(template)
+    if old_banner and old_banner != template.image_path:
+        delete_template_object(old_banner)
+    if old_logo and old_logo != template.logo_path:
+        delete_template_object(old_logo)
     return template
+
+
+def template_logo_url(template: CardTemplate | None) -> str:
+    """Публичный URL логотипа шаблона или дефолтный Mugle."""
+    if template is None:
+        return _DEFAULT_LOGO_URL
+    path = (template.logo_path or "").strip()
+    if not path:
+        return _DEFAULT_LOGO_URL
+    return media_url(path)
+
+
+def template_logo_is_custom(template: CardTemplate | None) -> bool:
+    """Есть ли у шаблона свой загруженный логотип."""
+    return bool(template is not None and (template.logo_path or "").strip())
 
 
 def optimize_existing_templates(db: Session) -> None:
@@ -382,6 +404,30 @@ def _sync_segment_defaults(
     return changed
 
 
+def _store_banner_upload(filename: str, payload: bytes, content_type: str) -> str:
+    """Проверяет баннер и сохраняет оптимизированный WebP."""
+    _validate_image_upload(payload, content_type, label="Баннер")
+    optimized = _optimize_template_image(payload)
+    return store_template_bytes(optimized, f"{secrets.token_hex(12)}.webp")
+
+
+def _store_logo_upload(filename: str, payload: bytes, content_type: str) -> str:
+    """Проверяет логотип и сохраняет WebP 116×94 (на карточке 58×47)."""
+    _validate_image_upload(payload, content_type, label="Логотип")
+    optimized = _optimize_logo_image(payload)
+    return store_template_bytes(optimized, f"logo-{secrets.token_hex(12)}.webp")
+
+
+def _validate_image_upload(payload: bytes, content_type: str, *, label: str) -> None:
+    """Общие проверки JPEG/PNG/WebP до обработки."""
+    if content_type not in _IMAGE_TYPES:
+        raise BonusError(f"{label}: нужен JPEG, PNG или WebP")
+    if len(payload) > _MAX_UPLOAD_BYTES:
+        raise BonusError(f"{label}: файл больше 8 МБ")
+    if not payload:
+        raise BonusError(f"{label}: файл пустой")
+
+
 def _optimize_template_image(payload: bytes) -> bytes:
     """Режет баннер под карточку и сжимает в WebP."""
     try:
@@ -407,6 +453,40 @@ def _optimize_template_image(payload: bytes) -> bytes:
     data = buffer.getvalue()
     if not data:
         raise BonusError("Не удалось обработать картинку")
+    return data
+
+
+def _optimize_logo_image(payload: bytes) -> bytes:
+    """Вписывает логотип в 116×94 с прозрачностью, без обрезки."""
+    try:
+        with Image.open(BytesIO(payload)) as image:
+            framed = ImageOps.exif_transpose(image)
+            rgba = framed.convert("RGBA")
+            fitted = ImageOps.contain(
+                rgba,
+                _LOGO_SIZE,
+                method=Image.Resampling.LANCZOS,
+            )
+            canvas = Image.new("RGBA", _LOGO_SIZE, (0, 0, 0, 0))
+            offset = (
+                (_LOGO_SIZE[0] - fitted.width) // 2,
+                (_LOGO_SIZE[1] - fitted.height) // 2,
+            )
+            canvas.paste(fitted, offset, fitted)
+            buffer = BytesIO()
+            canvas.save(
+                buffer,
+                format="WEBP",
+                quality=_LOGO_WEBP_QUALITY,
+                method=6,
+            )
+    except UnidentifiedImageError as exc:
+        raise BonusError("Логотип: файл не похож на картинку") from exc
+    except OSError as exc:
+        raise BonusError("Логотип: не удалось обработать картинку") from exc
+    data = buffer.getvalue()
+    if not data:
+        raise BonusError("Логотип: не удалось обработать картинку")
     return data
 
 

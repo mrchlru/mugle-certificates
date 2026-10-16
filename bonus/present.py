@@ -63,6 +63,8 @@ class CardView:
     single_use: bool
     segment_name: str
     template_url: str
+    logo_url: str
+    logo_custom: bool
     barcode_value: str
     barcode_svg: str
     history: tuple[TxView, ...]
@@ -362,12 +364,17 @@ def _card_view(
     history: tuple[TxView, ...],
 ) -> CardView:
     template_path = ""
+    logo_url = "/static/logo.svg"
+    logo_custom = False
     if certificate.template_id is not None:
+        from bonus.catalog import template_logo_is_custom, template_logo_url
         from bonus.models import CardTemplate
 
         template = db.get(CardTemplate, certificate.template_id)
         if template is not None and template.image_path:
             template_path = media_url(template.image_path)
+        logo_url = template_logo_url(template)
+        logo_custom = template_logo_is_custom(template)
     return CardView(
         id=certificate.id,
         public_number=certificate.public_number,
@@ -391,6 +398,8 @@ def _card_view(
         single_use=bool(certificate.single_use),
         segment_name=_segment_name(db, certificate.segment_id),
         template_url=template_path,
+        logo_url=logo_url,
+        logo_custom=logo_custom,
         barcode_value=format_short_code(certificate.short_code),
         barcode_svg=barcode_svg(certificate.short_code.replace("-", "").replace(" ", "")),
         history=history,
