@@ -235,17 +235,19 @@ def save_template(
     filename: str,
     payload: bytes,
     content_type: str,
-    logo_filename: str,
-    logo_payload: bytes,
-    logo_content_type: str,
+    logo_filename: str = "",
+    logo_payload: bytes | None = None,
+    logo_content_type: str = "",
     discount_percent: int = 0,
     color: str = "#00A8A8",
     segment_id: int | None = None,
 ) -> CardTemplate:
-    """Сохраняет баннер, логотип, цвет и привязку к сегменту."""
+    """Сохраняет баннер; без логотипа на карточке будет дефолтный."""
     cleaned = " ".join(name.split()) or Path(filename).stem or "Шаблон"
     banner_path = _store_banner_upload(filename, payload, content_type)
-    logo_path = _store_logo_upload(logo_filename, logo_payload, logo_content_type)
+    logo_path = ""
+    if logo_payload:
+        logo_path = _store_logo_upload(logo_filename, logo_payload, logo_content_type)
     template = CardTemplate(
         name=cleaned[:120],
         image_path=banner_path,

@@ -305,23 +305,29 @@ def template_create(
     color: str = Form("#00A8A8"),
     segment_id: int = Form(0),
     image: UploadFile = File(...),
-    logo: UploadFile = File(...),
+    logo: UploadFile | None = File(None),
     csrf_token: str = Form(""),
 ):
-    """Загружает баннер и логотип шаблона карточки."""
+    """Загружает баннер; логотип необязателен — иначе дефолтный."""
     try:
         guard_csrf(request, csrf_token)
         payload = image.file.read()
-        logo_payload = logo.file.read()
+        logo_filename = ""
+        logo_payload: bytes | None = None
+        logo_content_type = ""
+        if logo is not None and logo.filename:
+            logo_payload = logo.file.read()
+            logo_filename = logo.filename
+            logo_content_type = logo.content_type or ""
         save_template(
             db,
             name=name,
             filename=image.filename or "template.png",
             payload=payload,
             content_type=image.content_type or "",
-            logo_filename=logo.filename or "logo.png",
+            logo_filename=logo_filename,
             logo_payload=logo_payload,
-            logo_content_type=logo.content_type or "",
+            logo_content_type=logo_content_type,
             discount_percent=_discount(discount_percent),
             color=color,
             segment_id=segment_id or None,
