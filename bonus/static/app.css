@@ -790,14 +790,19 @@ body:has(.wallet-wrap) .flash {
 }
 
 .wallet-logo {
-  width: 58px;
-  height: 47px;
+  width: 160px;
+  max-width: min(160px, 48%);
+  height: 50px;
   object-fit: contain;
   object-position: left center;
+  flex: 0 1 auto;
 }
 
 .wallet-logo.is-default {
+  width: 58px;
+  max-width: 58px;
   height: auto;
+  flex: 0 0 auto;
   filter: brightness(0) invert(1);
 }
 
@@ -1302,9 +1307,10 @@ body:has(.wallet-wrap) .flash {
   position: absolute;
   left: 8px;
   top: 8px;
-  width: 29px;
-  height: 24px;
+  width: 72px;
+  height: 22px;
   object-fit: contain;
+  object-position: left center;
   display: block;
   background: rgba(0, 0, 0, 0.35);
   border-radius: 4px;

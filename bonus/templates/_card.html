@@ -1,6 +1,6 @@
 <article class="wallet-card" style="--card: {{ card.color }};">
   <div class="wallet-top">
-    <img class="wallet-logo{% if not card.logo_custom %} is-default{% endif %}" src="{{ card.logo_url }}" alt="" width="58" height="47">
+    <img class="wallet-logo{% if not card.logo_custom %} is-default{% endif %}" src="{{ card.logo_url }}" alt="" width="{% if card.logo_custom %}160{% else %}58{% endif %}" height="{% if card.logo_custom %}50{% else %}47{% endif %}">
     <div class="wallet-balance">
       <p class="wallet-label">Баланс</p>
       <p class="wallet-amount">{{ "{:,}".format(card.balance // 100).replace(",", " ") }}</p>

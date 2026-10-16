@@ -22,8 +22,8 @@ from bonus.storage import (
 
 # Натуральный макет баннера 1672×763 — храним половину, та же пропорция.
 _BANNER_SIZE = (836, 382)
-# На карточке лого 58×47 — храним 2× для Retina.
-_LOGO_SIZE = (116, 94)
+# На карточке кастомный логотип до 160×50 — храним 2× для Retina.
+_LOGO_SIZE = (320, 100)
 _DEFAULT_LOGO_URL = "/static/logo.svg"
 _WEBP_QUALITY = 78
 _LOGO_WEBP_QUALITY = 90
@@ -412,7 +412,7 @@ def _store_banner_upload(filename: str, payload: bytes, content_type: str) -> st
 
 
 def _store_logo_upload(filename: str, payload: bytes, content_type: str) -> str:
-    """Проверяет логотип и сохраняет WebP 116×94 (на карточке 58×47)."""
+    """Проверяет логотип и сохраняет WebP 320×100 (на карточке до 160×50)."""
     _validate_image_upload(payload, content_type, label="Логотип")
     optimized = _optimize_logo_image(payload)
     return store_template_bytes(optimized, f"logo-{secrets.token_hex(12)}.webp")
@@ -457,21 +457,18 @@ def _optimize_template_image(payload: bytes) -> bytes:
 
 
 def _optimize_logo_image(payload: bytes) -> bytes:
-    """Вписывает логотип в 116×94 с прозрачностью, без обрезки."""
+    """Обрезает пустые поля и вписывает логотип в 320×100 с прозрачностью."""
     try:
         with Image.open(BytesIO(payload)) as image:
             framed = ImageOps.exif_transpose(image)
-            rgba = framed.convert("RGBA")
+            rgba = _trim_logo_margins(framed.convert("RGBA"))
             fitted = ImageOps.contain(
                 rgba,
                 _LOGO_SIZE,
                 method=Image.Resampling.LANCZOS,
             )
             canvas = Image.new("RGBA", _LOGO_SIZE, (0, 0, 0, 0))
-            offset = (
-                (_LOGO_SIZE[0] - fitted.width) // 2,
-                (_LOGO_SIZE[1] - fitted.height) // 2,
-            )
+            offset = (0, (_LOGO_SIZE[1] - fitted.height) // 2)
             canvas.paste(fitted, offset, fitted)
             buffer = BytesIO()
             canvas.save(
@@ -488,6 +485,33 @@ def _optimize_logo_image(payload: bytes) -> bytes:
     if not data:
         raise BonusError("Логотип: не удалось обработать картинку")
     return data
+
+
+def _trim_logo_margins(image: Image.Image) -> Image.Image:
+    """Срезает прозрачные и почти чёрные поля, из‑за которых логотип сжимается."""
+    alpha = image.split()[-1]
+    bbox = alpha.getbbox()
+    if bbox is None:
+        return image
+    cropped = image.crop(bbox)
+    pixels = cropped.load()
+    width, height = cropped.size
+    min_x, min_y, max_x, max_y = width, height, -1, -1
+    for y in range(height):
+        for x in range(width):
+            red, green, blue, alpha_value = pixels[x, y]
+            if alpha_value > 12 and (red > 28 or green > 28 or blue > 28):
+                if x < min_x:
+                    min_x = x
+                if y < min_y:
+                    min_y = y
+                if x > max_x:
+                    max_x = x
+                if y > max_y:
+                    max_y = y
+    if max_x < 0:
+        return cropped
+    return cropped.crop((min_x, min_y, max_x + 1, max_y + 1))
 
 
 def _slug(name: str) -> str:
