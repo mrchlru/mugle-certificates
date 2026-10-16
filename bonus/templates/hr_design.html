@@ -128,10 +128,14 @@
       <ul class="design-list">
         {% for item in templates %}
         <li class="design-card design-card-template {% if not item.is_active %}is-off{% endif %}">
-          <div class="design-thumb">
-            <img src="{{ media_url(item.image_path) }}" alt="{{ item.name }}" width="160" height="96" loading="lazy" decoding="async">
+          <div class="design-thumb-stack">
+            <div class="design-thumb">
+              <img src="{{ media_url(item.image_path) }}" alt="{{ item.name }}" width="160" height="96" loading="lazy" decoding="async">
+            </div>
             {% if item.logo_path %}
-            <img class="design-thumb-logo" src="{{ media_url(item.logo_path) }}" alt="" width="160" height="50" loading="lazy" decoding="async">
+            <div class="design-logo-preview">
+              <img class="design-thumb-logo" src="{{ media_url(item.logo_path) }}" alt="" width="160" height="50" loading="lazy" decoding="async">
+            </div>
             {% endif %}
           </div>
           <div class="design-card-body">
@@ -169,11 +173,19 @@
                 <button class="btn ghost compact" type="submit">Сохранить</button>
               </div>
             </form>
-            <form method="post" action="/hr/design/templates/{{ item.id }}/active" class="design-side-action">
-              <input type="hidden" name="csrf_token" value="{{ csrf }}">
-              <input type="hidden" name="active" value="{{ '0' if item.is_active else '1' }}">
-              <button class="btn soft compact" type="submit">{{ 'Отключить' if item.is_active else 'Включить' }}</button>
-            </form>
+            <div class="design-side-actions">
+              <form method="post" action="/hr/design/templates/{{ item.id }}/active" class="design-side-action">
+                <input type="hidden" name="csrf_token" value="{{ csrf }}">
+                <input type="hidden" name="active" value="{{ '0' if item.is_active else '1' }}">
+                <button class="btn soft compact" type="submit">{{ 'Отключить' if item.is_active else 'Включить' }}</button>
+              </form>
+              {% if user and user.role.value == 'admin' %}
+              <form method="post" action="/hr/design/templates/{{ item.id }}/delete" class="design-side-action" onsubmit="return confirm('Удалить шаблон «{{ item.name }}» навсегда?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf }}">
+                <button class="btn danger compact" type="submit">Удалить</button>
+              </form>
+              {% endif %}
+            </div>
           </div>
         </li>
         {% else %}

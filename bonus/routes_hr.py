@@ -15,6 +15,7 @@ from bonus.catalog import (
     parse_accrual_period,
     resolve_segment,
     resolve_template,
+    delete_template,
     save_template,
     set_segment_active,
     set_template_active,
@@ -398,6 +399,37 @@ def template_active(
         flash(request, exc.message, "bad")
     else:
         flash(request, "Шаблон обновлён")
+    return RedirectResponse("/hr/design", status_code=303)
+
+
+@router.post("/hr/design/templates/{template_id}/delete")
+def template_delete(
+    template_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin)),
+    csrf_token: str = Form(""),
+):
+    """Удаляет шаблон и файлы. Только admin."""
+    template = db.get(CardTemplate, template_id)
+    try:
+        guard_csrf(request, csrf_token)
+        if template is None:
+            raise BonusError("Шаблон не найден")
+        name = delete_template(db, template, user)
+        write_audit(
+            db,
+            actor=user,
+            action=AuditAction.template_delete,
+            summary=f"Удаление шаблона {name}",
+            target_type="template",
+            target_id=template_id,
+            detail=name,
+        )
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+    else:
+        flash(request, f"Шаблон «{name}» удалён")
     return RedirectResponse("/hr/design", status_code=303)
 
 

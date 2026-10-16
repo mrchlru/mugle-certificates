@@ -47,6 +47,7 @@ class AuditAction(str, enum.Enum):
     debit_undo = "debit_undo"
     import_rows = "import_rows"
     certificate_delete = "certificate_delete"
+    template_delete = "template_delete"
 
 
 class CertificateStatus(str, enum.Enum):

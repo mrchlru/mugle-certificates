@@ -1288,33 +1288,44 @@ body:has(.wallet-wrap) .flash {
   align-items: start;
 }
 
+.design-thumb-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
 .design-thumb {
-  position: relative;
   overflow: hidden;
   border-radius: 12px;
   background: #111;
   aspect-ratio: 5 / 3;
 }
 
-.design-thumb > img:first-child {
+.design-thumb img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
 }
 
+.design-logo-preview {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 44px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #111;
+}
+
 .design-thumb-logo {
-  position: absolute;
-  left: 8px;
-  top: 8px;
-  width: 72px;
-  height: 22px;
+  width: 100%;
+  max-width: 120px;
+  height: 36px;
   object-fit: contain;
   object-position: left center;
   display: block;
-  background: rgba(0, 0, 0, 0.35);
-  border-radius: 4px;
-  padding: 2px;
 }
 
 .design-card-body {
@@ -1333,6 +1344,13 @@ body:has(.wallet-wrap) .flash {
 
 .design-card-foot .btn {
   margin-left: auto;
+}
+
+.design-side-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
 }
 
 .design-side-action {

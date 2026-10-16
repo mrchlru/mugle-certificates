@@ -6,11 +6,11 @@ from io import BytesIO
 from pathlib import Path
 
 from PIL import Image, ImageOps, UnidentifiedImageError
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from bonus.config import get_settings
-from bonus.models import AccrualPeriod, CardTemplate, Segment
+from bonus.models import AccrualPeriod, CardTemplate, Certificate, Role, Segment, User
 from bonus.services import BonusError, normalize_discount
 from bonus.storage import (
     delete_template_object,
@@ -261,6 +261,28 @@ def set_template_active(db: Session, template: CardTemplate, active: bool) -> No
     """Отключает шаблон без удаления файла."""
     template.is_active = active
     db.commit()
+
+
+def delete_template(db: Session, template: CardTemplate, actor: User) -> str:
+    """Полностью удаляет шаблон и файлы. Только admin."""
+    if actor.role != Role.admin:
+        raise BonusError("Удалять шаблоны может только главный администратор")
+    name = template.name
+    banner_path = template.image_path or ""
+    logo_path = (template.logo_path or "").strip()
+    template_id = template.id
+    db.execute(
+        update(Certificate)
+        .where(Certificate.template_id == template_id)
+        .values(template_id=None)
+    )
+    db.delete(template)
+    db.commit()
+    if banner_path:
+        delete_template_object(banner_path)
+    if logo_path:
+        delete_template_object(logo_path)
+    return name
 
 
 def update_template(
