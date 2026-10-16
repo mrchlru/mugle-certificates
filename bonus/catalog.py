@@ -22,8 +22,8 @@ from bonus.storage import (
 
 # Натуральный макет баннера 1672×763 — храним половину, та же пропорция.
 _BANNER_SIZE = (836, 382)
-# На карточке кастомный логотип до 160×50 — храним 2× для Retina.
-_LOGO_SIZE = (320, 100)
+# На карточке кастомный логотип до 140×44 — храним 2× для Retina.
+_LOGO_SIZE = (280, 88)
 _DEFAULT_LOGO_URL = "/static/logo.svg"
 _WEBP_QUALITY = 78
 _LOGO_WEBP_QUALITY = 90
@@ -452,7 +452,7 @@ def _store_banner_upload(filename: str, payload: bytes, content_type: str) -> st
 
 
 def _store_logo_upload(filename: str, payload: bytes, content_type: str) -> str:
-    """Проверяет логотип и сохраняет WebP 320×100 (на карточке до 160×50)."""
+    """Проверяет логотип и сохраняет WebP 280×88 (на карточке до 140×44)."""
     _validate_image_upload(payload, content_type, label="Логотип")
     optimized = _optimize_logo_image(payload)
     return store_template_bytes(optimized, f"logo-{secrets.token_hex(12)}.webp")
@@ -497,7 +497,7 @@ def _optimize_template_image(payload: bytes) -> bytes:
 
 
 def _optimize_logo_image(payload: bytes) -> bytes:
-    """Обрезает пустые поля и вписывает логотип в 320×100 с прозрачностью."""
+    """Обрезает пустые поля и вписывает логотип в 280×88 с прозрачностью."""
     try:
         with Image.open(BytesIO(payload)) as image:
             framed = ImageOps.exif_transpose(image)
