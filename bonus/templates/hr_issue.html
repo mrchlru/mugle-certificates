@@ -112,9 +112,9 @@
       </fieldset>
       <label class="field">Шаблон баннера
         <select name="template_id" id="template-select">
-          <option value="0" data-discount="0" data-image="" data-logo="">Без картинки</option>
+          <option value="0" data-discount="0" data-image="" data-logo="" data-color="" data-segment="">Без картинки</option>
           {% for item in templates %}
-          <option value="{{ item.id }}" data-discount="{{ item.discount_percent or 0 }}" data-image="{{ media_url(item.image_path) }}" data-logo="{% if item.logo_path %}{{ media_url(item.logo_path) }}{% endif %}">{{ item.name }}{% if item.discount_percent %} · {{ item.discount_percent }}%{% endif %}</option>
+          <option value="{{ item.id }}" data-discount="{{ item.discount_percent or 0 }}" data-image="{{ media_url(item.image_path) }}" data-logo="{% if item.logo_path %}{{ media_url(item.logo_path) }}{% endif %}" data-color="{{ item.color or '' }}" data-segment="{{ item.segment_id or '' }}">{{ item.name }}{% if item.discount_percent %} · {{ item.discount_percent }}%{% endif %}</option>
           {% endfor %}
         </select>
       </label>
@@ -251,6 +251,35 @@
     if (value && value !== "0") discount.value = value;
   }
 
+  function applyTemplateDefaults(option) {
+    if (!option) return;
+    applyDiscountFrom(option);
+    var color = option.getAttribute("data-color") || "";
+    if (color) applyTemplateColor(color);
+  }
+
+  function findTemplateForSegment(segmentId) {
+    if (!templates || !segmentId) return null;
+    for (var i = 0; i < templates.options.length; i++) {
+      var opt = templates.options[i];
+      if (String(opt.getAttribute("data-segment") || "") === String(segmentId)) {
+        return opt;
+      }
+    }
+    return null;
+  }
+
+  function applyTemplateColor(raw) {
+    var hex = normalizeHex(raw);
+    if (!hex) return;
+    var radio = document.querySelector('#color-grid input[name="color"][value="' + hex + '"]');
+    if (radio) {
+      selectColor(hex);
+      return;
+    }
+    saveCustomColor(hex);
+  }
+
   document.querySelectorAll('input[name="ledger_sheet"]').forEach(function (radio) {
     radio.addEventListener("change", syncLedger);
   });
@@ -258,6 +287,11 @@
     select.addEventListener("change", function () {
       syncExpiry();
       applyDiscountFrom(select.options[select.selectedIndex]);
+      var matched = findTemplateForSegment(select.value);
+      if (matched && templates) {
+        templates.value = matched.value;
+        applyTemplateDefaults(matched);
+      }
       syncPreview();
     });
   }
@@ -394,9 +428,9 @@
     });
   }
   renderSavedColors();
-  if (templates && discount) {
+  if (templates) {
     templates.addEventListener("change", function () {
-      applyDiscountFrom(templates.options[templates.selectedIndex]);
+      applyTemplateDefaults(templates.options[templates.selectedIndex]);
       syncPreview();
     });
   }

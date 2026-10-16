@@ -202,6 +202,7 @@ def design_page(request: Request, db: Session = Depends(get_db), user: User = De
         templates=list_templates(db, active_only=False),
         media_url=media_url,
         accrual_choices=ACCRUAL_CHOICES,
+        colors=CARD_COLORS,
         media_on_s3=s3_enabled(),
     )
 
@@ -301,6 +302,8 @@ def template_create(
     user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
     name: str = Form(""),
     discount_percent: str = Form(""),
+    color: str = Form("#00A8A8"),
+    segment_id: int = Form(0),
     image: UploadFile = File(...),
     logo: UploadFile = File(...),
     csrf_token: str = Form(""),
@@ -320,6 +323,8 @@ def template_create(
             logo_payload=logo_payload,
             logo_content_type=logo.content_type or "",
             discount_percent=_discount(discount_percent),
+            color=color,
+            segment_id=segment_id or None,
         )
     except BonusError as exc:
         flash(request, exc.message, "bad")
@@ -336,11 +341,13 @@ async def template_update(
     user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
     name: str = Form(""),
     discount_percent: str = Form(""),
+    color: str = Form("#00A8A8"),
+    segment_id: int = Form(0),
     image: UploadFile | None = File(None),
     logo: UploadFile | None = File(None),
     csrf_token: str = Form(""),
 ):
-    """Меняет название шаблона и при желании заменяет баннер или логотип."""
+    """Меняет название, цвет, сегмент и при желании баннер или логотип."""
     template = db.get(CardTemplate, template_id)
     try:
         guard_csrf(request, csrf_token)
@@ -365,6 +372,8 @@ async def template_update(
             template,
             name=name,
             discount_percent=_discount(discount_percent),
+            color=color,
+            segment_id=segment_id or None,
             filename=filename,
             payload=payload,
             content_type=content_type,

@@ -239,8 +239,10 @@ def save_template(
     logo_payload: bytes,
     logo_content_type: str,
     discount_percent: int = 0,
+    color: str = "#00A8A8",
+    segment_id: int | None = None,
 ) -> CardTemplate:
-    """Сохраняет баннер и логотип шаблона на диск или в S3."""
+    """Сохраняет баннер, логотип, цвет и привязку к сегменту."""
     cleaned = " ".join(name.split()) or Path(filename).stem or "Шаблон"
     banner_path = _store_banner_upload(filename, payload, content_type)
     logo_path = _store_logo_upload(logo_filename, logo_payload, logo_content_type)
@@ -248,6 +250,8 @@ def save_template(
         name=cleaned[:120],
         image_path=banner_path,
         logo_path=logo_path,
+        color=normalize_color(color or "#00A8A8"),
+        segment_id=_optional_segment_id(db, segment_id),
         discount_percent=normalize_discount(discount_percent),
         is_active=True,
     )
@@ -291,6 +295,8 @@ def update_template(
     *,
     name: str,
     discount_percent: int = 0,
+    color: str = "#00A8A8",
+    segment_id: int | None = None,
     filename: str = "",
     payload: bytes | None = None,
     content_type: str = "",
@@ -298,12 +304,14 @@ def update_template(
     logo_payload: bytes | None = None,
     logo_content_type: str = "",
 ) -> CardTemplate:
-    """Меняет название, процент и при необходимости заменяет баннер/логотип."""
+    """Меняет название, цвет, сегмент и при необходимости баннер/логотип."""
     cleaned = " ".join(name.split()) or template.name
     if len(cleaned) < 1:
         raise BonusError("Укажите название шаблона")
     template.name = cleaned[:120]
     template.discount_percent = normalize_discount(discount_percent)
+    template.color = normalize_color(color or "#00A8A8")
+    template.segment_id = _optional_segment_id(db, segment_id)
     old_banner = ""
     old_logo = ""
     if payload is not None and len(payload) > 0:
@@ -321,6 +329,16 @@ def update_template(
     if old_logo and old_logo != template.logo_path:
         delete_template_object(old_logo)
     return template
+
+
+def _optional_segment_id(db: Session, segment_id: int | None) -> int | None:
+    """Пустая привязка или id активного сегмента."""
+    if segment_id is None or segment_id <= 0:
+        return None
+    segment = db.get(Segment, segment_id)
+    if segment is None or not segment.is_active:
+        raise BonusError("Выберите сегмент для шаблона или оставьте без привязки")
+    return segment.id
 
 
 def template_logo_url(template: CardTemplate | None) -> str:

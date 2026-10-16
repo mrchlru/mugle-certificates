@@ -108,6 +108,19 @@
             <input name="discount_percent" inputmode="numeric" placeholder="30" maxlength="3" title="Только отображение">
           </label>
         </div>
+        <div class="design-form-row">
+          <label class="field">Цвет карты
+            <input type="color" name="color" value="#00A8A8" title="Подставится при выборе шаблона">
+          </label>
+          <label class="field">Сегмент
+            <select name="segment_id">
+              <option value="0">Без привязки</option>
+              {% for segment in segments if segment.is_active %}
+              <option value="{{ segment.id }}">{{ segment.name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+        </div>
         <label class="field">Баннер
           <span class="file-pick">
             <input type="file" name="image" accept="image/jpeg,image/png,image/webp" required data-file-pick>
@@ -149,6 +162,22 @@
                   <input name="discount_percent" value="{{ item.discount_percent or '' }}" inputmode="numeric" maxlength="3" placeholder="0" title="Только отображение">
                 </label>
               </div>
+              <div class="design-form-row">
+                <label class="field">Цвет карты
+                  <span class="design-color-row">
+                    <input type="color" name="color" value="{{ item.color or '#00A8A8' }}">
+                    <span class="design-color-swatch" style="background: {{ item.color or '#00A8A8' }}"></span>
+                  </span>
+                </label>
+                <label class="field">Сегмент
+                  <select name="segment_id">
+                    <option value="0">Без привязки</option>
+                    {% for segment in segments if segment.is_active %}
+                    <option value="{{ segment.id }}" {% if item.segment_id == segment.id %}selected{% endif %}>{{ segment.name }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+              </div>
               <label class="field">Заменить баннер
                 <span class="file-pick">
                   <input type="file" name="image" accept="image/jpeg,image/png,image/webp" data-file-pick>
@@ -167,8 +196,14 @@
                 <span class="status-pill {% if item.is_active %}is-on{% else %}is-off{% endif %}">
                   {% if item.is_active %}Активен{% else %}Скрыт{% endif %}
                 </span>
+                <span class="design-color-swatch" style="background: {{ item.color or '#00A8A8' }}" title="{{ item.color or '#00A8A8' }}"></span>
                 {% if item.discount_percent %}
                 <span class="muted design-meta">{{ item.discount_percent }}%</span>
+                {% endif %}
+                {% if item.segment_id %}
+                {% for segment in segments if segment.id == item.segment_id %}
+                <span class="muted design-meta">{{ segment.name }}</span>
+                {% endfor %}
                 {% endif %}
                 <button class="btn ghost compact" type="submit">Сохранить</button>
               </div>

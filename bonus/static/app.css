@@ -1288,6 +1288,29 @@ body:has(.wallet-wrap) .flash {
   align-items: start;
 }
 
+.design-color-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.design-color-row input[type="color"] {
+  width: 48px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid var(--line);
+  background: transparent;
+  cursor: pointer;
+}
+
+.design-color-swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  flex: 0 0 auto;
+}
+
 .design-thumb-stack {
   display: flex;
   flex-direction: column;

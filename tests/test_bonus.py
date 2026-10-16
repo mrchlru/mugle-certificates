@@ -226,7 +226,11 @@ def test_issue_with_segment_color_and_template() -> None:
         logo_filename="logo.png",
         logo_payload=_tiny_png(),
         logo_content_type="image/png",
+        color="#FF5A00",
+        segment_id=segment.id,
     )
+    assert template.color == "#FF5A00"
+    assert template.segment_id == segment.id
     issued = issue_certificate(
         db,
         IssueDraft(
@@ -239,7 +243,7 @@ def test_issue_with_segment_color_and_template() -> None:
             expires_on=None,
             segment_id=segment.id,
             template_id=template.id,
-            color="#FF5A00",
+            color=template.color,
         ),
         hr,
     )

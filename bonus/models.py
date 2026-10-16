@@ -123,7 +123,7 @@ class Segment(Base):
 
 
 class CardTemplate(Base):
-    """Баннер и логотип карточки, которые HR выбирает при выпуске."""
+    """Баннер, логотип, цвет и сегмент для выпуска карточки."""
 
     __tablename__ = "card_templates"
 
@@ -131,6 +131,8 @@ class CardTemplate(Base):
     name: Mapped[str] = mapped_column(String(120))
     image_path: Mapped[str] = mapped_column(String(200))
     logo_path: Mapped[str] = mapped_column(String(200), default="")
+    color: Mapped[str] = mapped_column(String(7), default="#00A8A8")
+    segment_id: Mapped[int | None] = mapped_column(ForeignKey("segments.id"), nullable=True, index=True)
     discount_percent: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: _utcnow())
