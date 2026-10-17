@@ -790,10 +790,9 @@ body:has(.wallet-wrap) .flash {
 }
 
 .wallet-logo {
-  width: auto;
-  max-width: min(180px, 54%);
-  height: auto;
-  max-height: 70px;
+  width: 140px;
+  max-width: min(140px, 44%);
+  height: 44px;
   object-fit: contain;
   object-position: left center;
   flex: 0 1 auto;
@@ -1461,10 +1460,9 @@ body:has(.wallet-wrap) .flash {
 }
 
 .design-thumb-logo {
-  width: auto;
-  max-width: 140px;
-  height: auto;
-  max-height: 48px;
+  width: 100%;
+  max-width: 110px;
+  height: 34px;
   object-fit: contain;
   object-position: left center;
   display: block;

@@ -22,9 +22,8 @@ from bonus.storage import (
 
 # Натуральный макет баннера 1672×763 — храним половину, та же пропорция.
 _BANNER_SIZE = (836, 382)
-# Максимум на карточке ~180×70 — храним 2×; файл без пустого холста.
-_LOGO_SIZE = (360, 140)
-_PADDED_LOGO_SIZES = frozenset({(320, 100), (280, 88)})
+# На карточке кастомный логотип до 140×44 — храним 2× для Retina.
+_LOGO_SIZE = (280, 88)
 _DEFAULT_LOGO_URL = "/static/logo.svg"
 _WEBP_QUALITY = 78
 _LOGO_WEBP_QUALITY = 90
@@ -385,51 +384,6 @@ def optimize_existing_templates(db: Session) -> None:
             delete_template_object(old_name)
     if changed:
         db.commit()
-    optimize_existing_logos(db)
-
-
-def optimize_existing_logos(db: Session) -> None:
-    """Пережимает логотипы с пустым холстом — без полей мелкий текст читается."""
-    changed = False
-    for template in db.scalars(select(CardTemplate)).all():
-        path = (template.logo_path or "").strip()
-        if not path:
-            continue
-        raw = read_template_bytes(path)
-        if raw is None or not _logo_needs_refit(raw):
-            continue
-        try:
-            optimized = _optimize_logo_image(raw)
-        except BonusError:
-            continue
-        old_name = template.logo_path
-        stored = store_template_bytes(optimized, f"logo-{secrets.token_hex(12)}.webp")
-        template.logo_path = stored
-        changed = True
-        if old_name and old_name != stored:
-            delete_template_object(old_name)
-    if changed:
-        db.commit()
-
-
-def _logo_needs_refit(payload: bytes) -> bool:
-    """Проверяет, что файл ещё на фиксированном холсте с полями."""
-    try:
-        with Image.open(BytesIO(payload)) as image:
-            size = image.size
-            if size in _PADDED_LOGO_SIZES:
-                return True
-            rgba = image.convert("RGBA")
-            alpha = rgba.split()[-1]
-            bbox = alpha.getbbox()
-    except (UnidentifiedImageError, OSError):
-        return False
-    if bbox is None:
-        return False
-    left, top, right, bottom = bbox
-    pad_x = left + (size[0] - right)
-    pad_y = top + (size[1] - bottom)
-    return pad_x > size[0] * 0.18 or pad_y > size[1] * 0.18
 
 
 def normalize_color(value: str) -> str:
@@ -500,7 +454,7 @@ def _store_banner_upload(filename: str, payload: bytes, content_type: str) -> st
 
 
 def _store_logo_upload(filename: str, payload: bytes, content_type: str) -> str:
-    """Проверяет логотип и сохраняет WebP без пустых полей (до 360×140)."""
+    """Проверяет логотип и сохраняет WebP 280×88 (на карточке до 140×44)."""
     _validate_image_upload(payload, content_type, label="Логотип")
     optimized = _optimize_logo_image(payload)
     return store_template_bytes(optimized, f"logo-{secrets.token_hex(12)}.webp")
@@ -545,7 +499,7 @@ def _optimize_template_image(payload: bytes) -> bytes:
 
 
 def _optimize_logo_image(payload: bytes) -> bytes:
-    """Обрезает поля и вписывает в лимит, сохраняя пропорции без пустого холста."""
+    """Обрезает пустые поля и вписывает логотип в 280×88 с прозрачностью."""
     try:
         with Image.open(BytesIO(payload)) as image:
             framed = ImageOps.exif_transpose(image)
@@ -555,8 +509,11 @@ def _optimize_logo_image(payload: bytes) -> bytes:
                 _LOGO_SIZE,
                 method=Image.Resampling.LANCZOS,
             )
+            canvas = Image.new("RGBA", _LOGO_SIZE, (0, 0, 0, 0))
+            offset = (0, (_LOGO_SIZE[1] - fitted.height) // 2)
+            canvas.paste(fitted, offset, fitted)
             buffer = BytesIO()
-            fitted.save(
+            canvas.save(
                 buffer,
                 format="WEBP",
                 quality=_LOGO_WEBP_QUALITY,

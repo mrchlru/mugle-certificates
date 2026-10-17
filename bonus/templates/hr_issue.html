@@ -7,7 +7,7 @@
     <p class="eyebrow">Как увидит сотрудник</p>
     <article class="wallet-card" id="card-preview" style="--card: {{ colors[0][0] }};">
       <div class="wallet-top">
-        <img class="wallet-logo is-default" id="preview-logo" src="/static/logo.svg" alt="" width="58" height="47" data-default-w="58" data-default-h="47">
+        <img class="wallet-logo is-default" id="preview-logo" src="/static/logo.svg" alt="" width="58" height="47" data-default-w="58" data-default-h="47" data-custom-w="140" data-custom-h="44">
         <div class="wallet-balance">
           <p class="wallet-label">Баланс</p>
           <p class="wallet-amount" id="preview-amount">0</p>
@@ -225,8 +225,8 @@
       if (logo) {
         logoImg.src = logo;
         logoImg.classList.remove("is-default");
-        logoImg.removeAttribute("width");
-        logoImg.removeAttribute("height");
+        logoImg.width = Number(logoImg.getAttribute("data-custom-w") || 140);
+        logoImg.height = Number(logoImg.getAttribute("data-custom-h") || 44);
       } else {
         logoImg.src = defaultLogo;
         logoImg.classList.add("is-default");

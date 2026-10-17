@@ -46,21 +46,15 @@ def public_media_url(image_path: str) -> str:
 
 
 def read_template_bytes(image_path: str) -> bytes | None:
-    """Читает файл шаблона с диска или из S3."""
-    settings = get_settings()
-    if not image_path.startswith(("http://", "https://")):
-        path = _local_file(image_path)
-        if path.is_file():
-            return path.read_bytes()
-        fallback = settings.data_path() / "uploads" / Path(image_path).name
-        if fallback.is_file():
-            return fallback.read_bytes()
-    if s3_enabled(settings):
-        key = _storage_key(image_path)
-        if key:
-            payload = _get_s3(settings, key)
-            if payload:
-                return payload
+    """Читает локальный файл шаблона, если он ещё на диске."""
+    if image_path.startswith("http://") or image_path.startswith("https://"):
+        return None
+    path = _local_file(image_path)
+    if path.is_file():
+        return path.read_bytes()
+    fallback = get_settings().data_path() / "uploads" / Path(image_path).name
+    if fallback.is_file():
+        return fallback.read_bytes()
     return None
 
 
@@ -107,22 +101,6 @@ def _storage_key(image_path: str) -> str:
             return cleaned[len(base) + 1 :]
         return cleaned.rsplit("/", 1)[-1]
     return cleaned.lstrip("/")
-
-
-def _get_s3(settings: Settings, key: str) -> bytes | None:
-    """Скачивает объект из S3; при ошибке возвращает None."""
-    try:
-        from botocore.exceptions import BotoCoreError, ClientError
-    except ImportError:
-        return None
-    try:
-        response = _s3_client(settings).get_object(Bucket=settings.s3_bucket, Key=key)
-        body = response.get("Body")
-        if body is None:
-            return None
-        return body.read()
-    except (BotoCoreError, ClientError, OSError):
-        return None
 
 
 def _put_s3(settings: Settings, key: str, payload: bytes) -> None:
