@@ -1061,9 +1061,11 @@ body:has(.wallet-wrap) .flash {
 }
 
 .color-grid {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(6, 36px);
   gap: 10px;
+  justify-content: start;
+  align-items: start;
 }
 
 .color-option {
