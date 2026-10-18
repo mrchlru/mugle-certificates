@@ -38,8 +38,8 @@ from bonus.ledger import (
     ledger_needs_birth_date,
     parse_ledger_sheet,
 )
-from bonus.present import dashboard_stats, ledger, list_staff, load_card, search_certificates
-from bonus.roles import AUDIT_ROLES, STAFF_ROLES, parse_staff_role, role_label
+from bonus.present import admin_dashboard, dashboard_stats, ledger, list_staff, load_card, search_certificates
+from bonus.roles import AUDIT_ROLES, DASHBOARD_ROLES, STAFF_ROLES, parse_staff_role, role_label
 from bonus.security import flash
 from bonus.services import (
     BonusError,
@@ -81,6 +81,21 @@ def dashboard(
         query=q,
         segment_id=segment_id or 0,
         segments=list_segments(db),
+    )
+
+
+@router.get("/hr/dashboard")
+def admin_dashboard_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(*DASHBOARD_ROLES)),
+):
+    """Расширенный дашборд — пока только для главного администратора."""
+    return render(
+        request,
+        "hr_dashboard.html",
+        section="dashboard",
+        dash=admin_dashboard(db),
     )
 
 

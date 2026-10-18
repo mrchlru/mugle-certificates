@@ -31,6 +31,7 @@
   {% endblock %}
   {% set panel_role = user and user.role.value in ['admin', 'hr', 'hrd'] %}
   {% set staff_role = user and user.role.value in ['admin', 'hrd'] %}
+  {% set admin_role = user and user.role.value == 'admin' %}
   {% if panel_role and section is defined %}
   <div class="wrap nav-wrap">
     {% if warn_secret %}
@@ -47,6 +48,9 @@
     {% endfor %}
     <nav class="subnav">
       <a href="/hr" {% if section == 'home' %}class="is-on"{% endif %}>Сводка</a>
+      {% if admin_role %}
+      <a href="/hr/dashboard" {% if section == 'dashboard' %}class="is-on"{% endif %}>Дашборд</a>
+      {% endif %}
       <a href="/hr/new" {% if section == 'issue' %}class="is-on"{% endif %}>Выписать</a>
       <a href="/hr/design" {% if section == 'design' %}class="is-on"{% endif %}>Оформление</a>
       <a href="/hr/ledger" {% if section == 'ledger' %}class="is-on"{% endif %}>Журнал</a>

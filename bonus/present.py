@@ -80,6 +80,65 @@ class DashboardStats:
 
 
 @dataclass(frozen=True)
+class DashBucket:
+    """Именованная группа для полосок дашборда."""
+
+    name: str
+    count: int
+    amount: int
+    share: float
+
+
+@dataclass(frozen=True)
+class DashDay:
+    """День в мини-графике списаний и начислений."""
+
+    day: date
+    label: str
+    debit: int
+    credit: int
+    debit_share: float
+    credit_share: float
+
+
+@dataclass(frozen=True)
+class DashCardRow:
+    """Короткая строка карты для списков дашборда."""
+
+    id: int
+    public_number: str
+    holder_name: str
+    segment_name: str
+    balance: int
+    color: str
+    expires_on: date | None
+
+
+@dataclass(frozen=True)
+class AdminDashboard:
+    """Полная сводка для admin-дашборда."""
+
+    active_count: int
+    blocked_count: int
+    zero_balance_count: int
+    expiring_soon_count: int
+    total_balance: int
+    spent_today: int
+    spent_month: int
+    credited_today: int
+    credited_month: int
+    burned_month: int
+    issued_month: int
+    by_segment: tuple[DashBucket, ...]
+    by_ledger: tuple[DashBucket, ...]
+    by_restaurant: tuple[DashBucket, ...]
+    days: tuple[DashDay, ...]
+    recent_debits: tuple[TxView, ...]
+    expiring: tuple[DashCardRow, ...]
+    top_balance: tuple[DashCardRow, ...]
+
+
+@dataclass(frozen=True)
 class StaffView:
     """Управляющий или HR в списке доступа."""
 
@@ -210,6 +269,66 @@ def dashboard_stats(db: Session) -> DashboardStats:
         or 0
     )
     return DashboardStats(active_count=active_count, total_balance=total_balance, spent_today=spent_today)
+
+
+def admin_dashboard(db: Session) -> AdminDashboard:
+    """Собирает KPI, разрезы и списки для дашборда администратора."""
+    apply_due_expiries(db)
+    today = today_msk()
+    day_start = _moscow_day_start()
+    month_start = _moscow_month_start()
+    chart_start = _moscow_days_ago(13)
+    soon = today + timedelta(days=14)
+    reversed_ids = select(Transaction.reversal_of_id).where(Transaction.reversal_of_id.is_not(None))
+    active = Certificate.status == CertificateStatus.active
+
+    active_count = _count_certs(db, active)
+    blocked_count = _count_certs(db, Certificate.status == CertificateStatus.blocked)
+    zero_balance_count = _count_certs(db, active, Certificate.balance <= 0)
+    expiring_soon_count = _count_certs(
+        db,
+        active,
+        Certificate.expires_on.is_not(None),
+        Certificate.expires_on >= today,
+        Certificate.expires_on <= soon,
+        Certificate.balance > 0,
+    )
+    total_balance = _sum_balance(db, active)
+    spent_today = _sum_tx(db, TxType.debit, day_start, reversed_ids)
+    spent_month = _sum_tx(db, TxType.debit, month_start, reversed_ids)
+    credited_today = _sum_tx(db, TxType.credit, day_start, None)
+    credited_month = _sum_tx(db, TxType.credit, month_start, None)
+    burned_month = _sum_tx(db, TxType.burn, month_start, None)
+    issued_month = _count_tx(db, TxType.issue, month_start)
+
+    by_segment = _buckets_by_segment(db)
+    by_ledger = _buckets_by_ledger(db)
+    by_restaurant = _buckets_by_restaurant(db, month_start, reversed_ids)
+    days = _day_series(db, chart_start, reversed_ids)
+    recent_debits = _recent_debits(db, limit=8)
+    expiring = _expiring_cards(db, today, soon, limit=8)
+    top_balance = _top_balance_cards(db, limit=8)
+
+    return AdminDashboard(
+        active_count=active_count,
+        blocked_count=blocked_count,
+        zero_balance_count=zero_balance_count,
+        expiring_soon_count=expiring_soon_count,
+        total_balance=total_balance,
+        spent_today=spent_today,
+        spent_month=spent_month,
+        credited_today=credited_today,
+        credited_month=credited_month,
+        burned_month=burned_month,
+        issued_month=issued_month,
+        by_segment=by_segment,
+        by_ledger=by_ledger,
+        by_restaurant=by_restaurant,
+        days=days,
+        recent_debits=recent_debits,
+        expiring=expiring,
+        top_balance=top_balance,
+    )
 
 
 def ledger(db: Session, actor: User, limit: int = 200) -> list[TxView]:
@@ -457,3 +576,238 @@ def _moscow_day_start() -> datetime:
     now = datetime.now(MSK)
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     return start.astimezone(timezone.utc)
+
+
+def _moscow_month_start() -> datetime:
+    now = datetime.now(MSK)
+    start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    return start.astimezone(timezone.utc)
+
+
+def _moscow_days_ago(days: int) -> datetime:
+    now = datetime.now(MSK)
+    start = (now - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return start.astimezone(timezone.utc)
+
+
+def _count_certs(db: Session, *clauses: object) -> int:
+    statement = select(func.count()).select_from(Certificate)
+    for clause in clauses:
+        statement = statement.where(clause)
+    return int(db.scalar(statement) or 0)
+
+
+def _sum_balance(db: Session, *clauses: object) -> int:
+    statement = select(func.coalesce(func.sum(Certificate.balance), 0))
+    for clause in clauses:
+        statement = statement.where(clause)
+    return int(db.scalar(statement) or 0)
+
+
+def _sum_tx(
+    db: Session,
+    tx_type: TxType,
+    since: datetime,
+    reversed_ids: object | None,
+) -> int:
+    statement = select(func.coalesce(func.sum(Transaction.amount), 0)).where(
+        Transaction.tx_type == tx_type,
+        Transaction.created_at >= since,
+    )
+    if reversed_ids is not None:
+        statement = statement.where(Transaction.id.not_in(reversed_ids))
+    return int(db.scalar(statement) or 0)
+
+
+def _count_tx(db: Session, tx_type: TxType, since: datetime) -> int:
+    return int(
+        db.scalar(
+            select(func.count())
+            .select_from(Transaction)
+            .where(Transaction.tx_type == tx_type, Transaction.created_at >= since)
+        )
+        or 0
+    )
+
+
+def _share(value: int, peak: int) -> float:
+    if peak <= 0 or value <= 0:
+        return 0.0
+    return round(100.0 * value / peak, 1)
+
+
+def _buckets_from_rows(rows: list[tuple[str, int, int]]) -> tuple[DashBucket, ...]:
+    peak = max((amount for _, _, amount in rows), default=0)
+    return tuple(
+        DashBucket(name=name, count=count, amount=amount, share=_share(amount, peak))
+        for name, count, amount in rows
+        if count > 0 or amount > 0
+    )
+
+
+def _buckets_by_segment(db: Session) -> tuple[DashBucket, ...]:
+    rows = db.execute(
+        select(
+            func.coalesce(Segment.name, "Без сегмента"),
+            func.count(Certificate.id),
+            func.coalesce(func.sum(Certificate.balance), 0),
+        )
+        .select_from(Certificate)
+        .outerjoin(Segment, Certificate.segment_id == Segment.id)
+        .where(Certificate.status == CertificateStatus.active)
+        .group_by(Segment.name)
+        .order_by(func.coalesce(func.sum(Certificate.balance), 0).desc())
+    ).all()
+    return _buckets_from_rows([(str(name), int(count), int(amount)) for name, count, amount in rows])
+
+
+def _buckets_by_ledger(db: Session) -> tuple[DashBucket, ...]:
+    from bonus.ledger import LEDGER_CHOICES
+
+    titles = dict(LEDGER_CHOICES)
+    rows = db.execute(
+        select(
+            Certificate.ledger_sheet,
+            func.count(Certificate.id),
+            func.coalesce(func.sum(Certificate.balance), 0),
+        )
+        .where(Certificate.status == CertificateStatus.active)
+        .group_by(Certificate.ledger_sheet)
+        .order_by(func.coalesce(func.sum(Certificate.balance), 0).desc())
+    ).all()
+    packed = [
+        (titles.get(str(sheet), str(sheet) or "Прочее"), int(count), int(amount))
+        for sheet, count, amount in rows
+    ]
+    return _buckets_from_rows(packed)
+
+
+def _buckets_by_restaurant(
+    db: Session,
+    since: datetime,
+    reversed_ids: object,
+) -> tuple[DashBucket, ...]:
+    rows = db.execute(
+        select(
+            func.coalesce(func.nullif(Transaction.restaurant, ""), "Без ресторана"),
+            func.count(Transaction.id),
+            func.coalesce(func.sum(Transaction.amount), 0),
+        )
+        .where(
+            Transaction.tx_type == TxType.debit,
+            Transaction.created_at >= since,
+            Transaction.id.not_in(reversed_ids),
+        )
+        .group_by(func.coalesce(func.nullif(Transaction.restaurant, ""), "Без ресторана"))
+        .order_by(func.coalesce(func.sum(Transaction.amount), 0).desc())
+        .limit(8)
+    ).all()
+    return _buckets_from_rows([(str(name), int(count), int(amount)) for name, count, amount in rows])
+
+
+def _day_series(db: Session, since: datetime, reversed_ids: object) -> tuple[DashDay, ...]:
+    today = today_msk()
+    days = [today - timedelta(days=offset) for offset in range(13, -1, -1)]
+    debit_map = _tx_by_msk_day(db, TxType.debit, since, reversed_ids)
+    credit_map = _tx_by_msk_day(db, TxType.credit, since, None)
+    peak = max([*debit_map.values(), *credit_map.values(), 0])
+    return tuple(
+        DashDay(
+            day=day,
+            label=day.strftime("%d.%m"),
+            debit=debit_map.get(day, 0),
+            credit=credit_map.get(day, 0),
+            debit_share=_share(debit_map.get(day, 0), peak),
+            credit_share=_share(credit_map.get(day, 0), peak),
+        )
+        for day in days
+    )
+
+
+def _tx_by_msk_day(
+    db: Session,
+    tx_type: TxType,
+    since: datetime,
+    reversed_ids: object | None,
+) -> dict[date, int]:
+    statement = select(Transaction.created_at, Transaction.amount).where(
+        Transaction.tx_type == tx_type,
+        Transaction.created_at >= since,
+    )
+    if reversed_ids is not None:
+        statement = statement.where(Transaction.id.not_in(reversed_ids))
+    rows = db.execute(statement).all()
+    totals: dict[date, int] = {}
+    for created_at, amount in rows:
+        day = as_utc(created_at).astimezone(MSK).date()
+        totals[day] = totals.get(day, 0) + int(amount)
+    return totals
+
+
+def _recent_debits(db: Session, *, limit: int) -> tuple[TxView, ...]:
+    rows = db.execute(
+        select(Transaction, Certificate.public_number, User.full_name)
+        .join(Certificate, Transaction.certificate_id == Certificate.id)
+        .join(User, Certificate.holder_id == User.id)
+        .where(Transaction.tx_type == TxType.debit)
+        .order_by(Transaction.id.desc())
+        .limit(limit)
+    ).all()
+    actor_ids = {row[0].actor_id for row in rows if row[0].actor_id is not None}
+    names = _user_names(db, actor_ids)
+    places = _user_restaurants(db, actor_ids)
+    undone = _undone_ids(db, [row[0].id for row in rows])
+    return tuple(
+        _tx_view(
+            tx,
+            names.get(tx.actor_id or 0, ""),
+            holder_name,
+            public_number,
+            tx.id in undone,
+            None,
+            restaurant=tx.restaurant or places.get(tx.actor_id or 0, ""),
+        )
+        for tx, public_number, holder_name in rows
+    )
+
+
+def _expiring_cards(db: Session, today: date, soon: date, *, limit: int) -> tuple[DashCardRow, ...]:
+    rows = db.execute(
+        select(Certificate, User.full_name, Segment.name)
+        .join(User, Certificate.holder_id == User.id)
+        .outerjoin(Segment, Certificate.segment_id == Segment.id)
+        .where(
+            Certificate.status == CertificateStatus.active,
+            Certificate.expires_on.is_not(None),
+            Certificate.expires_on >= today,
+            Certificate.expires_on <= soon,
+            Certificate.balance > 0,
+        )
+        .order_by(Certificate.expires_on.asc(), Certificate.id.asc())
+        .limit(limit)
+    ).all()
+    return tuple(_dash_card_row(cert, holder_name, segment_name) for cert, holder_name, segment_name in rows)
+
+
+def _top_balance_cards(db: Session, *, limit: int) -> tuple[DashCardRow, ...]:
+    rows = db.execute(
+        select(Certificate, User.full_name, Segment.name)
+        .join(User, Certificate.holder_id == User.id)
+        .outerjoin(Segment, Certificate.segment_id == Segment.id)
+        .where(Certificate.status == CertificateStatus.active, Certificate.balance > 0)
+        .order_by(Certificate.balance.desc(), Certificate.id.desc())
+        .limit(limit)
+    ).all()
+    return tuple(_dash_card_row(cert, holder_name, segment_name) for cert, holder_name, segment_name in rows)
+
+
+def _dash_card_row(cert: Certificate, holder_name: str, segment_name: str | None) -> DashCardRow:
+    return DashCardRow(
+        id=cert.id,
+        public_number=cert.public_number,
+        holder_name=holder_name,
+        segment_name=segment_name or "—",
+        balance=cert.balance,
+        color=cert.color or "#00A8A8",
+        expires_on=cert.expires_on,
+    )

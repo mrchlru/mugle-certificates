@@ -1,0 +1,260 @@
+{% extends "base.html" %}
+{% block title %}Дашборд{% endblock %}
+{% block content %}
+<section class="dash">
+  <header class="dash-intro">
+    <p class="eyebrow">Только администратор</p>
+    <h1>Дашборд</h1>
+    <p class="lede muted">Остатки, списания и срезы по сегментам, листам и ресторанам.</p>
+  </header>
+
+  <section class="dash-kpis" aria-label="Ключевые показатели">
+    <article>
+      <p class="eyebrow">Активные карты</p>
+      <p class="stat">{{ dash.active_count }}</p>
+    </article>
+    <article>
+      <p class="eyebrow">Остаток на картах</p>
+      <p class="stat">{{ dash.total_balance|money }}</p>
+    </article>
+    <article>
+      <p class="eyebrow">Списано сегодня</p>
+      <p class="stat">{{ dash.spent_today|money }}</p>
+    </article>
+    <article>
+      <p class="eyebrow">Списано за месяц</p>
+      <p class="stat">{{ dash.spent_month|money }}</p>
+    </article>
+    <article>
+      <p class="eyebrow">Начислено сегодня</p>
+      <p class="stat">{{ dash.credited_today|money }}</p>
+    </article>
+    <article>
+      <p class="eyebrow">Начислено за месяц</p>
+      <p class="stat">{{ dash.credited_month|money }}</p>
+    </article>
+    <article>
+      <p class="eyebrow">Сгорело за месяц</p>
+      <p class="stat">{{ dash.burned_month|money }}</p>
+    </article>
+    <article>
+      <p class="eyebrow">Выпущено за месяц</p>
+      <p class="stat">{{ dash.issued_month }}</p>
+    </article>
+    <article>
+      <p class="eyebrow">Нулевой баланс</p>
+      <p class="stat">{{ dash.zero_balance_count }}</p>
+    </article>
+    <article>
+      <p class="eyebrow">Срок ≤ 14 дней</p>
+      <p class="stat">{{ dash.expiring_soon_count }}</p>
+    </article>
+    <article>
+      <p class="eyebrow">Заблокированы</p>
+      <p class="stat">{{ dash.blocked_count }}</p>
+    </article>
+  </section>
+
+  <section class="dash-panel">
+    <div class="dash-panel-head">
+      <h2>14 дней</h2>
+      <p class="muted">Списания и начисления по дням (МСК)</p>
+    </div>
+    {% if dash.days %}
+    <div class="dash-chart" role="img" aria-label="График списаний и начислений за 14 дней">
+      {% for day in dash.days %}
+      <div class="dash-chart-col" title="{{ day.label }}: списано {{ day.debit|money }}, начислено {{ day.credit|money }}">
+        <div class="dash-chart-bars">
+          <span class="dash-bar is-debit" style="height: {{ day.debit_share }}%"></span>
+          <span class="dash-bar is-credit" style="height: {{ day.credit_share }}%"></span>
+        </div>
+        <span class="dash-chart-label">{{ day.label }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    <p class="dash-legend muted">
+      <span class="dash-legend-swatch is-debit"></span> Списания
+      <span class="dash-legend-swatch is-credit"></span> Начисления
+    </p>
+    {% else %}
+    <p class="muted">Пока нет операций за период.</p>
+    {% endif %}
+  </section>
+
+  <div class="dash-grid">
+    <section class="dash-panel">
+      <div class="dash-panel-head">
+        <h2>По сегментам</h2>
+        <p class="muted">Активные карты и остаток</p>
+      </div>
+      {% if dash.by_segment %}
+      <ul class="dash-bars">
+        {% for item in dash.by_segment %}
+        <li>
+          <div class="dash-bar-meta">
+            <span>{{ item.name }}</span>
+            <span class="muted">{{ item.count }} · {{ item.amount|money }}</span>
+          </div>
+          <div class="dash-bar-track"><span style="width: {{ item.share }}%"></span></div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="muted">Нет активных карт.</p>
+      {% endif %}
+    </section>
+
+    <section class="dash-panel">
+      <div class="dash-panel-head">
+        <h2>По листам учёта</h2>
+        <p class="muted">Активные карты и остаток</p>
+      </div>
+      {% if dash.by_ledger %}
+      <ul class="dash-bars">
+        {% for item in dash.by_ledger %}
+        <li>
+          <div class="dash-bar-meta">
+            <span>{{ item.name }}</span>
+            <span class="muted">{{ item.count }} · {{ item.amount|money }}</span>
+          </div>
+          <div class="dash-bar-track"><span style="width: {{ item.share }}%"></span></div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="muted">Нет активных карт.</p>
+      {% endif %}
+    </section>
+
+    <section class="dash-panel">
+      <div class="dash-panel-head">
+        <h2>Рестораны</h2>
+        <p class="muted">Списания за текущий месяц</p>
+      </div>
+      {% if dash.by_restaurant %}
+      <ul class="dash-bars">
+        {% for item in dash.by_restaurant %}
+        <li>
+          <div class="dash-bar-meta">
+            <span>{{ item.name }}</span>
+            <span class="muted">{{ item.count }} · {{ item.amount|money }}</span>
+          </div>
+          <div class="dash-bar-track"><span style="width: {{ item.share }}%"></span></div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="muted">Списаний за месяц ещё не было.</p>
+      {% endif %}
+    </section>
+  </div>
+
+  <div class="dash-grid dash-grid-lists">
+    <section class="dash-panel">
+      <div class="dash-panel-head">
+        <h2>Последние списания</h2>
+        <p class="muted"><a class="text-link" href="/hr/ledger">Весь журнал</a></p>
+      </div>
+      {% if dash.recent_debits %}
+      <div class="table-wrap">
+        <table class="dash-table">
+          <thead>
+            <tr>
+              <th>Карта</th>
+              <th>Сумма</th>
+              <th>Где</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in dash.recent_debits %}
+            <tr class="{% if row.undone %}is-undone{% endif %}">
+              <td>
+                <a href="/hr?q={{ row.public_number }}">{{ row.holder_name }}</a>
+                <br><span class="muted">{{ row.public_number }}</span>
+              </td>
+              <td>{{ row.amount|money }}</td>
+              <td>{{ row.restaurant or "—" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="muted">Списаний пока нет.</p>
+      {% endif %}
+    </section>
+
+    <section class="dash-panel">
+      <div class="dash-panel-head">
+        <h2>Скоро истекают</h2>
+        <p class="muted">Ближайшие 14 дней</p>
+      </div>
+      {% if dash.expiring %}
+      <div class="table-wrap">
+        <table class="dash-table">
+          <thead>
+            <tr>
+              <th>Карта</th>
+              <th>Остаток</th>
+              <th>До</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for card in dash.expiring %}
+            <tr>
+              <td>
+                <span class="cert-ref">
+                  <a href="/hr/c/{{ card.id }}">{{ card.public_number }}</a>
+                  <span class="swatch" style="background: {{ card.color }}" title="{{ card.color }}"></span>
+                </span>
+                <br><span class="muted">{{ card.holder_name }} · {{ card.segment_name }}</span>
+              </td>
+              <td>{{ card.balance|money }}</td>
+              <td>{% if card.expires_on %}{{ card.expires_on|day }}{% else %}—{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="muted">В ближайшие две недели сроков нет.</p>
+      {% endif %}
+    </section>
+
+    <section class="dash-panel">
+      <div class="dash-panel-head">
+        <h2>Крупные остатки</h2>
+        <p class="muted">Топ активных карт</p>
+      </div>
+      {% if dash.top_balance %}
+      <div class="table-wrap">
+        <table class="dash-table">
+          <thead>
+            <tr>
+              <th>Карта</th>
+              <th>Остаток</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for card in dash.top_balance %}
+            <tr>
+              <td>
+                <span class="cert-ref">
+                  <a href="/hr/c/{{ card.id }}">{{ card.public_number }}</a>
+                  <span class="swatch" style="background: {{ card.color }}" title="{{ card.color }}"></span>
+                </span>
+                <br><span class="muted">{{ card.holder_name }} · {{ card.segment_name }}</span>
+              </td>
+              <td>{{ card.balance|money }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="muted">Активных карт с остатком нет.</p>
+      {% endif %}
+    </section>
+  </div>
+</section>
+{% endblock %}
