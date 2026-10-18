@@ -4,6 +4,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_DEFAULT_TIMEOUT=120 \
+    UV_SYSTEM_PYTHON=1 \
     PORT=8080 \
     DATA_DIR=/data \
     DATABASE_URL=sqlite:////data/bonus.db
@@ -13,13 +14,12 @@ WORKDIR /app
 # Слой зависимостей отдельно — при неизменном requirements.txt кэшируется.
 COPY requirements.txt .
 
-# Кэш pip между сборками + зеркало ближе к RU (Timeweb), чтобы уложиться в лимит ~28 мин.
+# uv ставит пакеты заметно быстрее pip; кэш BuildKit переживает повторные сборки.
+# Официальный PyPI: зеркало Яндекса на билде Timeweb отдавало пустой индекс.
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install \
-      --retries 8 \
-      -i https://mirror.yandex.ru/mirrors/pypi/simple/ \
-      --trusted-host mirror.yandex.ru \
-      -r requirements.txt
+    --mount=type=cache,target=/root/.cache/uv \
+    pip install --retries 8 uv \
+    && uv pip install --system --retries 8 -r requirements.txt
 
 COPY bonus ./bonus
 
