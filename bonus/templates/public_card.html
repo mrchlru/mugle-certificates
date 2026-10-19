@@ -16,11 +16,25 @@
 {% block content %}
 <p class="wallet-hint">Покажите штрихкод управляющему в ресторане.</p>
 {% include "_card.html" %}
-{% if google_wallet_enabled|default(false) and google_wallet_href|default('') %}
+{% if google_wallet_enabled|default(false) and google_wallet_href|default('')
+   or apple_wallet_enabled|default(false) and apple_wallet_href|default('')
+   or walletpasses_enabled|default(false) and walletpasses_href|default('') %}
 <p class="wallet-actions">
+  {% if google_wallet_enabled|default(false) and google_wallet_href|default('') %}
   <a class="google-wallet-btn" href="{{ google_wallet_href }}" rel="noopener">
     <img src="/static/add-to-google-wallet.svg" alt="Добавить в Google Wallet" width="200" height="50">
   </a>
+  {% endif %}
+  {% if apple_wallet_enabled|default(false) and apple_wallet_href|default('') %}
+  <a class="apple-wallet-btn" href="{{ apple_wallet_href }}" rel="noopener">
+    Добавить в Apple Wallet
+  </a>
+  {% endif %}
+  {% if walletpasses_enabled|default(false) and walletpasses_href|default('') %}
+  <a class="walletpasses-btn" href="{{ walletpasses_href }}" rel="noopener">
+    <img src="https://www.walletpasses.io/badges/badge_web_black_en@2x.png" alt="Add to Wallet Passes" width="180" height="50">
+  </a>
+  {% endif %}
 </p>
 {% endif %}
 {% set show_holder = false %}

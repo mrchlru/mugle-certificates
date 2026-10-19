@@ -775,20 +775,39 @@ body:has(.wallet-wrap) .flash {
 
 .wallet-actions {
   display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
   justify-content: center;
+  align-items: center;
   margin: 16px 0 0;
 }
 
-.google-wallet-btn {
+.google-wallet-btn,
+.walletpasses-btn {
   display: inline-flex;
   line-height: 0;
   border-radius: 8px;
 }
 
-.google-wallet-btn img {
+.google-wallet-btn img,
+.walletpasses-btn img {
   display: block;
   width: min(200px, 100%);
   height: auto;
+}
+
+.apple-wallet-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 50px;
+  padding: 0 18px;
+  border-radius: 8px;
+  background: #000;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
 }
 
 .wallet-card {

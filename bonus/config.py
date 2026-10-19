@@ -50,6 +50,21 @@ class Settings(BaseSettings):
     google_wallet_issuer_name: str = "Mugle Rest"
     google_wallet_logo_url: str = ""
     google_wallet_class_color: str = "#00B596"
+    apple_wallet_enabled: bool = False
+    apple_pass_type_id: str = ""
+    apple_team_id: str = ""
+    apple_organization_name: str = "Mugle Rest"
+    apple_pass_description: str = "Бонус"
+    apple_pass_cert_pem: str = ""
+    apple_pass_key_pem: str = ""
+    apple_pass_cert_file: str = ""
+    apple_pass_key_file: str = ""
+    apple_pass_p12_file: str = ""
+    apple_pass_p12_password: str = ""
+    apple_wwdr_pem: str = ""
+    apple_wwdr_file: str = ""
+    apple_pass_web_service_url: str = ""
+    apple_pass_auth_token: str = ""
 
     def normalized_database_url(self) -> str:
         """Возвращает URL базы в формате SQLAlchemy."""

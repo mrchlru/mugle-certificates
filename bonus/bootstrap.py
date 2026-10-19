@@ -26,11 +26,13 @@ def bootstrap(settings: Settings) -> None:
             "при деплое без тома пропадут",
             flush=True,
         )
+    from bonus.apple_wallet import log_apple_wallet_status
     from bonus.google_wallet import log_wallet_status
     from bonus.sheets_sync import log_sheets_status
 
     log_sheets_status()
     log_wallet_status()
+    log_apple_wallet_status()
     db = open_session()
     try:
         ensure_default_segments(db)

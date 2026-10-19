@@ -22,9 +22,16 @@ def test_wallet_disabled_by_default() -> None:
 
 def test_class_and_object_ids() -> None:
     settings = Settings(google_wallet_issuer_id="338800000", google_wallet_class_suffix="teams_bonus")
-    cert = SimpleNamespace(id=42)
+    cert = SimpleNamespace(id=42, template_id=None, template=None)
     assert class_id(settings) == "338800000.teams_bonus"
+    assert class_id(settings, certificate=cert) == "338800000.teams_bonus"
     assert object_id(cert, settings) == "338800000.cert_42"
+
+
+def test_class_id_per_template() -> None:
+    settings = Settings(google_wallet_issuer_id="338800000", google_wallet_class_suffix="teams_bonus")
+    cert = SimpleNamespace(id=7, template_id=5, template=SimpleNamespace(id=5, name="VIP"))
+    assert class_id(settings, certificate=cert) == "338800000.tpl_5"
 
 
 def test_build_loyalty_object_payload() -> None:
@@ -43,6 +50,9 @@ def test_build_loyalty_object_payload() -> None:
         expires_on=date(2026, 12, 31),
         discount_percent=10,
         token="tok_abc",
+        template_id=None,
+        template=None,
+        segment=None,
     )
     holder = SimpleNamespace(full_name="Иван Петров")
     body = build_loyalty_object(
@@ -70,6 +80,38 @@ def test_build_loyalty_object_payload() -> None:
     assert "Действует до" in headers
 
 
+def test_build_loyalty_object_uses_template_class() -> None:
+    settings = Settings(
+        google_wallet_issuer_id="338800000",
+        google_wallet_class_suffix="teams_bonus",
+        app_public_url="https://bonus.example",
+    )
+    template = SimpleNamespace(
+        id=3,
+        name="Хачапури",
+        color="#112233",
+        logo_path="",
+        image_path="",
+    )
+    cert = SimpleNamespace(
+        id=9,
+        public_number="MR-00009",
+        short_code="99999999",
+        balance=0,
+        color="#AABBCC",
+        status=CertificateStatus.active,
+        expires_on=None,
+        discount_percent=0,
+        token="t9",
+        template_id=3,
+        template=template,
+        segment=None,
+    )
+    body = build_loyalty_object(cert, None, base_url="https://bonus.example", settings=settings)
+    assert body["classId"] == "338800000.tpl_3"
+    assert body["hexBackgroundColor"] == "#AABBCC"
+
+
 def test_build_loyalty_object_blocked_and_expired() -> None:
     settings = Settings(google_wallet_issuer_id="1", google_wallet_class_suffix="x")
     blocked = SimpleNamespace(
@@ -82,6 +124,9 @@ def test_build_loyalty_object_blocked_and_expired() -> None:
         expires_on=None,
         discount_percent=0,
         token="t1",
+        template_id=None,
+        template=None,
+        segment=None,
     )
     assert build_loyalty_object(blocked, None, settings=settings)["state"] == "INACTIVE"
     expired = SimpleNamespace(
@@ -94,8 +139,46 @@ def test_build_loyalty_object_blocked_and_expired() -> None:
         expires_on=date(2020, 1, 1),
         discount_percent=0,
         token="t2",
+        template_id=None,
+        template=None,
+        segment=None,
     )
     assert build_loyalty_object(expired, None, expired=True, settings=settings)["state"] == "EXPIRED"
+
+
+def test_build_loyalty_class_from_template() -> None:
+    settings = Settings(
+        google_wallet_issuer_id="99",
+        google_wallet_class_suffix="teams_bonus",
+        google_wallet_program_name="Бонус",
+        google_wallet_issuer_name="Mugle Rest",
+        google_wallet_class_color="#00B596",
+        app_public_url="https://bonus.example",
+    )
+    template = SimpleNamespace(
+        id=8,
+        name="Сотрудник кухни",
+        color="#00A8A8",
+        logo_path="templates/logo.webp",
+        image_path="templates/banner.webp",
+    )
+    cert = SimpleNamespace(
+        id=1,
+        color="#00A8A8",
+        template_id=8,
+        template=template,
+    )
+    body = build_loyalty_class(
+        base_url="https://bonus.example",
+        certificate=cert,
+        settings=settings,
+    )
+    assert body["id"] == "99.tpl_8"
+    assert body["issuerName"] == "Mugle Rest"
+    assert body["programName"] == "Сотрудник кухни"
+    assert body["hexBackgroundColor"] == "#00A8A8"
+    assert body["programLogo"]["sourceUri"]["uri"] == "https://bonus.example/media/templates/logo.webp"
+    assert "reviewStatus" not in body
 
 
 def test_build_loyalty_class_uses_logo() -> None:
@@ -114,7 +197,6 @@ def test_build_loyalty_class_uses_logo() -> None:
     assert body["accountNameLabel"] == "Владелец карты"
     assert body["hexBackgroundColor"] == "#00B596"
     assert body["programLogo"]["sourceUri"]["uri"] == "https://bonus.example/static/wallet-logo.png"
-    # Не проставляем reviewStatus в payload class — иначе JWT/PATCH сбрасывают APPROVED в демо.
     assert "reviewStatus" not in body
 
 
@@ -130,6 +212,28 @@ def test_build_loyalty_class_rewrites_teams_bonus_env() -> None:
     assert body["programName"] == "Бонус"
 
 
+def test_build_loyalty_class_prefers_template_logo_over_env() -> None:
+    settings = Settings(
+        google_wallet_issuer_id="99",
+        google_wallet_logo_url="https://cdn.example/forced.png",
+        app_public_url="https://bonus.example",
+    )
+    template = SimpleNamespace(
+        id=2,
+        name="Бар",
+        color="#123456",
+        logo_path="templates/bar-logo.webp",
+        image_path="",
+    )
+    cert = SimpleNamespace(id=1, color="#123456", template_id=2, template=template)
+    body = build_loyalty_class(
+        base_url="https://bonus.example",
+        certificate=cert,
+        settings=settings,
+    )
+    assert body["programLogo"]["sourceUri"]["uri"] == "https://bonus.example/media/templates/bar-logo.webp"
+
+
 def test_save_jwt_claims_structure() -> None:
     """Проверяет форму claims, как у save_url (без сети)."""
     private_key = _rsa_private_pem()
@@ -143,7 +247,7 @@ def test_save_jwt_claims_structure() -> None:
             "loyaltyObjects": [
                 {
                     "id": "1.cert_1",
-                    "classId": "1.teams_bonus",
+                    "classId": "1.tpl_3",
                     "state": "ACTIVE",
                 }
             ]
