@@ -1,4 +1,4 @@
-"""Автоначисление бонусов по сегментам (ежедневно и ежемесячно)."""
+"""Автоначисление и вечернее сгорание ежедневных бонусов."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from bonus.db import open_session
 from bonus.models import AccrualPeriod, Certificate, CertificateStatus, Segment, Transaction, TxType
-from bonus.services import BonusError, reset_monthly_balance
+from bonus.services import BonusError, burn_daily_remainder, reset_monthly_balance
 from bonus.values import MSK, as_utc, today_msk
 from bonus.weekdays import WEEKDAYS, allows_weekday
 
@@ -19,10 +19,11 @@ logger = logging.getLogger("bonus.accrual")
 
 _MONTHLY_PREFIX = "Автоначисление: ежемесячно"
 _DAILY_PREFIX = "Автоначисление: ежедневно"
+_DAILY_BURN_PREFIX = "Сгорание остатка: ежедневно"
 
 
 def run_scheduled_accruals() -> int:
-    """Проверяет окно 04:00 МСК и начисляет положенные бонусы. Возвращает число карт."""
+    """Окно 04:00 — начисления; окно 23:00 — сгорание дневного остатка."""
     db = open_session()
     try:
         now = datetime.now(MSK)
@@ -30,32 +31,23 @@ def run_scheduled_accruals() -> int:
         if _accrual_window_open(now):
             total += apply_daily_accruals(db, now)
             total += apply_monthly_accruals(db, now)
+        if _daily_burn_window_open(now):
+            total += apply_daily_burns(db, now)
         return total
     finally:
         db.close()
 
 
 def apply_daily_accruals(db: Session, now: datetime | None = None) -> int:
-    """Сбрасывает остаток к номиналу картам с ежедневным начислением в выбранные дни."""
+    """В 04:00 МСК выставляет номинал картам с ежедневным начислением в выбранные дни."""
     moment = now or datetime.now(MSK)
     marker = _daily_marker(moment)
-    certificates = db.scalars(
-        select(Certificate)
-        .join(Segment, Certificate.segment_id == Segment.id)
-        .where(
-            Segment.accrual_period == AccrualPeriod.daily,
-            Segment.is_active.is_(True),
-            Certificate.status == CertificateStatus.active,
-            Certificate.nominal > 0,
-            Certificate.single_use.is_(False),
-        )
-        .order_by(Certificate.id)
-    ).all()
+    certificates = _daily_certificates(db)
     done = 0
     for certificate in certificates:
         if not _certificate_accepts_daily(certificate, moment):
             continue
-        if _has_marker_credit(db, certificate.id, marker):
+        if _has_marker(db, certificate.id, TxType.credit, marker):
             continue
         try:
             reset_monthly_balance(db, certificate, marker)
@@ -68,12 +60,39 @@ def apply_daily_accruals(db: Session, now: datetime | None = None) -> int:
             continue
         done += 1
         logger.info(
-            "Ежедневный сброс %s → номинал %s коп.",
+            "Ежедневное начисление %s → номинал %s коп.",
             certificate.public_number,
             certificate.nominal,
         )
     if done:
         print(f"Teams Bonus: ежедневное начисление — {done} карт ({marker})", flush=True)
+    return done
+
+
+def apply_daily_burns(db: Session, now: datetime | None = None) -> int:
+    """В 23:00 МСК сжигает неиспользованный остаток ежедневных карт."""
+    moment = now or datetime.now(MSK)
+    marker = _daily_burn_marker(moment)
+    certificates = _daily_certificates(db)
+    done = 0
+    for certificate in certificates:
+        if certificate.expires_on is not None and certificate.expires_on < today_msk():
+            continue
+        if _has_marker(db, certificate.id, TxType.burn, marker):
+            continue
+        try:
+            burn_daily_remainder(db, certificate, marker)
+        except BonusError as exc:
+            logger.warning(
+                "Ежедневное сгорание %s пропущено: %s",
+                certificate.public_number,
+                exc.message,
+            )
+            continue
+        done += 1
+        logger.info("Ежедневное сгорание %s", certificate.public_number)
+    if done:
+        print(f"Teams Bonus: ежедневное сгорание — {done} карт ({marker})", flush=True)
     return done
 
 
@@ -101,7 +120,7 @@ def apply_monthly_accruals(db: Session, now: datetime | None = None) -> int:
     for certificate in certificates:
         if not _certificate_accepts_monthly(certificate, moment):
             continue
-        if _has_marker_credit(db, certificate.id, marker):
+        if _has_marker(db, certificate.id, TxType.credit, marker):
             continue
         try:
             reset_monthly_balance(db, certificate, marker)
@@ -124,7 +143,7 @@ def apply_monthly_accruals(db: Session, now: datetime | None = None) -> int:
 
 
 async def accrual_worker() -> None:
-    """Фоновый цикл: сразу догон, затем каждый день около 04:00 МСК."""
+    """Фоновый цикл: догон, затем сон до ближайших 04:00 или 23:00 МСК."""
     while True:
         try:
             await asyncio.to_thread(run_scheduled_accruals)
@@ -132,7 +151,24 @@ async def accrual_worker() -> None:
             raise
         except Exception:
             logger.exception("Сбой автоначисления")
-        await asyncio.sleep(_seconds_until_next_moscow_4am())
+        await asyncio.sleep(_seconds_until_next_job())
+
+
+def _daily_certificates(db: Session) -> list[Certificate]:
+    return list(
+        db.scalars(
+            select(Certificate)
+            .join(Segment, Certificate.segment_id == Segment.id)
+            .where(
+                Segment.accrual_period == AccrualPeriod.daily,
+                Segment.is_active.is_(True),
+                Certificate.status == CertificateStatus.active,
+                Certificate.nominal > 0,
+                Certificate.single_use.is_(False),
+            )
+            .order_by(Certificate.id)
+        ).all()
+    )
 
 
 def _accrual_window_open(now: datetime) -> bool:
@@ -140,13 +176,25 @@ def _accrual_window_open(now: datetime) -> bool:
     return (now.hour, now.minute, now.second) >= (4, 0, 0)
 
 
-def _seconds_until_next_moscow_4am() -> float:
-    """Сколько спать до следующего 04:00 Europe/Moscow."""
+def _daily_burn_window_open(now: datetime) -> bool:
+    """После 23:00 МСК можно (идемпотентно) сжечь дневной остаток."""
+    return (now.hour, now.minute, now.second) >= (23, 0, 0)
+
+
+def _seconds_until_next_job() -> float:
+    """Сон до ближайших 04:00 или 23:00 Europe/Moscow."""
     now = datetime.now(MSK)
-    target = now.replace(hour=4, minute=0, second=0, microsecond=0)
-    if now >= target:
-        target = target + timedelta(days=1)
-    return max(30.0, (target - now).total_seconds())
+    targets = [
+        now.replace(hour=4, minute=0, second=0, microsecond=0),
+        now.replace(hour=23, minute=0, second=0, microsecond=0),
+    ]
+    upcoming: list[datetime] = []
+    for target in targets:
+        point = target
+        if now >= point:
+            point = point + timedelta(days=1)
+        upcoming.append(point)
+    return max(30.0, (min(upcoming) - now).total_seconds())
 
 
 def _monthly_marker(year: int, month: int) -> str:
@@ -156,6 +204,11 @@ def _monthly_marker(year: int, month: int) -> str:
 def _daily_marker(moment: datetime) -> str:
     day = moment.astimezone(MSK).date()
     return f"{_DAILY_PREFIX} {day.isoformat()}"
+
+
+def _daily_burn_marker(moment: datetime) -> str:
+    day = moment.astimezone(MSK).date()
+    return f"{_DAILY_BURN_PREFIX} {day.isoformat()}"
 
 
 def _certificate_accepts_daily(certificate: Certificate, moment: datetime) -> bool:
@@ -180,11 +233,11 @@ def _certificate_accepts_monthly(certificate: Certificate, moment: datetime) -> 
     return True
 
 
-def _has_marker_credit(db: Session, certificate_id: int, marker: str) -> bool:
+def _has_marker(db: Session, certificate_id: int, tx_type: TxType, marker: str) -> bool:
     found = db.scalar(
         select(Transaction.id).where(
             Transaction.certificate_id == certificate_id,
-            Transaction.tx_type == TxType.credit,
+            Transaction.tx_type == tx_type,
             Transaction.comment == marker,
         )
     )

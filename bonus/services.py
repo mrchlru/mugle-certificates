@@ -248,6 +248,35 @@ def reset_monthly_balance(db: Session, certificate: Certificate, comment: str) -
     _sync_usage(db, certificate)
 
 
+def burn_daily_remainder(db: Session, certificate: Certificate, comment: str) -> None:
+    """Обнуляет остаток ежедневной карты в 23:00 МСК — без накопления на завтра."""
+    text = comment.strip()[:300] or "Сгорание остатка: ежедневно"
+    leftover = max(0, certificate.balance)
+    if leftover > 0:
+        changed = _change_balance(
+            db,
+            certificate.id,
+            -leftover,
+            require_active=False,
+        )
+        if not changed:
+            db.rollback()
+            raise BonusError("Не удалось сжечь дневной остаток")
+        db.refresh(certificate)
+    _add_transaction(
+        db,
+        certificate_id=certificate.id,
+        actor_id=None,
+        tx_type=TxType.burn,
+        amount=leftover,
+        balance_after=certificate.balance,
+        comment=text,
+    )
+    db.commit()
+    db.refresh(certificate)
+    _sync_usage(db, certificate)
+
+
 def delete_certificate(db: Session, certificate: Certificate, actor: User) -> str:
     """Полностью удаляет карту, журнал и строку в Google Sheets. Только admin."""
     if actor.role != Role.admin:
