@@ -6,7 +6,7 @@ from bonus.services import BonusError
 HR_PANEL_ROLES: tuple[Role, ...] = (Role.admin, Role.hr, Role.hrd)
 STAFF_ROLES: tuple[Role, ...] = (Role.admin, Role.hrd)
 AUDIT_ROLES: tuple[Role, ...] = (Role.admin, Role.hrd)
-DASHBOARD_ROLES: tuple[Role, ...] = (Role.admin,)
+DASHBOARD_ROLES: tuple[Role, ...] = (Role.admin, Role.hr, Role.hrd)
 DESK_ROLES: tuple[Role, ...] = (Role.manager, Role.hr, Role.admin, Role.hrd)
 STAFF_ASSIGNABLE: tuple[Role, ...] = (Role.manager, Role.hr, Role.hrd)
 

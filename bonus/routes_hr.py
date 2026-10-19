@@ -90,7 +90,7 @@ def admin_dashboard_page(
     db: Session = Depends(get_db),
     user: User = Depends(require(*DASHBOARD_ROLES)),
 ):
-    """Расширенный дашборд — пока только для главного администратора."""
+    """Расширенный дашборд для admin, HR и HRD."""
     return render(
         request,
         "hr_dashboard.html",
