@@ -95,7 +95,14 @@ def save_url(
             base_url=base_url,
             expired=expired,
         )
-        _upsert_loyalty_object(payload)
+        try:
+            _upsert_loyalty_object(payload)
+        except Exception:
+            # JWT с полным object всё равно можно отдать — Google создаст при сохранении.
+            logger.exception(
+                "Google Wallet object upsert failed for %s; выдаём JWT без REST",
+                certificate.public_number or certificate.id,
+            )
         token = _signed_save_jwt(payload, origins=_origins(base_url))
         return f"{SAVE_BASE}/{token}"
     except Exception:
@@ -210,7 +217,7 @@ def log_wallet_status() -> None:
 
 
 def _ensure_loyalty_class(*, base_url: str = "") -> None:
-    """Идемпотентно создаёт Loyalty Class в Google."""
+    """Идемпотентно создаёт Loyalty Class и выводит его из DRAFT в UNDER_REVIEW."""
     cfg = get_settings()
     cid = class_id(cfg)
     with _class_lock:
@@ -219,15 +226,35 @@ def _ensure_loyalty_class(*, base_url: str = "") -> None:
         session = _authorized_session()
         existing = session.get(f"{WALLET_API}/loyaltyClass/{cid}")
         if existing.status_code == 200:
+            _promote_class_for_issue(session, cid, existing.json())
             _class_ready.add(cid)
             return
         payload = build_loyalty_class(base_url=base_url, settings=cfg)
         created = session.post(f"{WALLET_API}/loyaltyClass", json=payload)
         if created.status_code in {200, 409}:
+            if created.status_code == 409:
+                again = session.get(f"{WALLET_API}/loyaltyClass/{cid}")
+                if again.status_code == 200:
+                    _promote_class_for_issue(session, cid, again.json())
             _class_ready.add(cid)
             return
         raise RuntimeError(
             f"loyaltyClass create failed HTTP {created.status_code}: {created.text[:500]}"
+        )
+
+
+def _promote_class_for_issue(session: AuthorizedSession, cid: str, body: dict[str, Any]) -> None:
+    """DRAFT class нельзя выдавать — переводим в UNDER_REVIEW."""
+    status = str(body.get("reviewStatus") or "").upper()
+    if status in {"UNDER_REVIEW", "APPROVED"}:
+        return
+    patched = session.patch(
+        f"{WALLET_API}/loyaltyClass/{cid}",
+        json={"reviewStatus": "UNDER_REVIEW"},
+    )
+    if patched.status_code != 200:
+        raise RuntimeError(
+            f"loyaltyClass promote failed HTTP {patched.status_code}: {patched.text[:500]}"
         )
 
 
