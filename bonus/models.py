@@ -118,6 +118,9 @@ class Segment(Base):
     requires_expiry: Mapped[bool] = mapped_column(default=False)
     single_use: Mapped[bool] = mapped_column(default=False)
     discount_percent: Mapped[int] = mapped_column(Integer, default=0)
+    # Маска дней ISO: 1=Пн … 7=Вс, например "12345" = будни.
+    use_days: Mapped[str] = mapped_column(String(16), default="1234567")
+    accrual_days: Mapped[str] = mapped_column(String(16), default="12345")
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(default=True)
 
@@ -157,6 +160,8 @@ class Certificate(Base):
     color: Mapped[str] = mapped_column(String(7), default="#00A8A8")
     discount_percent: Mapped[int] = mapped_column(Integer, default=0)
     single_use: Mapped[bool] = mapped_column(default=False)
+    use_days: Mapped[str] = mapped_column(String(16), default="1234567")
+    accrual_days: Mapped[str] = mapped_column(String(16), default="12345")
     nominal: Mapped[int] = mapped_column(Integer)
     balance: Mapped[int] = mapped_column(Integer)
     note: Mapped[str] = mapped_column(String(500), default="")

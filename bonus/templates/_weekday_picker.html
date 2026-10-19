@@ -1,0 +1,15 @@
+{# Ожидает: field_name, selected_days (строка "12345"), legend, weekday_choices #}
+{% set _selected = selected_days or '1234567' %}
+{% set _name = field_name or 'use_days' %}
+{% set _legend = legend or 'Дни' %}
+<fieldset class="weekday-field" data-weekday-field="{{ _name }}">
+  <legend>{{ _legend }}</legend>
+  <div class="weekday-grid">
+    {% for value, title in weekday_choices %}
+    <label class="weekday-chip" title="{{ title }}">
+      <input type="checkbox" name="{{ _name }}" value="{{ value }}" {% if value in _selected %}checked{% endif %}>
+      <span>{{ title }}</span>
+    </label>
+    {% endfor %}
+  </div>
+</fieldset>

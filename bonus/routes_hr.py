@@ -58,6 +58,7 @@ from bonus.services import (
     update_staff,
 )
 from bonus.values import MoneyError, format_money, parse_date
+from bonus.weekdays import ALL_DAYS, WEEKDAY_CHOICES, WEEKDAYS, normalize_days
 
 router = APIRouter()
 
@@ -111,11 +112,12 @@ def issue_form(request: Request, db: Session = Depends(get_db), user: User = Dep
         colors=CARD_COLORS,
         media_url=media_url,
         ledger_choices=LEDGER_CHOICES,
+        weekday_choices=WEEKDAY_CHOICES,
     )
 
 
 @router.post("/hr/new")
-def issue_submit(
+async def issue_submit(
     request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
@@ -138,6 +140,9 @@ def issue_submit(
     """Выписывает сертификат на полный номинал и ведёт к ссылке для сотрудника."""
     try:
         guard_csrf(request, csrf_token)
+        form = await request.form()
+        use_days = normalize_days(form.getlist("use_days"), default=ALL_DAYS)
+        accrual_days = normalize_days(form.getlist("accrual_days"), default=WEEKDAYS)
         nominal_value = optional_money(nominal)
         if nominal_value is None:
             raise BonusError("Укажите номинал")
@@ -183,6 +188,8 @@ def issue_submit(
                 phone=phone,
                 discount_percent=discount,
                 single_use=one_shot,
+                use_days=use_days,
+                accrual_days=accrual_days,
                 segment_name=segment.name,
                 ledger_sheet=sheet.value,
                 company=company,
@@ -217,13 +224,14 @@ def design_page(request: Request, db: Session = Depends(get_db), user: User = De
         templates=list_templates(db, active_only=False),
         media_url=media_url,
         accrual_choices=ACCRUAL_CHOICES,
+        weekday_choices=WEEKDAY_CHOICES,
         colors=CARD_COLORS,
         media_on_s3=s3_enabled(),
     )
 
 
 @router.post("/hr/design/segments")
-def segment_create(
+async def segment_create(
     request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
@@ -237,6 +245,7 @@ def segment_create(
     """Добавляет свой сегмент с периодичностью начисления."""
     try:
         guard_csrf(request, csrf_token)
+        form = await request.form()
         create_segment(
             db,
             name,
@@ -244,6 +253,8 @@ def segment_create(
             requires_expiry=requires_expiry == "1",
             single_use=single_use == "1",
             discount_percent=_discount(discount_percent),
+            use_days=form.getlist("use_days"),
+            accrual_days=form.getlist("accrual_days"),
         )
     except BonusError as exc:
         flash(request, exc.message, "bad")
@@ -253,7 +264,7 @@ def segment_create(
 
 
 @router.post("/hr/design/segments/{segment_id}")
-def segment_update(
+async def segment_update(
     segment_id: int,
     request: Request,
     db: Session = Depends(get_db),
@@ -265,12 +276,13 @@ def segment_update(
     discount_percent: str = Form(""),
     csrf_token: str = Form(""),
 ):
-    """Редактирует название, периодичность, срок и процент сегмента."""
+    """Редактирует название, периодичность, срок, дни и процент сегмента."""
     segment = db.get(Segment, segment_id)
     try:
         guard_csrf(request, csrf_token)
         if segment is None:
             raise BonusError("Сегмент не найден")
+        form = await request.form()
         update_segment(
             db,
             segment,
@@ -279,6 +291,8 @@ def segment_update(
             requires_expiry=requires_expiry == "1",
             single_use=single_use == "1",
             discount_percent=_discount(discount_percent),
+            use_days=form.getlist("use_days"),
+            accrual_days=form.getlist("accrual_days"),
         )
     except BonusError as exc:
         flash(request, exc.message, "bad")

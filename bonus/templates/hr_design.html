@@ -22,7 +22,7 @@
             <input name="name" placeholder="Новый сегмент" required autocomplete="off">
           </label>
           <label class="field">Начисление
-            <select name="accrual_period">
+            <select name="accrual_period" data-accrual-select>
               {% for value, title in accrual_choices %}
               <option value="{{ value }}">{{ title }}</option>
               {% endfor %}
@@ -42,6 +42,14 @@
           <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
           <span class="switch-copy">Разовый: после первого списания остаток сгорает</span>
         </label>
+        {% with field_name='use_days', selected_days='1234567', legend='Дни использования', weekday_choices=weekday_choices %}
+          {% include "_weekday_picker.html" %}
+        {% endwith %}
+        <div class="weekday-accrual" data-accrual-days-wrap hidden>
+          {% with field_name='accrual_days', selected_days='12345', legend='Дни начисления (ежедневно, 04:00 МСК)', weekday_choices=weekday_choices %}
+            {% include "_weekday_picker.html" %}
+          {% endwith %}
+        </div>
         <button class="btn" type="submit">Добавить сегмент</button>
       </form>
 
@@ -55,7 +63,7 @@
                 <input name="name" value="{{ item.name }}" required autocomplete="off">
               </label>
               <label class="field">Начисление
-                <select name="accrual_period">
+                <select name="accrual_period" data-accrual-select>
                   {% for value, title in accrual_choices %}
                   <option value="{{ value }}" {% if item.accrual_period.value == value %}selected{% endif %}>{{ title }}</option>
                   {% endfor %}
@@ -75,6 +83,14 @@
               <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
               <span class="switch-copy">Разовый: после первого списания остаток сгорает</span>
             </label>
+            {% with field_name='use_days', selected_days=item.use_days or '1234567', legend='Дни использования', weekday_choices=weekday_choices %}
+              {% include "_weekday_picker.html" %}
+            {% endwith %}
+            <div class="weekday-accrual" data-accrual-days-wrap {% if item.accrual_period.value != 'daily' %}hidden{% endif %}>
+              {% with field_name='accrual_days', selected_days=item.accrual_days or '12345', legend='Дни начисления (ежедневно, 04:00 МСК)', weekday_choices=weekday_choices %}
+                {% include "_weekday_picker.html" %}
+              {% endwith %}
+            </div>
             <div class="design-card-foot">
               <span class="status-pill {% if item.is_active %}is-on{% else %}is-off{% endif %}">
                 {% if item.is_active %}Активен{% else %}Скрыт{% endif %}
@@ -249,6 +265,17 @@
     sync();
   }
   document.querySelectorAll("[data-file-pick]").forEach(bindFilePick);
+  function syncAccrualDays(select) {
+    var form = select.closest("form");
+    if (!form) return;
+    var wrap = form.querySelector("[data-accrual-days-wrap]");
+    if (!wrap) return;
+    wrap.hidden = select.value !== "daily";
+  }
+  document.querySelectorAll("[data-accrual-select]").forEach(function (select) {
+    select.addEventListener("change", function () { syncAccrualDays(select); });
+    syncAccrualDays(select);
+  });
   if (window.TeamsBonusColorPicker) {
     window.TeamsBonusColorPicker.initAll();
   }

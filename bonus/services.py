@@ -51,6 +51,8 @@ class IssueDraft:
     discount_percent: int = 0
     segment_name: str = ""
     single_use: bool = False
+    use_days: str = "1234567"
+    accrual_days: str = "12345"
     ledger_sheet: str = "employee"
     company: str = ""
     birth_date: date | None = None
@@ -70,6 +72,8 @@ def issue_certificate(db: Session, draft: IssueDraft, actor: User | None) -> Iss
         color=draft.color or "#00A8A8",
         discount_percent=normalize_discount(draft.discount_percent),
         single_use=draft.single_use,
+        use_days=(draft.use_days or "1234567")[:16],
+        accrual_days=(draft.accrual_days or "12345")[:16],
         nominal=nominal,
         balance=balance,
         note=draft.note.strip()[:500],
@@ -214,7 +218,7 @@ def reset_monthly_balance(db: Session, certificate: Certificate, comment: str) -
             tx_type=TxType.burn,
             amount=leftover,
             balance_after=certificate.balance,
-            comment="Сгорание остатка перед ежемесячным начислением",
+            comment="Сгорание остатка перед автоначислением",
         )
     target = max(0, certificate.nominal)
     if certificate.balance != target:
@@ -228,7 +232,7 @@ def reset_monthly_balance(db: Session, certificate: Certificate, comment: str) -
         )
         if not changed:
             db.rollback()
-            raise BonusError("Не удалось выставить ежемесячный лимит")
+            raise BonusError("Не удалось выставить лимит автоначисления")
         db.refresh(certificate)
     _add_transaction(
         db,
@@ -679,12 +683,19 @@ def _opening_amounts(nominal: int | None, balance: int | None) -> tuple[int, int
 
 
 def _ensure_can_debit(certificate: Certificate, amount: int) -> None:
+    from bonus.weekdays import allows_weekday, days_label
+
     if amount <= 0:
         raise BonusError("Сумма списания должна быть больше нуля")
     if certificate.status != CertificateStatus.active:
         raise BonusError("Сертификат заблокирован")
     if certificate.expires_on is not None and certificate.expires_on < today_msk():
         raise BonusError("Срок сертификата истёк")
+    today = today_msk()
+    if not allows_weekday(certificate.use_days, today.isoweekday()):
+        raise BonusError(
+            f"Карта сегодня не действует. Дни использования: {days_label(certificate.use_days)}"
+        )
     if certificate.balance < amount:
         raise BonusError("На сертификате меньше бонусов, чем вы списываете")
 

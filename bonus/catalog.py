@@ -19,6 +19,7 @@ from bonus.storage import (
     s3_enabled,
     store_template_bytes,
 )
+from bonus.weekdays import ALL_DAYS, WEEKDAYS, normalize_days
 
 # Натуральный макет баннера 1672×763 — храним половину, та же пропорция.
 _BANNER_SIZE = (836, 382)
@@ -73,7 +74,7 @@ CARD_COLORS: tuple[tuple[str, str], ...] = (
 
 ACCRUAL_CHOICES: tuple[tuple[str, str], ...] = (
     (AccrualPeriod.none.value, "Без начисления"),
-    (AccrualPeriod.daily.value, "Ежедневно"),
+    (AccrualPeriod.daily.value, "Ежедневно: сброс к номиналу в 04:00 МСК"),
     (AccrualPeriod.monthly.value, "Ежемесячно: сброс к номиналу 1-го в 04:00 МСК"),
     (AccrualPeriod.yearly.value, "Раз в год"),
 )
@@ -123,6 +124,8 @@ def ensure_default_segments(db: Session) -> None:
                 accrual_period=period,
                 requires_expiry=needs_expiry,
                 single_use=one_shot,
+                use_days=ALL_DAYS,
+                accrual_days=WEEKDAYS if period == AccrualPeriod.daily else WEEKDAYS,
                 sort_order=index,
                 is_active=True,
             )
@@ -172,6 +175,8 @@ def create_segment(
     requires_expiry: bool = False,
     single_use: bool = False,
     discount_percent: int = 0,
+    use_days: object = ALL_DAYS,
+    accrual_days: object = WEEKDAYS,
 ) -> Segment:
     """Добавляет новый сегмент."""
     cleaned = " ".join(name.split())
@@ -186,6 +191,8 @@ def create_segment(
         requires_expiry=requires_expiry,
         single_use=single_use,
         discount_percent=normalize_discount(discount_percent),
+        use_days=normalize_days(use_days, default=ALL_DAYS),
+        accrual_days=normalize_days(accrual_days, default=WEEKDAYS),
         sort_order=1000 + int(db.scalar(select(Segment.id).order_by(Segment.id.desc()).limit(1)) or 0),
         is_active=True,
     )
@@ -204,8 +211,10 @@ def update_segment(
     requires_expiry: bool,
     single_use: bool = False,
     discount_percent: int = 0,
+    use_days: object = ALL_DAYS,
+    accrual_days: object = WEEKDAYS,
 ) -> Segment:
-    """Меняет название, периодичность, срок, одноразовость и процент."""
+    """Меняет название, периодичность, срок, дни и процент."""
     cleaned = " ".join(name.split())
     if len(cleaned) < 2:
         raise BonusError("Укажите название сегмента")
@@ -217,6 +226,8 @@ def update_segment(
     segment.requires_expiry = requires_expiry
     segment.single_use = single_use
     segment.discount_percent = normalize_discount(discount_percent)
+    segment.use_days = normalize_days(use_days, default=ALL_DAYS)
+    segment.accrual_days = normalize_days(accrual_days, default=WEEKDAYS)
     db.commit()
     db.refresh(segment)
     return segment

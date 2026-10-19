@@ -73,12 +73,20 @@
       </label>
       <label class="field">Сегмент
         <select name="segment_id" id="segment-select" required>
-          <option value="" data-requires-expiry="0" data-discount="0" data-name="">Выберите сегмент</option>
+          <option value="" data-requires-expiry="0" data-discount="0" data-name="" data-accrual="none" data-use-days="1234567" data-accrual-days="12345">Выберите сегмент</option>
           {% for segment in segments %}
-          <option value="{{ segment.id }}" data-name="{{ segment.name }}" data-requires-expiry="{{ '1' if segment.requires_expiry else '0' }}" data-single-use="{{ '1' if segment.single_use else '0' }}" data-discount="{{ segment.discount_percent or 0 }}">{{ segment.name }}{% if segment.single_use %} · разовый{% endif %}{% if segment.discount_percent %} · {{ segment.discount_percent }}%{% endif %}</option>
+          <option value="{{ segment.id }}" data-name="{{ segment.name }}" data-requires-expiry="{{ '1' if segment.requires_expiry else '0' }}" data-single-use="{{ '1' if segment.single_use else '0' }}" data-discount="{{ segment.discount_percent or 0 }}" data-accrual="{{ segment.accrual_period.value }}" data-use-days="{{ segment.use_days or '1234567' }}" data-accrual-days="{{ segment.accrual_days or '12345' }}">{{ segment.name }}{% if segment.single_use %} · разовый{% endif %}{% if segment.discount_percent %} · {{ segment.discount_percent }}%{% endif %}</option>
           {% endfor %}
         </select>
       </label>
+      {% with field_name='use_days', selected_days='1234567', legend='Дни использования', weekday_choices=weekday_choices %}
+        {% include "_weekday_picker.html" %}
+      {% endwith %}
+      <div id="accrual-days-wrap" hidden>
+        {% with field_name='accrual_days', selected_days='12345', legend='Дни начисления (ежедневно, 04:00 МСК)', weekday_choices=weekday_choices %}
+          {% include "_weekday_picker.html" %}
+        {% endwith %}
+      </div>
       <label class="field" id="expires-field">Срок действия
         <input type="date" name="expires_on" id="expires-on">
       </label>
@@ -159,6 +167,24 @@
     var option = select.options[select.selectedIndex];
     var needed = option && option.getAttribute("data-requires-expiry") === "1";
     expires.required = needed;
+  }
+
+  function setWeekdayChecks(name, mask) {
+    var selected = String(mask || "");
+    document.querySelectorAll('input[name="' + name + '"]').forEach(function (box) {
+      box.checked = selected.indexOf(box.value) !== -1;
+    });
+  }
+
+  function syncWeekdays() {
+    var wrap = document.getElementById("accrual-days-wrap");
+    var option = select && select.options[select.selectedIndex];
+    var useDays = option ? option.getAttribute("data-use-days") || "1234567" : "1234567";
+    var accrualDays = option ? option.getAttribute("data-accrual-days") || "12345" : "12345";
+    var accrual = option ? option.getAttribute("data-accrual") || "none" : "none";
+    setWeekdayChecks("use_days", useDays);
+    setWeekdayChecks("accrual_days", accrualDays);
+    if (wrap) wrap.hidden = accrual !== "daily";
   }
 
   function formatMoney(raw) {
@@ -271,6 +297,7 @@
   if (select) {
     select.addEventListener("change", function () {
       syncExpiry();
+      syncWeekdays();
       applyDiscountFrom(select.options[select.selectedIndex]);
       var matched = findTemplateForSegment(select.value);
       if (matched && templates) {
@@ -292,6 +319,7 @@
     });
   }
   syncLedger();
+  syncWeekdays();
   syncPreview();
 })();
 </script>

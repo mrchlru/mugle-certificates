@@ -1,3 +1,3 @@
 """Teams Bonus — корпоративные сертификаты (замена Statix Bonus)."""
 
-__version__ = "1.2.21"
+__version__ = "1.2.22"

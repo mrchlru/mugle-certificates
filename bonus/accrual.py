@@ -1,4 +1,4 @@
-"""Автоначисление бонусов по сегментам (ежемесячно и др.)."""
+"""Автоначисление бонусов по сегментам (ежедневно и ежемесячно)."""
 
 from __future__ import annotations
 
@@ -13,10 +13,12 @@ from bonus.db import open_session
 from bonus.models import AccrualPeriod, Certificate, CertificateStatus, Segment, Transaction, TxType
 from bonus.services import BonusError, reset_monthly_balance
 from bonus.values import MSK, as_utc, today_msk
+from bonus.weekdays import WEEKDAYS, allows_weekday
 
 logger = logging.getLogger("bonus.accrual")
 
 _MONTHLY_PREFIX = "Автоначисление: ежемесячно"
+_DAILY_PREFIX = "Автоначисление: ежедневно"
 
 
 def run_scheduled_accruals() -> int:
@@ -25,11 +27,54 @@ def run_scheduled_accruals() -> int:
     try:
         now = datetime.now(MSK)
         total = 0
-        if _monthly_window_open(now):
+        if _accrual_window_open(now):
+            total += apply_daily_accruals(db, now)
             total += apply_monthly_accruals(db, now)
         return total
     finally:
         db.close()
+
+
+def apply_daily_accruals(db: Session, now: datetime | None = None) -> int:
+    """Сбрасывает остаток к номиналу картам с ежедневным начислением в выбранные дни."""
+    moment = now or datetime.now(MSK)
+    marker = _daily_marker(moment)
+    certificates = db.scalars(
+        select(Certificate)
+        .join(Segment, Certificate.segment_id == Segment.id)
+        .where(
+            Segment.accrual_period == AccrualPeriod.daily,
+            Segment.is_active.is_(True),
+            Certificate.status == CertificateStatus.active,
+            Certificate.nominal > 0,
+            Certificate.single_use.is_(False),
+        )
+        .order_by(Certificate.id)
+    ).all()
+    done = 0
+    for certificate in certificates:
+        if not _certificate_accepts_daily(certificate, moment):
+            continue
+        if _has_marker_credit(db, certificate.id, marker):
+            continue
+        try:
+            reset_monthly_balance(db, certificate, marker)
+        except BonusError as exc:
+            logger.warning(
+                "Ежедневное начисление %s пропущено: %s",
+                certificate.public_number,
+                exc.message,
+            )
+            continue
+        done += 1
+        logger.info(
+            "Ежедневный сброс %s → номинал %s коп.",
+            certificate.public_number,
+            certificate.nominal,
+        )
+    if done:
+        print(f"Teams Bonus: ежедневное начисление — {done} карт ({marker})", flush=True)
+    return done
 
 
 def apply_monthly_accruals(db: Session, now: datetime | None = None) -> int:
@@ -54,7 +99,7 @@ def apply_monthly_accruals(db: Session, now: datetime | None = None) -> int:
     ).all()
     done = 0
     for certificate in certificates:
-        if not _certificate_accepts_accrual(certificate, moment):
+        if not _certificate_accepts_monthly(certificate, moment):
             continue
         if _has_marker_credit(db, certificate.id, marker):
             continue
@@ -90,10 +135,8 @@ async def accrual_worker() -> None:
         await asyncio.sleep(_seconds_until_next_moscow_4am())
 
 
-def _monthly_window_open(now: datetime) -> bool:
-    """С 1-го числа 04:00 МСК до конца месяца можно (идемпотентно) начислять."""
-    if now.day > 1:
-        return True
+def _accrual_window_open(now: datetime) -> bool:
+    """После 04:00 МСК можно (идемпотентно) начислять за сегодня / месяц."""
     return (now.hour, now.minute, now.second) >= (4, 0, 0)
 
 
@@ -110,7 +153,24 @@ def _monthly_marker(year: int, month: int) -> str:
     return f"{_MONTHLY_PREFIX} {year:04d}-{month:02d}"
 
 
-def _certificate_accepts_accrual(certificate: Certificate, moment: datetime) -> bool:
+def _daily_marker(moment: datetime) -> str:
+    day = moment.astimezone(MSK).date()
+    return f"{_DAILY_PREFIX} {day.isoformat()}"
+
+
+def _certificate_accepts_daily(certificate: Certificate, moment: datetime) -> bool:
+    """День в маске начисления, не день выпуска, не просрочена."""
+    if certificate.expires_on is not None and certificate.expires_on < today_msk():
+        return False
+    if not allows_weekday(certificate.accrual_days, moment.isoweekday(), default=WEEKDAYS):
+        return False
+    created = as_utc(certificate.created_at).astimezone(MSK).date()
+    if created >= moment.astimezone(MSK).date():
+        return False
+    return True
+
+
+def _certificate_accepts_monthly(certificate: Certificate, moment: datetime) -> bool:
     """Не просрочена; в месяц выпуска автосброс не делается — лимит уже выдан при выпуске."""
     if certificate.expires_on is not None and certificate.expires_on < today_msk():
         return False
