@@ -31,6 +31,14 @@
 | `GOOGLE_SHEETS_SPREADSHEET_ID` | ID Google Таблицы учёта (из URL `/d/ID/edit`) |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | JSON ключ сервисного аккаунта одной строкой. Таблицу нужно расшарить на `client_email` из JSON (редактор). На Timeweb обычно задают именно это |
 | `GOOGLE_SERVICE_ACCOUNT_FILE` | Альтернатива: путь к файлу ключа внутри контейнера. Если файл недоступен, берётся `GOOGLE_SERVICE_ACCOUNT_JSON` |
+| `GOOGLE_WALLET_ENABLED` | `true` — кнопка Add to Google Wallet и синк Loyalty Object. Без Issuer ID / ключа всё равно выключено |
+| `GOOGLE_WALLET_ISSUER_ID` | Числовой Issuer ID из [Pay & Wallet Console](https://pay.google.com/business/console) |
+| `GOOGLE_WALLET_CLASS_SUFFIX` | Суффикс Loyalty Class, по умолчанию `teams_bonus` → class id `{issuerId}.teams_bonus` |
+| `GOOGLE_WALLET_SERVICE_ACCOUNT_JSON` | JSON ключ SA для Wallet API (роль Developer у Issuer). Если пусто — берётся `GOOGLE_SERVICE_ACCOUNT_JSON` |
+| `GOOGLE_WALLET_SERVICE_ACCOUNT_FILE` | Файл ключа Wallet SA; иначе как у Sheets |
+| `GOOGLE_WALLET_PROGRAM_NAME` | Имя программы на карте в Google Wallet |
+| `GOOGLE_WALLET_ISSUER_NAME` | Имя эмитента на карте |
+| `GOOGLE_WALLET_LOGO_URL` | HTTPS URL логотипа class (квадрат). Пусто = `{APP_PUBLIC_URL}/static/logo-teams.png` |
 
 `DATA_DIR` нужен только для SQLite и локальных загрузок без S3. Файл базы тогда должен жить на постоянном диске, смонтированном в `/data`. Иначе при следующем деплое сертификаты исчезнут. Для боевого запуска берите PostgreSQL.
 

@@ -773,6 +773,24 @@ body:has(.wallet-wrap) .flash {
   font-size: 14px;
 }
 
+.wallet-actions {
+  display: flex;
+  justify-content: center;
+  margin: 16px 0 0;
+}
+
+.google-wallet-btn {
+  display: inline-flex;
+  line-height: 0;
+  border-radius: 8px;
+}
+
+.google-wallet-btn img {
+  display: block;
+  width: min(200px, 100%);
+  height: auto;
+}
+
 .wallet-card {
   overflow: hidden;
   border-radius: 18px;

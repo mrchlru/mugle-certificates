@@ -1117,6 +1117,7 @@ def _sync_issue(certificate: Certificate, holder: User, segment_name: str) -> No
     from bonus.sheets_sync import sync_certificate_issued
 
     sync_certificate_issued(certificate, holder, segment_name=segment_name.strip())
+    _sync_wallet(certificate, holder, expired=False)
 
 
 def _sync_usage(
@@ -1142,6 +1143,21 @@ def _sync_usage(
         segment_name=segment_name,
         expired=expired,
     )
+    _sync_wallet(certificate, holder, expired=expired)
+
+
+def _sync_wallet(
+    certificate: Certificate,
+    holder: User | None,
+    *,
+    expired: bool = False,
+) -> None:
+    """Обновляет Loyalty Object в Google Wallet; сбои не ломают кассу."""
+    from bonus.config import get_settings
+    from bonus.google_wallet import sync_certificate
+
+    base_url = get_settings().app_public_url.strip().rstrip("/")
+    sync_certificate(certificate, holder, base_url=base_url, expired=expired)
 
 
 def _sheet_usages(db: Session, certificate_id: int) -> list:

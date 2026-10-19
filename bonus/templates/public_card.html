@@ -14,8 +14,15 @@
 {% endblock %}
 {% block main_class %}wallet-wrap{% endblock %}
 {% block content %}
-<p class="wallet-hint">Покажите QR управляющему в ресторане.</p>
+<p class="wallet-hint">Покажите штрихкод управляющему в ресторане.</p>
 {% include "_card.html" %}
+{% if google_wallet_enabled|default(false) and google_wallet_href|default('') %}
+<p class="wallet-actions">
+  <a class="google-wallet-btn" href="{{ google_wallet_href }}" rel="noopener">
+    <img src="/static/add-to-google-wallet.svg" alt="Добавить в Google Wallet" width="200" height="50">
+  </a>
+</p>
+{% endif %}
 {% set show_holder = false %}
 {% set next_path = '' %}
 {% with items=card.history %}
