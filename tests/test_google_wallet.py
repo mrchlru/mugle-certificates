@@ -114,6 +114,8 @@ def test_build_loyalty_class_uses_logo() -> None:
     assert body["accountNameLabel"] == "Владелец карты"
     assert body["hexBackgroundColor"] == "#00B596"
     assert body["programLogo"]["sourceUri"]["uri"] == "https://bonus.example/static/wallet-logo.png"
+    # Не проставляем reviewStatus в payload class — иначе JWT/PATCH сбрасывают APPROVED в демо.
+    assert "reviewStatus" not in body
 
 
 def test_build_loyalty_class_rewrites_teams_bonus_env() -> None:

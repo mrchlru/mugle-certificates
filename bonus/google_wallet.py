@@ -88,18 +88,12 @@ def save_url(
     if not wallet_enabled():
         return None
     try:
-        class_payload = build_loyalty_class(
-            base_url=base_url,
-            certificate=certificate,
-        )
+        # Class уже APPROVED в консоли — в JWT его не кладём (иначе снова UNDER_REVIEW).
         try:
-            class_payload = _ensure_loyalty_class(
-                base_url=base_url,
-                certificate=certificate,
-            )
+            _ensure_loyalty_class(base_url=base_url, certificate=certificate)
         except Exception:
             logger.exception(
-                "Google Wallet class sync failed for %s; JWT без REST class update",
+                "Google Wallet class sync failed for %s; JWT только с object",
                 certificate.public_number or certificate.id,
             )
         payload = build_loyalty_object(
@@ -116,11 +110,7 @@ def save_url(
                 "Google Wallet object upsert failed for %s; выдаём JWT без REST",
                 certificate.public_number or certificate.id,
             )
-        token = _signed_save_jwt(
-            payload,
-            loyalty_class=class_payload,
-            origins=_origins(base_url),
-        )
+        token = _signed_save_jwt(payload, origins=_origins(base_url))
         return f"{SAVE_BASE}/{token}"
     except Exception:
         logger.exception(
@@ -206,7 +196,6 @@ def build_loyalty_class(
         "programName": program,
         "accountNameLabel": "Владелец карты",
         "accountIdLabel": "Номер карты",
-        "reviewStatus": "UNDER_REVIEW",
         "hexBackgroundColor": _normalize_hex(
             cfg.google_wallet_class_color or "#00B596"
         ),
@@ -254,23 +243,26 @@ def _ensure_loyalty_class(
     base_url: str = "",
     certificate: Certificate | None = None,
 ) -> dict[str, Any]:
-    """Создаёт/обновляет Loyalty Class (бренд + UNDER_REVIEW) и возвращает payload."""
+    """Создаёт Loyalty Class при отсутствии; APPROVED class не трогаем (без UNDER_REVIEW)."""
     cfg = get_settings()
     cid = class_id(cfg)
     payload = build_loyalty_class(base_url=base_url, certificate=certificate, settings=cfg)
     with _class_lock:
+        if cid in _class_ready:
+            return payload
         session = _authorized_session()
         existing = session.get(f"{WALLET_API}/loyaltyClass/{cid}")
         if existing.status_code == 200:
-            _sync_class_branding(session, cid, payload, existing.json())
+            current = existing.json()
+            status = str(current.get("reviewStatus") or "").upper()
+            if status == "DRAFT":
+                # Только черновик поднимаем на проверку; APPROVED не трогаем.
+                _promote_draft_class(session, cid)
             _class_ready.add(cid)
             return payload
-        created = session.post(f"{WALLET_API}/loyaltyClass", json=payload)
+        create_body = {**payload, "reviewStatus": "UNDER_REVIEW"}
+        created = session.post(f"{WALLET_API}/loyaltyClass", json=create_body)
         if created.status_code in {200, 409}:
-            if created.status_code == 409:
-                again = session.get(f"{WALLET_API}/loyaltyClass/{cid}")
-                if again.status_code == 200:
-                    _sync_class_branding(session, cid, payload, again.json())
             _class_ready.add(cid)
             return payload
         raise RuntimeError(
@@ -278,36 +270,15 @@ def _ensure_loyalty_class(
         )
 
 
-def _sync_class_branding(
-    session: AuthorizedSession,
-    cid: str,
-    desired: dict[str, Any],
-    current: dict[str, Any],
-) -> None:
-    """Обновляет оформление class. Любой PATCH у APPROVED требует UNDER_REVIEW."""
-    patch: dict[str, Any] = {}
-    for key in (
-        "issuerName",
-        "programName",
-        "accountNameLabel",
-        "accountIdLabel",
-        "hexBackgroundColor",
-        "programLogo",
-    ):
-        if key in desired and desired.get(key) != current.get(key):
-            patch[key] = desired[key]
-    status = str(current.get("reviewStatus") or "").upper()
-    if status == "DRAFT":
-        patch["reviewStatus"] = "UNDER_REVIEW"
-    elif patch:
-        # Google: нельзя оставить APPROVED при изменении полей — только UNDER_REVIEW.
-        patch["reviewStatus"] = "UNDER_REVIEW"
-    if not patch:
-        return
-    patched = session.patch(f"{WALLET_API}/loyaltyClass/{cid}", json=patch)
+def _promote_draft_class(session: AuthorizedSession, cid: str) -> None:
+    """DRAFT → UNDER_REVIEW (без трогания уже APPROVED)."""
+    patched = session.patch(
+        f"{WALLET_API}/loyaltyClass/{cid}",
+        json={"reviewStatus": "UNDER_REVIEW"},
+    )
     if patched.status_code != 200:
         raise RuntimeError(
-            f"loyaltyClass branding failed HTTP {patched.status_code}: {patched.text[:500]}"
+            f"loyaltyClass promote failed HTTP {patched.status_code}: {patched.text[:500]}"
         )
 
 
@@ -341,24 +312,20 @@ def _upsert_loyalty_object(payload: dict[str, Any]) -> None:
 def _signed_save_jwt(
     loyalty_object: dict[str, Any],
     *,
-    loyalty_class: dict[str, Any] | None = None,
     origins: list[str],
 ) -> str:
-    """Подписывает JWT для кнопки Add to Google Wallet."""
+    """Подписывает JWT Save — только Object, class не трогаем (уже APPROVED)."""
     settings = get_settings()
     info = _wallet_service_account_info(settings)
     email = str(info.get("client_email") or "").strip()
     private_key = str(info.get("private_key") or "")
-    payload: dict[str, Any] = {"loyaltyObjects": [loyalty_object]}
-    if loyalty_class is not None:
-        payload["loyaltyClasses"] = [loyalty_class]
     claims = {
         "iss": email,
         "aud": "google",
         "typ": "savetowallet",
         "iat": int(time.time()),
         "origins": origins,
-        "payload": payload,
+        "payload": {"loyaltyObjects": [loyalty_object]},
     }
     return jwt.encode(claims, private_key, algorithm="RS256")
 
