@@ -88,7 +88,20 @@ def save_url(
     if not wallet_enabled():
         return None
     try:
-        class_payload = _ensure_loyalty_class(base_url=base_url, certificate=certificate)
+        class_payload = build_loyalty_class(
+            base_url=base_url,
+            certificate=certificate,
+        )
+        try:
+            class_payload = _ensure_loyalty_class(
+                base_url=base_url,
+                certificate=certificate,
+            )
+        except Exception:
+            logger.exception(
+                "Google Wallet class sync failed for %s; JWT без REST class update",
+                certificate.public_number or certificate.id,
+            )
         payload = build_loyalty_object(
             certificate,
             holder,
@@ -265,7 +278,7 @@ def _sync_class_branding(
     desired: dict[str, Any],
     current: dict[str, Any],
 ) -> None:
-    """Обновляет оформление class и выводит из DRAFT."""
+    """Обновляет оформление class. Любой PATCH у APPROVED требует UNDER_REVIEW."""
     patch: dict[str, Any] = {}
     for key in (
         "issuerName",
@@ -278,7 +291,10 @@ def _sync_class_branding(
         if key in desired and desired.get(key) != current.get(key):
             patch[key] = desired[key]
     status = str(current.get("reviewStatus") or "").upper()
-    if status not in {"UNDER_REVIEW", "APPROVED"}:
+    if status == "DRAFT":
+        patch["reviewStatus"] = "UNDER_REVIEW"
+    elif patch:
+        # Google: нельзя оставить APPROVED при изменении полей — только UNDER_REVIEW.
         patch["reviewStatus"] = "UNDER_REVIEW"
     if not patch:
         return
