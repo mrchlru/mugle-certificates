@@ -61,12 +61,13 @@ def test_build_loyalty_object_payload() -> None:
     assert body["barcode"]["value"] == "12345678"
     assert body["barcode"]["alternateText"] == "1234-5678"
     assert body["hexBackgroundColor"] == "#00A8A8"
+    assert body["accountName"] == "Иван Петров"
     assert body["linksModuleData"]["uris"][0]["uri"] == "https://bonus.example/c/tok_abc"
     assert "validTimeInterval" in body
     headers = {m["header"] for m in body["textModulesData"]}
     assert "Номер карты" not in headers
-    assert "Код для кассы" in headers
     assert "Скидка" in headers
+    assert "Действует до" in headers
 
 
 def test_build_loyalty_object_blocked_and_expired() -> None:
@@ -101,16 +102,30 @@ def test_build_loyalty_class_uses_logo() -> None:
     settings = Settings(
         google_wallet_issuer_id="99",
         google_wallet_class_suffix="teams_bonus",
-        google_wallet_program_name="Бонусная карта",
+        google_wallet_program_name="Бонус",
         google_wallet_issuer_name="Mugle Rest",
+        google_wallet_class_color="#00B596",
         app_public_url="https://bonus.example",
     )
     body = build_loyalty_class(base_url="https://bonus.example", settings=settings)
     assert body["id"] == "99.teams_bonus"
     assert body["issuerName"] == "Mugle Rest"
-    assert body["programName"] == "Бонусная карта"
-    assert body["accountNameLabel"] == "Владелец"
-    assert body["programLogo"]["sourceUri"]["uri"] == "https://bonus.example/static/logo-teams.png"
+    assert body["programName"] == "Бонус"
+    assert body["accountNameLabel"] == "Владелец карты"
+    assert body["hexBackgroundColor"] == "#00B596"
+    assert body["programLogo"]["sourceUri"]["uri"] == "https://bonus.example/static/wallet-logo.png"
+
+
+def test_build_loyalty_class_rewrites_teams_bonus_env() -> None:
+    settings = Settings(
+        google_wallet_issuer_id="99",
+        google_wallet_program_name="Teams Bonus",
+        google_wallet_issuer_name="Teams Bonus",
+        app_public_url="https://bonus.example",
+    )
+    body = build_loyalty_class(base_url="https://bonus.example", settings=settings)
+    assert body["issuerName"] == "Mugle Rest"
+    assert body["programName"] == "Бонус"
 
 
 def test_save_jwt_claims_structure() -> None:

@@ -37,9 +37,10 @@
 | `GOOGLE_WALLET_CLASS_SUFFIX` | Суффикс Loyalty Class, по умолчанию `teams_bonus` → class id `{issuerId}.teams_bonus` |
 | `GOOGLE_WALLET_SERVICE_ACCOUNT_JSON` | JSON ключ SA для Wallet API (роль Developer у Issuer). Если пусто — берётся `GOOGLE_SERVICE_ACCOUNT_JSON` |
 | `GOOGLE_WALLET_SERVICE_ACCOUNT_FILE` | Файл ключа Wallet SA; иначе как у Sheets |
-| `GOOGLE_WALLET_PROGRAM_NAME` | Имя программы на карте (по умолчанию «Бонусная карта», не дублировать с issuer) |
-| `GOOGLE_WALLET_ISSUER_NAME` | Имя эмитента (по умолчанию «Mugle Rest») |
-| `GOOGLE_WALLET_LOGO_URL` | HTTPS URL логотипа class (квадрат). Пусто = `{APP_PUBLIC_URL}/static/logo-teams.png` |
+| `GOOGLE_WALLET_PROGRAM_NAME` | Имя программы (по умолчанию «Бонус»). Не ставьте «Teams Bonus» — будет дубль с issuer |
+| `GOOGLE_WALLET_ISSUER_NAME` | Эмитент (по умолчанию «Mugle Rest», как в Statix Apple Pass) |
+| `GOOGLE_WALLET_CLASS_COLOR` | Фон class, по умолчанию `#00B596` (как Statix) |
+| `GOOGLE_WALLET_LOGO_URL` | HTTPS URL логотипа class. Пусто = `{APP_PUBLIC_URL}/static/wallet-logo.png` (Mugle Rest) |
 
 `DATA_DIR` нужен только для SQLite и локальных загрузок без S3. Файл базы тогда должен жить на постоянном диске, смонтированном в `/data`. Иначе при следующем деплое сертификаты исчезнут. Для боевого запуска берите PostgreSQL.
 

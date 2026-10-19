@@ -46,9 +46,10 @@ class Settings(BaseSettings):
     google_wallet_class_suffix: str = "teams_bonus"
     google_wallet_service_account_json: str = ""
     google_wallet_service_account_file: str = ""
-    google_wallet_program_name: str = "Бонусная карта"
+    google_wallet_program_name: str = "Бонус"
     google_wallet_issuer_name: str = "Mugle Rest"
     google_wallet_logo_url: str = ""
+    google_wallet_class_color: str = "#00B596"
 
     def normalized_database_url(self) -> str:
         """Возвращает URL базы в формате SQLAlchemy."""

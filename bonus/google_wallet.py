@@ -142,11 +142,9 @@ def build_loyalty_object(
     cfg = settings or get_settings()
     rubles = max(0, int(certificate.balance)) // 100
     short = (certificate.short_code or "").replace("-", "").replace(" ", "")
+    # Как в Statix pkpass: ФИО в поле владельца, без дубля бренда в имени.
     name = (holder.full_name if holder is not None else "") or "Сотрудник"
-    color = _normalize_hex(certificate.color or "#00A8A8")
-    segment = _segment_title(certificate)
-    if segment:
-        name = f"{name}, {segment.lower()}"
+    color = _normalize_hex(certificate.color or cfg.google_wallet_class_color or "#00B596")
     body: dict[str, Any] = {
         "id": object_id(certificate, cfg),
         "classId": class_id(cfg),
@@ -195,15 +193,23 @@ def build_loyalty_class(
     """Собирает тело Loyalty Class (бренд программы, не дублировать имена)."""
     cfg = settings or get_settings()
     logo = _logo_url(base_url, cfg, certificate=certificate)
+    # Как Statix Apple Pass: organizationName = Mugle Rest, фон бирюзовый.
+    issuer = (cfg.google_wallet_issuer_name or "Mugle Rest").strip()
+    program = (cfg.google_wallet_program_name or "Бонус").strip()
+    if program.lower() == issuer.lower() or program.lower() in {"teams bonus", "teamsbonus"}:
+        program = "Бонус"
+    if issuer.lower() in {"teams bonus", "teamsbonus"}:
+        issuer = "Mugle Rest"
     body: dict[str, Any] = {
         "id": class_id(cfg),
-        "issuerName": (cfg.google_wallet_issuer_name or "Mugle Rest").strip(),
-        "programName": (cfg.google_wallet_program_name or "Бонусная карта").strip(),
-        "accountNameLabel": "Владелец",
+        "issuerName": issuer,
+        "programName": program,
+        "accountNameLabel": "Владелец карты",
         "accountIdLabel": "Номер карты",
         "reviewStatus": "UNDER_REVIEW",
-        # Цвет class общий; индивидуальный цвет карты — на Loyalty Object.
-        "hexBackgroundColor": "#00A8A8",
+        "hexBackgroundColor": _normalize_hex(
+            cfg.google_wallet_class_color or "#00B596"
+        ),
     }
     if logo:
         body["programLogo"] = {
@@ -368,34 +374,25 @@ def _object_state(certificate: Certificate, *, expired: bool) -> str:
 
 
 def _text_modules(certificate: Certificate) -> list[dict[str, str]]:
-    """Доп. поля под штрихкодом: код кассы, сегмент, срок — без дубля номера."""
+    """Поля как у Statix storeCard: сегмент/скидка/срок — без лишнего шума."""
     modules: list[dict[str, str]] = []
-    short = (certificate.short_code or "").replace("-", "").replace(" ", "")
-    if short:
-        modules.append(
-            {
-                "id": "cashier_code",
-                "header": "Код для кассы",
-                "body": format_short_code(short),
-            }
-        )
     segment = _segment_title(certificate)
     if segment:
         modules.append({"id": "segment", "header": "Тип карты", "body": segment})
-    if certificate.expires_on is not None:
-        modules.append(
-            {
-                "id": "expires",
-                "header": "Действует до",
-                "body": certificate.expires_on.strftime("%d.%m.%Y"),
-            }
-        )
     if certificate.discount_percent:
         modules.append(
             {
                 "id": "discount",
                 "header": "Скидка",
                 "body": f"{certificate.discount_percent}%",
+            }
+        )
+    if certificate.expires_on is not None:
+        modules.append(
+            {
+                "id": "expires",
+                "header": "Действует до",
+                "body": certificate.expires_on.strftime("%d.%m.%Y"),
             }
         )
     return modules
@@ -464,7 +461,8 @@ def _logo_url(
     root = (base_url or settings.app_public_url or "").strip().rstrip("/")
     if not root:
         return ""
-    return f"{root}/static/logo-teams.png"
+    # Логотип Mugle Rest из Statix pkpass (квадрат для programLogo).
+    return f"{root}/static/wallet-logo.png"
 
 
 def _absolute_https(url: str, base_url: str) -> str:
