@@ -687,9 +687,11 @@ def _buckets_by_restaurant(
     since: datetime,
     reversed_ids: object,
 ) -> tuple[DashBucket, ...]:
+    """Списания по ресторану за период; пустое имя → «Без ресторана»."""
+    # Группируем по сырой колонке: Postgres ругается на coalesce() с разными bind-параметрами в SELECT/GROUP BY.
     rows = db.execute(
         select(
-            func.coalesce(func.nullif(Transaction.restaurant, ""), "Без ресторана"),
+            Transaction.restaurant,
             func.count(Transaction.id),
             func.coalesce(func.sum(Transaction.amount), 0),
         )
@@ -698,11 +700,18 @@ def _buckets_by_restaurant(
             Transaction.created_at >= since,
             Transaction.id.not_in(reversed_ids),
         )
-        .group_by(func.coalesce(func.nullif(Transaction.restaurant, ""), "Без ресторана"))
+        .group_by(Transaction.restaurant)
         .order_by(func.coalesce(func.sum(Transaction.amount), 0).desc())
         .limit(8)
     ).all()
-    return _buckets_from_rows([(str(name), int(count), int(amount)) for name, count, amount in rows])
+    packed: dict[str, list[int]] = {}
+    for raw_name, count, amount in rows:
+        name = (raw_name or "").strip() or "Без ресторана"
+        current = packed.setdefault(name, [0, 0])
+        current[0] += int(count)
+        current[1] += int(amount)
+    ordered = sorted(packed.items(), key=lambda item: item[1][1], reverse=True)
+    return _buckets_from_rows([(name, totals[0], totals[1]) for name, totals in ordered])
 
 
 def _day_series(db: Session, since: datetime, reversed_ids: object) -> tuple[DashDay, ...]:
