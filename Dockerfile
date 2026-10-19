@@ -6,7 +6,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     UV_SYSTEM_PYTHON=1 \
-    UV_HTTP_TIMEOUT=120 \
+    UV_LINK_MODE=copy \
+    UV_HTTP_TIMEOUT=300 \
     PORT=8080 \
     DATA_DIR=/data \
     DATABASE_URL=sqlite:////data/bonus.db
@@ -19,8 +20,9 @@ COPY --from=uvbin /uv /usr/local/bin/uv
 COPY requirements.txt .
 
 # uv быстрее pip; кэш BuildKit переживает повторные сборки.
+# --link-mode=copy: кэш и слой Docker на разных FS, hardlink падает с warning.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system -r requirements.txt
+    uv pip install --system --link-mode=copy -r requirements.txt
 
 COPY bonus ./bonus
 
