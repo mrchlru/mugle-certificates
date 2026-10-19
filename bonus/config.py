@@ -46,8 +46,8 @@ class Settings(BaseSettings):
     google_wallet_class_suffix: str = "teams_bonus"
     google_wallet_service_account_json: str = ""
     google_wallet_service_account_file: str = ""
-    google_wallet_program_name: str = "Teams Bonus"
-    google_wallet_issuer_name: str = "Teams Bonus"
+    google_wallet_program_name: str = "Бонусная карта"
+    google_wallet_issuer_name: str = "Mugle Rest"
     google_wallet_logo_url: str = ""
 
     def normalized_database_url(self) -> str:

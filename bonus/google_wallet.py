@@ -62,7 +62,7 @@ def sync_certificate(
     if not wallet_enabled():
         return
     try:
-        _ensure_loyalty_class(base_url=base_url)
+        _ensure_loyalty_class(base_url=base_url, certificate=certificate)
         payload = build_loyalty_object(
             certificate,
             holder,
@@ -88,7 +88,7 @@ def save_url(
     if not wallet_enabled():
         return None
     try:
-        _ensure_loyalty_class(base_url=base_url)
+        class_payload = _ensure_loyalty_class(base_url=base_url, certificate=certificate)
         payload = build_loyalty_object(
             certificate,
             holder,
@@ -103,7 +103,11 @@ def save_url(
                 "Google Wallet object upsert failed for %s; выдаём JWT без REST",
                 certificate.public_number or certificate.id,
             )
-        token = _signed_save_jwt(payload, origins=_origins(base_url))
+        token = _signed_save_jwt(
+            payload,
+            loyalty_class=class_payload,
+            origins=_origins(base_url),
+        )
         return f"{SAVE_BASE}/{token}"
     except Exception:
         logger.exception(
@@ -127,6 +131,9 @@ def build_loyalty_object(
     short = (certificate.short_code or "").replace("-", "").replace(" ", "")
     name = (holder.full_name if holder is not None else "") or "Сотрудник"
     color = _normalize_hex(certificate.color or "#00A8A8")
+    segment = _segment_title(certificate)
+    if segment:
+        name = f"{name}, {segment.lower()}"
     body: dict[str, Any] = {
         "id": object_id(certificate, cfg),
         "classId": class_id(cfg),
@@ -135,7 +142,7 @@ def build_loyalty_object(
         "accountName": name,
         "loyaltyPoints": {
             "label": "Баланс",
-            "balance": {"string": str(rubles)},
+            "balance": {"string": f"{rubles} ₽"},
         },
         "barcode": {
             "type": "CODE_128",
@@ -145,6 +152,9 @@ def build_loyalty_object(
         "hexBackgroundColor": color,
         "textModulesData": _text_modules(certificate),
     }
+    hero = _hero_image(certificate, base_url)
+    if hero:
+        body["heroImage"] = hero
     if certificate.expires_on is not None:
         body["validTimeInterval"] = {
             "end": {"date": _end_of_day_iso(certificate.expires_on)},
@@ -166,16 +176,20 @@ def build_loyalty_object(
 def build_loyalty_class(
     *,
     base_url: str = "",
+    certificate: Certificate | None = None,
     settings: Settings | None = None,
 ) -> dict[str, Any]:
-    """Собирает тело Loyalty Class."""
+    """Собирает тело Loyalty Class (бренд программы, не дублировать имена)."""
     cfg = settings or get_settings()
-    logo = _logo_url(base_url, cfg)
+    logo = _logo_url(base_url, cfg, certificate=certificate)
     body: dict[str, Any] = {
         "id": class_id(cfg),
-        "issuerName": (cfg.google_wallet_issuer_name or "Teams Bonus").strip(),
-        "programName": (cfg.google_wallet_program_name or "Teams Bonus").strip(),
+        "issuerName": (cfg.google_wallet_issuer_name or "Mugle Rest").strip(),
+        "programName": (cfg.google_wallet_program_name or "Бонусная карта").strip(),
+        "accountNameLabel": "Владелец",
+        "accountIdLabel": "Номер карты",
         "reviewStatus": "UNDER_REVIEW",
+        # Цвет class общий; индивидуальный цвет карты — на Loyalty Object.
         "hexBackgroundColor": "#00A8A8",
     }
     if logo:
@@ -216,45 +230,62 @@ def log_wallet_status() -> None:
         print(f"Teams Bonus: Google Wallet проверка не удалась: {exc}", flush=True)
 
 
-def _ensure_loyalty_class(*, base_url: str = "") -> None:
-    """Идемпотентно создаёт Loyalty Class и выводит его из DRAFT в UNDER_REVIEW."""
+def _ensure_loyalty_class(
+    *,
+    base_url: str = "",
+    certificate: Certificate | None = None,
+) -> dict[str, Any]:
+    """Создаёт/обновляет Loyalty Class (бренд + UNDER_REVIEW) и возвращает payload."""
     cfg = get_settings()
     cid = class_id(cfg)
+    payload = build_loyalty_class(base_url=base_url, certificate=certificate, settings=cfg)
     with _class_lock:
-        if cid in _class_ready:
-            return
         session = _authorized_session()
         existing = session.get(f"{WALLET_API}/loyaltyClass/{cid}")
         if existing.status_code == 200:
-            _promote_class_for_issue(session, cid, existing.json())
+            _sync_class_branding(session, cid, payload, existing.json())
             _class_ready.add(cid)
-            return
-        payload = build_loyalty_class(base_url=base_url, settings=cfg)
+            return payload
         created = session.post(f"{WALLET_API}/loyaltyClass", json=payload)
         if created.status_code in {200, 409}:
             if created.status_code == 409:
                 again = session.get(f"{WALLET_API}/loyaltyClass/{cid}")
                 if again.status_code == 200:
-                    _promote_class_for_issue(session, cid, again.json())
+                    _sync_class_branding(session, cid, payload, again.json())
             _class_ready.add(cid)
-            return
+            return payload
         raise RuntimeError(
             f"loyaltyClass create failed HTTP {created.status_code}: {created.text[:500]}"
         )
 
 
-def _promote_class_for_issue(session: AuthorizedSession, cid: str, body: dict[str, Any]) -> None:
-    """DRAFT class нельзя выдавать — переводим в UNDER_REVIEW."""
-    status = str(body.get("reviewStatus") or "").upper()
-    if status in {"UNDER_REVIEW", "APPROVED"}:
+def _sync_class_branding(
+    session: AuthorizedSession,
+    cid: str,
+    desired: dict[str, Any],
+    current: dict[str, Any],
+) -> None:
+    """Обновляет оформление class и выводит из DRAFT."""
+    patch: dict[str, Any] = {}
+    for key in (
+        "issuerName",
+        "programName",
+        "accountNameLabel",
+        "accountIdLabel",
+        "hexBackgroundColor",
+        "programLogo",
+    ):
+        if key in desired and desired.get(key) != current.get(key):
+            patch[key] = desired[key]
+    status = str(current.get("reviewStatus") or "").upper()
+    if status not in {"UNDER_REVIEW", "APPROVED"}:
+        patch["reviewStatus"] = "UNDER_REVIEW"
+    if not patch:
         return
-    patched = session.patch(
-        f"{WALLET_API}/loyaltyClass/{cid}",
-        json={"reviewStatus": "UNDER_REVIEW"},
-    )
+    patched = session.patch(f"{WALLET_API}/loyaltyClass/{cid}", json=patch)
     if patched.status_code != 200:
         raise RuntimeError(
-            f"loyaltyClass promote failed HTTP {patched.status_code}: {patched.text[:500]}"
+            f"loyaltyClass branding failed HTTP {patched.status_code}: {patched.text[:500]}"
         )
 
 
@@ -285,19 +316,27 @@ def _upsert_loyalty_object(payload: dict[str, Any]) -> None:
     )
 
 
-def _signed_save_jwt(loyalty_object: dict[str, Any], *, origins: list[str]) -> str:
+def _signed_save_jwt(
+    loyalty_object: dict[str, Any],
+    *,
+    loyalty_class: dict[str, Any] | None = None,
+    origins: list[str],
+) -> str:
     """Подписывает JWT для кнопки Add to Google Wallet."""
     settings = get_settings()
     info = _wallet_service_account_info(settings)
     email = str(info.get("client_email") or "").strip()
     private_key = str(info.get("private_key") or "")
+    payload: dict[str, Any] = {"loyaltyObjects": [loyalty_object]}
+    if loyalty_class is not None:
+        payload["loyaltyClasses"] = [loyalty_class]
     claims = {
         "iss": email,
         "aud": "google",
         "typ": "savetowallet",
         "iat": int(time.time()),
         "origins": origins,
-        "payload": {"loyaltyObjects": [loyalty_object]},
+        "payload": payload,
     }
     return jwt.encode(claims, private_key, algorithm="RS256")
 
@@ -313,13 +352,28 @@ def _object_state(certificate: Certificate, *, expired: bool) -> str:
 
 
 def _text_modules(certificate: Certificate) -> list[dict[str, str]]:
-    modules = [
-        {
-            "id": "public_number",
-            "header": "Номер карты",
-            "body": certificate.public_number or "",
-        }
-    ]
+    """Доп. поля под штрихкодом: код кассы, сегмент, срок — без дубля номера."""
+    modules: list[dict[str, str]] = []
+    short = (certificate.short_code or "").replace("-", "").replace(" ", "")
+    if short:
+        modules.append(
+            {
+                "id": "cashier_code",
+                "header": "Код для кассы",
+                "body": format_short_code(short),
+            }
+        )
+    segment = _segment_title(certificate)
+    if segment:
+        modules.append({"id": "segment", "header": "Тип карты", "body": segment})
+    if certificate.expires_on is not None:
+        modules.append(
+            {
+                "id": "expires",
+                "header": "Действует до",
+                "body": certificate.expires_on.strftime("%d.%m.%Y"),
+            }
+        )
     if certificate.discount_percent:
         modules.append(
             {
@@ -329,6 +383,34 @@ def _text_modules(certificate: Certificate) -> list[dict[str, str]]:
             }
         )
     return modules
+
+
+def _segment_title(certificate: Certificate) -> str:
+    segment = getattr(certificate, "segment", None)
+    if segment is not None and getattr(segment, "name", None):
+        return str(segment.name).strip()
+    return ""
+
+
+def _hero_image(certificate: Certificate, base_url: str) -> dict[str, Any] | None:
+    """Баннер шаблона как heroImage, если есть публичный HTTPS URL."""
+    template = getattr(certificate, "template", None)
+    path = ""
+    if template is not None:
+        path = (getattr(template, "image_path", None) or "").strip()
+    if not path:
+        return None
+    from bonus.storage import public_media_url
+
+    url = _absolute_https(public_media_url(path), base_url)
+    if not url:
+        return None
+    return {
+        "sourceUri": {"uri": url},
+        "contentDescription": {
+            "defaultValue": {"language": "ru", "value": "Обложка карты"},
+        },
+    }
 
 
 def _end_of_day_iso(day: date) -> str:
@@ -344,14 +426,46 @@ def _card_url(certificate: Certificate, base_url: str) -> str:
     return f"{root}/c/{token}"
 
 
-def _logo_url(base_url: str, settings: Settings) -> str:
+def _logo_url(
+    base_url: str,
+    settings: Settings,
+    *,
+    certificate: Certificate | None = None,
+) -> str:
     configured = settings.google_wallet_logo_url.strip()
     if configured:
         return configured
+    template = getattr(certificate, "template", None) if certificate is not None else None
+    logo_path = ""
+    if template is not None:
+        logo_path = (getattr(template, "logo_path", None) or "").strip()
+    if logo_path:
+        from bonus.storage import public_media_url
+
+        custom = _absolute_https(public_media_url(logo_path), base_url)
+        if custom:
+            return custom
     root = (base_url or settings.app_public_url or "").strip().rstrip("/")
     if not root:
         return ""
     return f"{root}/static/logo-teams.png"
+
+
+def _absolute_https(url: str, base_url: str) -> str:
+    """Google Wallet принимает только абсолютные https-картинки."""
+    value = (url or "").strip()
+    if not value:
+        return ""
+    if value.startswith("https://"):
+        return value
+    if value.startswith("http://"):
+        return ""
+    root = (base_url or get_settings().app_public_url or "").strip().rstrip("/")
+    if not root.startswith("https://"):
+        return ""
+    if value.startswith("/"):
+        return f"{root}{value}"
+    return f"{root}/{value}"
 
 
 def _origins(base_url: str) -> list[str]:
