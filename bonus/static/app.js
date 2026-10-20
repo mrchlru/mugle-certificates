@@ -16,12 +16,16 @@ function bindPartnersDialog() {
         dialog.close();
       }
     });
+    dialog.addEventListener("close", function () {
+      document.body.classList.remove("partners-dialog-open");
+    });
   });
   document.querySelectorAll("[data-partners-open]").forEach(function (button) {
     button.addEventListener("click", function () {
       const targetId = button.getAttribute("data-partners-target") || "partners-dialog";
       const dialog = document.getElementById(targetId);
       if (dialog && typeof dialog.showModal === "function") {
+        document.body.classList.add("partners-dialog-open");
         dialog.showModal();
       }
     });
