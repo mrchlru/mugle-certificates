@@ -67,6 +67,9 @@ class CardView:
     logo_custom: bool
     barcode_value: str
     barcode_svg: str
+    use_days: str
+    use_days_label: str
+    use_days_active: tuple[str, ...]
     history: tuple[TxView, ...]
 
 
@@ -521,8 +524,29 @@ def _card_view(
         logo_custom=logo_custom,
         barcode_value=format_short_code(certificate.short_code),
         barcode_svg=barcode_svg(certificate.short_code.replace("-", "").replace(" ", "")),
+        use_days=_use_days_mask(certificate),
+        use_days_label=_use_days_caption(certificate),
+        use_days_active=_use_days_active(certificate),
         history=history,
     )
+
+
+def _use_days_mask(certificate: Certificate) -> str:
+    from bonus.weekdays import ALL_DAYS, normalize_days
+
+    return normalize_days(getattr(certificate, "use_days", None), default=ALL_DAYS)
+
+
+def _use_days_caption(certificate: Certificate) -> str:
+    from bonus.weekdays import days_label
+
+    return days_label(_use_days_mask(certificate))
+
+
+def _use_days_active(certificate: Certificate) -> tuple[str, ...]:
+    from bonus.weekdays import day_set
+
+    return tuple(sorted(day_set(_use_days_mask(certificate))))
 
 
 def _segment_name(db: Session, segment_id: int | None) -> str:

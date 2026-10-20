@@ -32,6 +32,17 @@
       {% endif %}
       <p class="wallet-code-number">{{ card.barcode_value }}</p>
     </div>
-    <p class="wallet-meta">{{ card.public_number }} · {{ status_label(card.status, card.balance, card.expires_on, card.single_use) }}</p>
+    <div class="wallet-meta-row">
+      <p class="wallet-meta">{{ card.public_number }} · {{ status_label(card.status, card.balance, card.expires_on, card.single_use) }}</p>
+      {% if show_card_partners|default(false) %}
+      {% set dialog_id = partners_dialog_id|default('partners-dialog') %}
+      <button type="button" class="wallet-partners-icon" data-partners-open data-partners-target="{{ dialog_id }}" aria-haspopup="dialog" aria-controls="{{ dialog_id }}" title="Где и когда действует карта" aria-label="Где и когда действует карта">
+        <svg viewBox="0 0 48 48" width="18" height="18" fill="none" aria-hidden="true">
+          <path d="M24 44s14-12.2 14-24a14 14 0 1 0-28 0c0 11.8 14 24 14 24Z" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+          <circle cx="24" cy="20" r="5" stroke="currentColor" stroke-width="3"/>
+        </svg>
+      </button>
+      {% endif %}
+    </div>
   </div>
 </article>

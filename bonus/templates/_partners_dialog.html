@@ -1,0 +1,47 @@
+{% set dialog_id = partners_dialog_id|default('partners-dialog') %}
+<dialog id="{{ dialog_id }}" class="partners-dialog" data-partners-dialog>
+  <form method="dialog" class="partners-dialog-head">
+    <div>
+      <p class="partners-eyebrow">Условия</p>
+      <h2>Где и когда можно пользоваться картой</h2>
+    </div>
+    <button type="submit" class="partners-close" aria-label="Закрыть">×</button>
+  </form>
+
+  {% if card is defined %}
+  <section class="partners-days" aria-label="Дни использования">
+    <p class="partners-days-title">Дни использования</p>
+    <p class="partners-days-caption">{{ card.use_days_label }}</p>
+    <div class="use-days-chips" role="list">
+      {% for value, title in weekday_choices|default([]) %}
+      <span class="use-day{% if value in card.use_days_active %} is-on{% endif %}" role="listitem"{% if value in card.use_days_active %} aria-current="true"{% endif %}>{{ title }}</span>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  <p class="partners-lead">Использовать карту можно в ресторанах-партнёрах.</p>
+  <div class="partners-scroll">
+    {% for city in partner_cities|default([]) %}
+    <section class="partners-city">
+      <h3>{{ city.city }}</h3>
+      <div class="partners-table" role="table">
+        <div class="partners-row partners-row-head" role="row">
+          <span role="columnheader">Ресторан</span>
+          <span role="columnheader">Адрес</span>
+        </div>
+        {% for place in city.places %}
+          {% for address in place.addresses %}
+          <div class="partners-row" role="row">
+            <span role="cell">{% if loop.first %}{{ place.name }}{% endif %}</span>
+            <span role="cell">{{ address }}</span>
+          </div>
+          {% endfor %}
+        {% endfor %}
+      </div>
+    </section>
+    {% else %}
+    <p class="muted">Список партнёров скоро появится.</p>
+    {% endfor %}
+  </div>
+</dialog>

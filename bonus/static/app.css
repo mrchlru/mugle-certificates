@@ -773,6 +773,245 @@ body:has(.wallet-wrap) .flash {
   font-size: 14px;
 }
 
+.wallet-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.wallet-meta-row .wallet-meta {
+  margin: 0;
+}
+
+.wallet-partners-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.18);
+  color: #fff;
+  cursor: pointer;
+}
+
+.wallet-partners-icon:hover,
+.wallet-partners-icon:focus-visible {
+  border-color: #fff;
+  background: rgba(0, 0, 0, 0.28);
+  outline: none;
+}
+
+.partners-wide-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  margin: 12px 0 0;
+  padding: 14px 16px;
+  border: 1px solid rgba(0, 181, 150, 0.4);
+  border-radius: 14px;
+  background: linear-gradient(160deg, rgba(0, 181, 150, 0.2), rgba(0, 181, 150, 0.06));
+  color: #eafff8;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.partners-wide-btn:hover,
+.partners-wide-btn:focus-visible {
+  border-color: #00b596;
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.partners-wide-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: rgba(0, 181, 150, 0.16);
+  color: #00b596;
+  flex: 0 0 auto;
+}
+
+.partners-wide-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.partners-wide-copy strong {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.partners-wide-copy small {
+  font-size: 12px;
+  color: #9ad9cb;
+}
+
+.partners-days {
+  margin: 14px 18px 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.partners-days-title {
+  margin: 0;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #9e9e9e;
+}
+
+.partners-days-caption {
+  margin: 6px 0 10px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.use-days-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.use-day {
+  min-width: 34px;
+  padding: 6px 8px;
+  border-radius: 999px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: #8a8a8a;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid transparent;
+}
+
+.use-day.is-on {
+  color: #04140f;
+  background: #00b596;
+  border-color: #00b596;
+}
+
+.partners-dialog {
+  width: min(560px, calc(100vw - 24px));
+  max-height: min(82vh, 720px);
+  margin: auto;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  background: #141414;
+  color: #f5f5f5;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+}
+
+.partners-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.62);
+}
+
+.partners-dialog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 18px 0;
+}
+
+.partners-eyebrow {
+  margin: 0 0 4px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #00b596;
+}
+
+.partners-dialog-head h2 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.partners-close {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.partners-lead {
+  margin: 12px 18px 0;
+  color: #cfcfcf;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.partners-scroll {
+  overflow: auto;
+  max-height: min(58vh, 520px);
+  padding: 14px 18px 18px;
+}
+
+.partners-city + .partners-city {
+  margin-top: 18px;
+}
+
+.partners-city h3 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  color: #00b596;
+}
+
+.partners-table {
+  display: grid;
+  gap: 1px;
+  overflow: hidden;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.partners-row {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.15fr);
+  gap: 10px;
+  padding: 10px 12px;
+  background: #1b1b1b;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.partners-row-head {
+  background: #222;
+  color: #9e9e9e;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.partners-row span:empty::before {
+  content: "";
+}
+
+@media (max-width: 560px) {
+  .partners-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
+
 .wallet-actions {
   display: flex;
   flex-wrap: wrap;

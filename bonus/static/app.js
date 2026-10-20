@@ -3,6 +3,29 @@ function boot() {
   bindOnce();
   bindAmounts();
   bindCamera();
+  bindPartnersDialog();
+}
+
+function bindPartnersDialog() {
+  document.querySelectorAll("[data-partners-dialog]").forEach(function (dialog) {
+    if (typeof dialog.showModal !== "function") {
+      return;
+    }
+    dialog.addEventListener("click", function (event) {
+      if (event.target === dialog) {
+        dialog.close();
+      }
+    });
+  });
+  document.querySelectorAll("[data-partners-open]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      const targetId = button.getAttribute("data-partners-target") || "partners-dialog";
+      const dialog = document.getElementById(targetId);
+      if (dialog && typeof dialog.showModal === "function") {
+        dialog.showModal();
+      }
+    });
+  });
 }
 
 function bindCopy() {

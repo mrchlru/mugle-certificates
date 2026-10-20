@@ -3,8 +3,12 @@
 {% block main_class %}narrow{% endblock %}
 {% block content %}
 {% if cards %}
+  {% set show_card_partners = true %}
   {% for card in cards %}
+    {% set partners_dialog_id = 'partners-dialog-' ~ card.id %}
     {% include "_card.html" %}
+    {% include "_card_partners.html" %}
+    {% include "_partners_dialog.html" %}
     {% set next_path = '/card' %}
     {% set show_holder = false %}
     {% with items=card.history %}

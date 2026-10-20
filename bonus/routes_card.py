@@ -14,17 +14,27 @@ from bonus.db import get_db
 from bonus.google_wallet import save_url, wallet_enabled
 from bonus.http import public_base, render, require
 from bonus.models import Role, User
+from bonus.partners import partner_cities
 from bonus.present import load_card, load_cards
 from bonus.services import find_certificate
+from bonus.weekdays import WEEKDAY_CHOICES
 
 router = APIRouter()
+
+
+def _card_page_extras() -> dict:
+    """Общий контекст: дни недели и каталог партнёров."""
+    return {
+        "weekday_choices": WEEKDAY_CHOICES,
+        "partner_cities": partner_cities(),
+    }
 
 
 @router.get("/card")
 def card(request: Request, db: Session = Depends(get_db), user: User = Depends(require(Role.employee))):
     """Показывает сертификаты того, кто вошёл."""
     cards = load_cards(db, user.id, public_base(request), user)
-    return render(request, "card.html", cards=cards)
+    return render(request, "card.html", cards=cards, **_card_page_extras())
 
 
 @router.get("/c/{token}")
@@ -47,6 +57,7 @@ def public_certificate(token: str, request: Request, db: Session = Depends(get_d
         apple_wallet_href=f"/c/{certificate.token}/apple-wallet.pkpass" if apple_on else "",
         walletpasses_enabled=apple_on and bool(pkpass_url),
         walletpasses_href=walletpasses_url(pkpass_url) if pkpass_url else "",
+        **_card_page_extras(),
     )
 
 
@@ -72,6 +83,7 @@ def google_wallet_save(token: str, request: Request, db: Session = Depends(get_d
             walletpasses_enabled=False,
             walletpasses_href="",
             status_code=503,
+            **_card_page_extras(),
         )
     return RedirectResponse(url, status_code=302)
 
@@ -98,6 +110,7 @@ def apple_wallet_pkpass(token: str, request: Request, db: Session = Depends(get_
             walletpasses_enabled=False,
             walletpasses_href="",
             status_code=503,
+            **_card_page_extras(),
         )
     filename = f"{certificate.public_number or certificate.id}.pkpass"
     return Response(

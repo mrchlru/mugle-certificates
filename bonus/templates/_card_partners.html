@@ -1,0 +1,13 @@
+{% set dialog_id = partners_dialog_id|default('partners-dialog') %}
+<button type="button" class="partners-wide-btn" data-partners-open data-partners-target="{{ dialog_id }}" aria-haspopup="dialog" aria-controls="{{ dialog_id }}">
+  <span class="partners-wide-icon" aria-hidden="true">
+    <svg viewBox="0 0 48 48" width="22" height="22" fill="none">
+      <path d="M24 44s14-12.2 14-24a14 14 0 1 0-28 0c0 11.8 14 24 14 24Z" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round"/>
+      <circle cx="24" cy="20" r="5.2" stroke="currentColor" stroke-width="2.6"/>
+    </svg>
+  </span>
+  <span class="partners-wide-copy">
+    <strong>Где и когда действует карта</strong>
+    <small>Рестораны-партнёры и дни использования</small>
+  </span>
+</button>
