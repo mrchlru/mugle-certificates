@@ -869,7 +869,11 @@ body:has(.wallet-wrap) .flash {
   border-color: #00b596;
 }
 
-.partners-dialog {
+.partners-dialog:not([open]) {
+  display: none;
+}
+
+.partners-dialog[open] {
   display: flex;
   flex-direction: column;
   width: min(560px, calc(100vw - 24px));
@@ -886,16 +890,16 @@ body:has(.wallet-wrap) .flash {
   -ms-overflow-style: none;
 }
 
-.partners-dialog::-webkit-scrollbar,
-.partners-dialog *::-webkit-scrollbar {
+.partners-dialog[open]::-webkit-scrollbar,
+.partners-dialog[open] *::-webkit-scrollbar {
   display: none;
   width: 0 !important;
   height: 0 !important;
   background: transparent;
 }
 
-.partners-dialog,
-.partners-dialog * {
+.partners-dialog[open],
+.partners-dialog[open] * {
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
