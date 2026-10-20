@@ -14,7 +14,6 @@
 {% endblock %}
 {% block main_class %}wallet-wrap{% endblock %}
 {% block content %}
-{% set show_card_partners = true %}
 <p class="wallet-hint">Покажите штрихкод управляющему в ресторане.</p>
 {% include "_card.html" %}
 {% if google_wallet_enabled|default(false) and google_wallet_href|default('')

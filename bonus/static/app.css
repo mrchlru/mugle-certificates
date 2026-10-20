@@ -773,39 +773,6 @@ body:has(.wallet-wrap) .flash {
   font-size: 14px;
 }
 
-.wallet-meta-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: 10px;
-}
-
-.wallet-meta-row .wallet-meta {
-  margin: 0;
-}
-
-.wallet-partners-icon {
-  display: grid;
-  place-items: center;
-  flex: 0 0 auto;
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.18);
-  color: #fff;
-  cursor: pointer;
-}
-
-.wallet-partners-icon:hover,
-.wallet-partners-icon:focus-visible {
-  border-color: #fff;
-  background: rgba(0, 0, 0, 0.28);
-  outline: none;
-}
-
 .partners-wide-btn {
   display: flex;
   align-items: center;

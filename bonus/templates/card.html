@@ -3,7 +3,6 @@
 {% block main_class %}narrow{% endblock %}
 {% block content %}
 {% if cards %}
-  {% set show_card_partners = true %}
   {% for card in cards %}
     {% set partners_dialog_id = 'partners-dialog-' ~ card.id %}
     {% include "_card.html" %}
