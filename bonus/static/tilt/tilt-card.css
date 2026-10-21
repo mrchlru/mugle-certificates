@@ -1,0 +1,84 @@
+/*
+ * tilt-card.css — подключить один раз в глобальных стилях
+ * (например, @import './tilt-card.css'; в app/globals.css).
+ *
+ * Атрибуты для разметки карточки:
+ *   data-tilt-ignore   касание этого блока не наклоняет карту (штрихкод, кнопки)
+ *   data-tilt-above    блок лежит выше блика (штрихкод: блик не снижает контраст)
+ *   data-tilt-depth    сдвиг слоя при наклоне, 1–12 (px при максимальном наклоне)
+ *   data-tilt-bleed    увеличить слой на 10%, чтобы при сдвиге не показались края
+ *                      (для картинок внутри контейнера с overflow:hidden)
+ *
+ * Переменные, которые можно переопределить на конкретной карте:
+ *   --tilt-sheen-rest  0..1, яркость блика в покое (по умолчанию 0: вид карты не меняется)
+ */
+
+.tilt-card {
+  position: relative;
+  isolation: isolate;
+  transform: perspective(var(--tilt-perspective, 900px))
+    rotateX(var(--tilt-rx, 0deg)) rotateY(var(--tilt-ry, 0deg));
+  transform-origin: 50% 50%;
+  /* вертикальная прокрутка страницы продолжает работать */
+  touch-action: pan-y pinch-zoom;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.tilt-card[data-tilting] {
+  will-change: transform;
+}
+
+/* Блик: подходит любому цвету карты */
+.tilt-card__sheen {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 1;
+  mix-blend-mode: soft-light;
+  opacity: calc(
+    var(--tilt-sheen-rest, 0) + (1 - var(--tilt-sheen-rest, 0)) * var(--tilt-mag, 0)
+  );
+  background: radial-gradient(
+    circle at var(--tilt-sx, 50%) var(--tilt-sy, 50%),
+    rgba(255, 255, 255, 0.6),
+    rgba(255, 255, 255, 0) 60%
+  );
+}
+
+/* Тень, смещающаяся при наклоне (необязательно) */
+.tilt-card--shadow {
+  filter: drop-shadow(
+    calc(var(--tilt-ox, 0) * -12px) calc(16px + var(--tilt-oy, 0) * 10px) 22px
+      rgba(0, 0, 0, 0.35)
+  );
+}
+
+/* Блок выше блика */
+[data-tilt-above] {
+  position: relative;
+  z-index: 2;
+}
+
+/* Параллакс слоёв. Используется отдельное свойство translate,
+   поэтому существующий transform элемента не затрагивается. */
+[data-tilt-depth] {
+  translate: calc(var(--tilt-px, 0) * var(--tilt-depth, 0) * 1px)
+    calc(var(--tilt-py, 0) * var(--tilt-depth, 0) * 1px);
+}
+[data-tilt-depth='1'] { --tilt-depth: 1; }
+[data-tilt-depth='2'] { --tilt-depth: 2; }
+[data-tilt-depth='3'] { --tilt-depth: 3; }
+[data-tilt-depth='4'] { --tilt-depth: 4; }
+[data-tilt-depth='5'] { --tilt-depth: 5; }
+[data-tilt-depth='6'] { --tilt-depth: 6; }
+[data-tilt-depth='7'] { --tilt-depth: 7; }
+[data-tilt-depth='8'] { --tilt-depth: 8; }
+[data-tilt-depth='9'] { --tilt-depth: 9; }
+[data-tilt-depth='10'] { --tilt-depth: 10; }
+[data-tilt-depth='11'] { --tilt-depth: 11; }
+[data-tilt-depth='12'] { --tilt-depth: 12; }
+
+[data-tilt-bleed] {
+  scale: 1.1;
+}

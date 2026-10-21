@@ -1,7 +1,7 @@
-<article class="wallet-card" style="--card: {{ card.color }};">
+<article class="wallet-card tilt-card" style="--card: {{ card.color }};">
   <div class="wallet-top">
-    <img class="wallet-logo{% if not card.logo_custom %} is-default{% endif %}" src="{{ card.logo_url }}" alt="" width="{% if card.logo_custom %}140{% else %}58{% endif %}" height="{% if card.logo_custom %}44{% else %}47{% endif %}">
-    <div class="wallet-balance">
+    <img class="wallet-logo{% if not card.logo_custom %} is-default{% endif %}" src="{{ card.logo_url }}" alt="" width="{% if card.logo_custom %}140{% else %}58{% endif %}" height="{% if card.logo_custom %}44{% else %}47{% endif %}" data-tilt-depth="3">
+    <div class="wallet-balance" data-tilt-depth="2">
       <p class="wallet-label">Баланс</p>
       <p class="wallet-amount">{{ "{:,}".format(card.balance // 100).replace(",", " ") }}</p>
       {% if card.discount_percent and card.discount_percent > 0 %}
@@ -11,22 +11,22 @@
   </div>
   <div class="wallet-banner{% if not card.template_url %} is-empty{% endif %}">
     {% if card.template_url %}
-    <img src="{{ card.template_url }}" alt="" width="1672" height="763" decoding="async" fetchpriority="high">
+    <img src="{{ card.template_url }}" alt="" width="1672" height="763" decoding="async" fetchpriority="high" data-tilt-depth="6" data-tilt-bleed>
     {% else %}
-    <div class="wallet-placeholder">
+    <div class="wallet-placeholder" data-tilt-depth="4">
       <span>mugle rest</span>
     </div>
     {% endif %}
   </div>
   <div class="wallet-body">
-    <p class="wallet-label">Владелец карты</p>
-    <p class="wallet-holder">
+    <p class="wallet-label" data-tilt-depth="2">Владелец карты</p>
+    <p class="wallet-holder" data-tilt-depth="2">
       {{ card.holder_name }}{% if card.segment_name %}, {{ card.segment_name|lower }}{% endif %}
     </p>
     {% if card.expires_on %}
-    <p class="wallet-expiry">Действует до {{ card.expires_on|day }}</p>
+    <p class="wallet-expiry" data-tilt-depth="2">Действует до {{ card.expires_on|day }}</p>
     {% endif %}
-    <div class="wallet-code">
+    <div class="wallet-code" data-tilt-ignore data-tilt-above>
       {% if card.barcode_svg %}
       <div class="wallet-barcode" aria-hidden="true">{{ card.barcode_svg|safe }}</div>
       {% endif %}
@@ -34,4 +34,5 @@
     </div>
     <p class="wallet-meta">{{ card.public_number }} · {{ status_label(card.status, card.balance, card.expires_on, card.single_use) }}</p>
   </div>
+  <span class="tilt-card__sheen" data-tilt-sheen aria-hidden="true"></span>
 </article>

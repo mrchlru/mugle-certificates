@@ -8,6 +8,7 @@
   <title>{% block title %}Сертификаты{% endblock %} — Teams Bonus</title>
   <link rel="icon" href="/static/favicon.png">
   <link rel="stylesheet" href="/static/app.css?v={{ asset_v|default('1') }}">
+  <link rel="stylesheet" href="/static/tilt/tilt-card.css?v={{ asset_v|default('1') }}">
   {% block head_scripts %}{% endblock %}
 </head>
 <body>
@@ -76,6 +77,7 @@
     {% endif %}
     {% block content %}{% endblock %}
   </main>
+  <script src="/static/tilt/tilt-core.js?v={{ asset_v|default('1') }}"></script>
   <script src="/static/app.js?v={{ asset_v|default('1') }}"></script>
   {% block scripts %}{% endblock %}
 </body>

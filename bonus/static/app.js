@@ -4,6 +4,16 @@ function boot() {
   bindAmounts();
   bindCamera();
   bindPartnersDialog();
+  bindTiltCards();
+}
+
+function bindTiltCards() {
+  if (typeof createTilt !== "function") {
+    return;
+  }
+  document.querySelectorAll(".wallet-card.tilt-card").forEach(function (card) {
+    createTilt(card, { maxAngle: 9, gyro: false });
+  });
 }
 
 function bindPartnersDialog() {
