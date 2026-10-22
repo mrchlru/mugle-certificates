@@ -70,6 +70,9 @@ class CardView:
     use_days: str
     use_days_label: str
     use_days_active: tuple[str, ...]
+    birthday_unwrap: bool
+    gift_opened: bool
+    first_name: str
     history: tuple[TxView, ...]
 
 
@@ -527,8 +530,88 @@ def _card_view(
         use_days=_use_days_mask(certificate),
         use_days_label=_use_days_caption(certificate),
         use_days_active=_use_days_active(certificate),
+        birthday_unwrap=_birthday_unwrap_enabled(db, certificate),
+        gift_opened=certificate.gift_opened_at is not None,
+        first_name=_first_name("" if holder is None else holder.full_name),
         history=history,
     )
+
+
+def _birthday_unwrap_enabled(db: Session, certificate: Certificate) -> bool:
+    """Сегмент карты с флажком «Анимация распаковки (День рождения)»."""
+    if certificate.segment_id is None:
+        return False
+    segment = db.get(Segment, certificate.segment_id)
+    return bool(segment is not None and getattr(segment, "birthday_unwrap", False))
+
+
+def preview_birthday_card(db: Session, segment: Segment) -> CardView:
+    """Карточка-макет для предпросмотра распаковки сегмента."""
+    from bonus.catalog import template_logo_is_custom, template_logo_url
+    from bonus.models import CardTemplate
+
+    template = db.scalar(
+        select(CardTemplate)
+        .where(CardTemplate.segment_id == segment.id, CardTemplate.is_active.is_(True))
+        .order_by(CardTemplate.id.desc())
+        .limit(1)
+    )
+    color = (template.color if template is not None else None) or "#B91C1C"
+    template_path = ""
+    logo_url = "/static/logo.svg"
+    logo_custom = False
+    discount = segment.discount_percent or 0
+    if template is not None:
+        if template.image_path:
+            template_path = media_url(template.image_path)
+        logo_url = template_logo_url(template)
+        logo_custom = template_logo_is_custom(template)
+        if template.discount_percent:
+            discount = template.discount_percent
+    short_code = "12345678"
+    return CardView(
+        id=0,
+        public_number="TB-PREVIEW",
+        short_code=short_code,
+        balance=300000,
+        nominal=300000,
+        note="",
+        expires_on=None,
+        holder_name="Марков Роман",
+        holder_login="",
+        department="",
+        job_title="",
+        phone="",
+        company="",
+        birth_date=None,
+        ledger_sheet="gift_birthday",
+        status=CertificateStatus.active,
+        can_spend=False,
+        color=color,
+        discount_percent=discount,
+        single_use=bool(segment.single_use),
+        segment_name=segment.name,
+        template_url=template_path,
+        logo_url=logo_url,
+        logo_custom=logo_custom,
+        barcode_value=format_short_code(short_code),
+        barcode_svg=barcode_svg(short_code),
+        use_days=segment.use_days or "1234567",
+        use_days_label="",
+        use_days_active=tuple(),
+        birthday_unwrap=True,
+        gift_opened=False,
+        first_name="Роман",
+        history=tuple(),
+    )
+
+
+def _first_name(full_name: str) -> str:
+    """Имя из «Фамилия Имя» (ровно два слова); иначе пусто."""
+    parts = [part for part in (full_name or "").split() if part]
+    if len(parts) == 2:
+        return parts[1]
+    return ""
 
 
 def _use_days_mask(certificate: Certificate) -> str:

@@ -42,6 +42,11 @@
           <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
           <span class="switch-copy">Разовый: после первого списания остаток сгорает</span>
         </label>
+        <label class="switch">
+          <input type="checkbox" name="birthday_unwrap" value="1">
+          <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+          <span class="switch-copy">Анимация распаковки (День рождения)</span>
+        </label>
         {% with field_name='use_days', selected_days='1234567', legend='Дни использования', weekday_choices=weekday_choices %}
           {% include "_weekday_picker.html" %}
         {% endwith %}
@@ -83,6 +88,11 @@
               <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
               <span class="switch-copy">Разовый: после первого списания остаток сгорает</span>
             </label>
+            <label class="switch">
+              <input type="checkbox" name="birthday_unwrap" value="1" {% if item.birthday_unwrap %}checked{% endif %}>
+              <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+              <span class="switch-copy">Анимация распаковки (День рождения)</span>
+            </label>
             {% with field_name='use_days', selected_days=item.use_days or '1234567', legend='Дни использования', weekday_choices=weekday_choices %}
               {% include "_weekday_picker.html" %}
             {% endwith %}
@@ -95,15 +105,18 @@
               <span class="status-pill {% if item.is_active %}is-on{% else %}is-off{% endif %}">
                 {% if item.is_active %}Активен{% else %}Скрыт{% endif %}
               </span>
-              <span class="muted design-meta">{{ accrual_label(item.accrual_period) }}{% if item.requires_expiry %} · со сроком{% endif %}{% if item.single_use %} · разовый{% endif %}{% if item.discount_percent %} · {{ item.discount_percent }}%{% endif %}</span>
+              <span class="muted design-meta">{{ accrual_label(item.accrual_period) }}{% if item.requires_expiry %} · со сроком{% endif %}{% if item.single_use %} · разовый{% endif %}{% if item.birthday_unwrap %} · распаковка{% endif %}{% if item.discount_percent %} · {{ item.discount_percent }}%{% endif %}</span>
               <button class="btn ghost compact" type="submit">Сохранить</button>
             </div>
           </form>
-          <form method="post" action="/hr/design/segments/{{ item.id }}/active" class="design-side-action">
-            <input type="hidden" name="csrf_token" value="{{ csrf }}">
-            <input type="hidden" name="active" value="{{ '0' if item.is_active else '1' }}">
-            <button class="btn soft compact" type="submit">{{ 'Скрыть' if item.is_active else 'Показать' }}</button>
-          </form>
+          <div class="design-side-actions">
+            <a class="btn soft compact" href="/hr/design/segments/{{ item.id }}/unwrap-preview" target="_blank" rel="noopener">Посмотреть распаковку</a>
+            <form method="post" action="/hr/design/segments/{{ item.id }}/active" class="design-side-action">
+              <input type="hidden" name="csrf_token" value="{{ csrf }}">
+              <input type="hidden" name="active" value="{{ '0' if item.is_active else '1' }}">
+              <button class="btn soft compact" type="submit">{{ 'Скрыть' if item.is_active else 'Показать' }}</button>
+            </form>
+          </div>
         </li>
         {% endfor %}
       </ul>

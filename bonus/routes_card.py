@@ -1,7 +1,9 @@
 """Карточка сотрудника с QR-кодом."""
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
 
 from bonus.apple_wallet import (
@@ -51,6 +53,7 @@ def public_certificate(token: str, request: Request, db: Session = Depends(get_d
         request,
         "public_card.html",
         card=card,
+        card_token=certificate.token,
         google_wallet_enabled=wallet_enabled(),
         google_wallet_href=f"/c/{certificate.token}/google-wallet",
         apple_wallet_enabled=apple_on,
@@ -59,6 +62,18 @@ def public_certificate(token: str, request: Request, db: Session = Depends(get_d
         walletpasses_href=walletpasses_url(pkpass_url) if pkpass_url else "",
         **_card_page_extras(),
     )
+
+
+@router.post("/c/{token}/gift-opened")
+def mark_gift_opened(token: str, db: Session = Depends(get_db)):
+    """Помечает подарочную распаковку открытой (один раз)."""
+    certificate = find_certificate(db, token)
+    if certificate is None:
+        return JSONResponse({"ok": False}, status_code=404)
+    if certificate.gift_opened_at is None:
+        certificate.gift_opened_at = datetime.now(timezone.utc)
+        db.commit()
+    return JSONResponse({"ok": True})
 
 
 @router.get("/c/{token}/google-wallet")

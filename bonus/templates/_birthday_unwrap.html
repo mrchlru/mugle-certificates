@@ -1,0 +1,67 @@
+{# Экран распаковки подарка. Ожидает: card, preview (bool), mark_url (str). #}
+{% set brand_name = "Mugle Rest" %}
+{% set seal_text = "mr" %}
+{% set reveal_title = ("С днём рождения, " ~ card.first_name ~ "!") if card.first_name else "С днём рождения!" %}
+{% set accent = card.color or "#B91C1C" %}
+<div
+  class="bday-shell"
+  data-bday-root
+  data-card-id="{{ card.id }}"
+  data-preview="{{ '1' if preview|default(false) else '0' }}"
+  data-mark-url="{{ mark_url|default('') }}"
+  data-native-w="360"
+  data-native-h="560"
+>
+  <div
+    class="bday is-idle"
+    data-bday-stage
+    style="--bday-accent: {{ accent }}; --bday-k: 1; --bday-card-h: 420px;"
+  >
+    <div class="bday__bar">
+      <span class="bday__tag">Подарок</span>
+      <button class="bday__x" type="button" aria-label="Закрыть" data-bday-go>×</button>
+    </div>
+
+    <div class="bday__heads">
+      <div class="bday__head bday__head--a">
+        <h1>Вам подарок!</h1>
+        <p>{{ brand_name }} приготовил кое-что ко дню рождения</p>
+      </div>
+      <div class="bday__head bday__head--b" aria-live="polite">
+        <h1>{{ reveal_title }}</h1>
+        <p>Ваша подарочная карта уже ждёт</p>
+      </div>
+    </div>
+
+    <div class="bday__giftwrap">
+      <div class="bday__gift">
+        <div class="bday__part bday__env-back"></div>
+        <div class="bday__card" data-bday-card>
+          <div class="bday__card-fit" data-bday-fit>
+            {% include "_card.html" %}
+          </div>
+        </div>
+        <div class="bday__part bday__env-front"></div>
+        <div class="bday__part bday__flap"><i class="bday__flap-out"></i><i class="bday__flap-in"></i></div>
+        <div class="bday__seal"><span>{{ seal_text }}</span></div>
+        <button class="bday__env-hit" type="button" aria-label="Открыть подарок" data-bday-open></button>
+      </div>
+    </div>
+
+    <div class="bday__foot">
+      <div class="bday__layer bday__layer--open">
+        <button class="bday__btn bday__btn--pulse" type="button" data-bday-open>Открыть</button>
+      </div>
+      <div class="bday__layer bday__layer--cta">
+        <button class="bday__btn" type="button" data-bday-go>
+          <span>Перейти к карте</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M5 12h14M13 6l6 6-6 6" />
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <canvas class="bday__fx" data-bday-fx aria-hidden="true"></canvas>
+  </div>
+</div>

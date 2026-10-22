@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Распаковка — предпросмотр{% endblock %}
+{% block header %}{% endblock %}
+{% block main_class %}wallet-wrap birthday-preview-wrap{% endblock %}
+{% block head_scripts %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Unbounded:wght@700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/birthday/birthday-unwrap.css?v={{ asset_v|default('1') }}">
+<style>
+  :root {
+    --font-unbounded: "Unbounded", system-ui, sans-serif;
+    --font-manrope: "Manrope", system-ui, sans-serif;
+  }
+  body:has(.bday-shell) .topbar,
+  body:has(.bday-shell) .site-header { display: none; }
+  .birthday-preview-wrap { padding: 0; width: 100%; max-width: none; }
+</style>
+{% endblock %}
+{% block content %}
+{% set preview = true %}
+{% set mark_url = "" %}
+{% include "_birthday_unwrap.html" %}
+{% endblock %}
+{% block scripts %}
+<script src="/static/birthday/confetti.js?v={{ asset_v|default('1') }}"></script>
+<script src="/static/birthday/birthday-unwrap.js?v={{ asset_v|default('1') }}"></script>
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    if (typeof bootBirthdayUnwrap === "function") {
+      bootBirthdayUnwrap();
+    }
+  });
+</script>
+{% endblock %}

@@ -38,7 +38,15 @@ from bonus.ledger import (
     ledger_needs_birth_date,
     parse_ledger_sheet,
 )
-from bonus.present import admin_dashboard, dashboard_stats, ledger, list_staff, load_card, search_certificates
+from bonus.present import (
+    admin_dashboard,
+    dashboard_stats,
+    ledger,
+    list_staff,
+    load_card,
+    preview_birthday_card,
+    search_certificates,
+)
 from bonus.roles import AUDIT_ROLES, DASHBOARD_ROLES, STAFF_ROLES, parse_staff_role, role_label
 from bonus.security import flash
 from bonus.services import (
@@ -239,6 +247,7 @@ async def segment_create(
     accrual_period: str = Form("none"),
     requires_expiry: str = Form("0"),
     single_use: str = Form("0"),
+    birthday_unwrap: str = Form("0"),
     discount_percent: str = Form(""),
     csrf_token: str = Form(""),
 ):
@@ -252,6 +261,7 @@ async def segment_create(
             parse_accrual_period(accrual_period),
             requires_expiry=requires_expiry == "1",
             single_use=single_use == "1",
+            birthday_unwrap=birthday_unwrap == "1",
             discount_percent=_discount(discount_percent),
             use_days=form.getlist("use_days"),
             accrual_days=form.getlist("accrual_days"),
@@ -273,6 +283,7 @@ async def segment_update(
     accrual_period: str = Form("none"),
     requires_expiry: str = Form("0"),
     single_use: str = Form("0"),
+    birthday_unwrap: str = Form("0"),
     discount_percent: str = Form(""),
     csrf_token: str = Form(""),
 ):
@@ -290,6 +301,7 @@ async def segment_update(
             accrual_period=parse_accrual_period(accrual_period),
             requires_expiry=requires_expiry == "1",
             single_use=single_use == "1",
+            birthday_unwrap=birthday_unwrap == "1",
             discount_percent=_discount(discount_percent),
             use_days=form.getlist("use_days"),
             accrual_days=form.getlist("accrual_days"),
@@ -322,6 +334,26 @@ def segment_active(
     else:
         flash(request, "Сегмент обновлён")
     return RedirectResponse("/hr/design", status_code=303)
+
+
+@router.get("/hr/design/segments/{segment_id}/unwrap-preview")
+def segment_unwrap_preview(
+    segment_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
+):
+    """Предпросмотр распаковки: статус «подарок открыт» не пишется."""
+    segment = db.get(Segment, segment_id)
+    if segment is None:
+        flash(request, "Сегмент не найден", "bad")
+        return RedirectResponse("/hr/design", status_code=303)
+    return render(
+        request,
+        "birthday_preview.html",
+        card=preview_birthday_card(db, segment),
+        section="design",
+    )
 
 
 @router.post("/hr/design/templates")

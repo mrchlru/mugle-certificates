@@ -37,6 +37,8 @@ def ensure_schema(engine: Engine) -> None:
             statements.append(
                 "ALTER TABLE certificates ADD COLUMN accrual_days VARCHAR(16) DEFAULT '12345'"
             )
+        if "gift_opened_at" not in columns:
+            statements.append("ALTER TABLE certificates ADD COLUMN gift_opened_at TIMESTAMP")
     if "card_templates" in tables:
         columns = {column["name"] for column in inspector.get_columns("card_templates")}
         if "discount_percent" not in columns:
@@ -92,6 +94,10 @@ def ensure_schema(engine: Engine) -> None:
         if "accrual_days" not in columns:
             statements.append(
                 "ALTER TABLE segments ADD COLUMN accrual_days VARCHAR(16) DEFAULT '12345'"
+            )
+        if "birthday_unwrap" not in columns:
+            statements.append(
+                "ALTER TABLE segments ADD COLUMN birthday_unwrap BOOLEAN DEFAULT FALSE"
             )
     if not statements:
         return

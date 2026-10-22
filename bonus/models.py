@@ -117,6 +117,7 @@ class Segment(Base):
     )
     requires_expiry: Mapped[bool] = mapped_column(default=False)
     single_use: Mapped[bool] = mapped_column(default=False)
+    birthday_unwrap: Mapped[bool] = mapped_column(default=False)
     discount_percent: Mapped[int] = mapped_column(Integer, default=0)
     # Маска дней ISO: 1=Пн … 7=Вс, например "12345" = будни.
     use_days: Mapped[str] = mapped_column(String(16), default="1234567")
@@ -178,6 +179,7 @@ class Certificate(Base):
         index=True,
     )
     expires_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    gift_opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     issued_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: _utcnow())
 
