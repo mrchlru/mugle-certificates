@@ -189,6 +189,23 @@
       });
     }
 
+    function showClassicCard() {
+      root.hidden = true;
+      root.remove();
+      var pageHeader = document.getElementById("wallet-page-header");
+      if (pageHeader) {
+        pageHeader.hidden = false;
+      }
+      if (mainEl) {
+        mainEl.hidden = false;
+        if (typeof bindTiltCards === "function") {
+          bindTiltCards();
+        }
+      } else {
+        window.location.reload();
+      }
+    }
+
     function goToCard() {
       markOpened();
       timers.forEach(clearTimeout);
@@ -201,16 +218,7 @@
         window.history.back();
         return;
       }
-      root.hidden = true;
-      root.remove();
-      if (mainEl) {
-        mainEl.hidden = false;
-        if (typeof bindTiltCards === "function") {
-          bindTiltCards();
-        }
-      } else {
-        window.location.reload();
-      }
+      showClassicCard();
     }
 
     root.querySelectorAll("[data-bday-open]").forEach(function (btn) {
@@ -246,6 +254,10 @@
     if (!root.getAttribute("data-preview") && root.getAttribute("data-card-id")) {
       if (readLocalOpened(root.getAttribute("data-card-id"))) {
         root.remove();
+        var pageHeader = document.getElementById("wallet-page-header");
+        if (pageHeader) {
+          pageHeader.hidden = false;
+        }
         var mainEl = document.getElementById("card-main");
         if (mainEl) {
           mainEl.hidden = false;
