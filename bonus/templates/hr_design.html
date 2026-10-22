@@ -106,7 +106,9 @@
             </div>
           </form>
           <div class="design-side-actions">
+            {% if item.unwrap_kind in ['birthday', 'gift'] %}
             <a class="btn soft compact" href="/hr/design/segments/{{ item.id }}/unwrap-preview" target="_blank" rel="noopener">Посмотреть распаковку</a>
+            {% endif %}
             <form method="post" action="/hr/design/segments/{{ item.id }}/active" class="design-side-action">
               <input type="hidden" name="csrf_token" value="{{ csrf }}">
               <input type="hidden" name="active" value="{{ '0' if item.is_active else '1' }}">
