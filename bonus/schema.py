@@ -103,11 +103,38 @@ def ensure_schema(engine: Engine) -> None:
             statements.append(
                 "ALTER TABLE segments ADD COLUMN birthday_unwrap BOOLEAN DEFAULT FALSE"
             )
+        if "unwrap_kind" not in columns:
+            statements.append(
+                "ALTER TABLE segments ADD COLUMN unwrap_kind VARCHAR(16) DEFAULT ''"
+            )
     if statements:
         with engine.begin() as connection:
             for statement in statements:
                 connection.execute(text(statement))
+    _migrate_unwrap_kind(engine)
     _backfill_unwrap_pending(engine)
+
+
+def _migrate_unwrap_kind(engine: Engine) -> None:
+    """Переносит старый birthday_unwrap → unwrap_kind='birthday'."""
+    inspector = inspect(engine)
+    if "segments" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("segments")}
+    if "unwrap_kind" not in columns:
+        return
+    with engine.begin() as connection:
+        if "birthday_unwrap" in columns:
+            connection.execute(
+                text(
+                    """
+                    UPDATE segments
+                    SET unwrap_kind = 'birthday'
+                    WHERE birthday_unwrap IS TRUE
+                      AND (unwrap_kind IS NULL OR unwrap_kind = '')
+                    """
+                )
+            )
 
 
 def _backfill_unwrap_pending(engine: Engine) -> None:
@@ -118,20 +145,41 @@ def _backfill_unwrap_pending(engine: Engine) -> None:
     columns = {column["name"] for column in inspector.get_columns("certificates")}
     if "unwrap_pending" not in columns:
         return
+    segment_columns = (
+        {column["name"] for column in inspector.get_columns("segments")}
+        if "segments" in inspector.get_table_names()
+        else set()
+    )
     with engine.begin() as connection:
-        connection.execute(
-            text(
-                """
-                UPDATE certificates
-                SET unwrap_pending = TRUE
-                WHERE unwrap_pending IS NOT TRUE
-                  AND gift_opened_at IS NULL
-                  AND segment_id IN (
-                    SELECT id FROM segments WHERE birthday_unwrap IS TRUE
-                  )
-                """
+        if "unwrap_kind" in segment_columns:
+            connection.execute(
+                text(
+                    """
+                    UPDATE certificates
+                    SET unwrap_pending = TRUE
+                    WHERE unwrap_pending IS NOT TRUE
+                      AND gift_opened_at IS NULL
+                      AND segment_id IN (
+                        SELECT id FROM segments
+                        WHERE unwrap_kind IN ('birthday', 'gift')
+                      )
+                    """
+                )
             )
-        )
+        elif "birthday_unwrap" in segment_columns:
+            connection.execute(
+                text(
+                    """
+                    UPDATE certificates
+                    SET unwrap_pending = TRUE
+                    WHERE unwrap_pending IS NOT TRUE
+                      AND gift_opened_at IS NULL
+                      AND segment_id IN (
+                        SELECT id FROM segments WHERE birthday_unwrap IS TRUE
+                      )
+                    """
+                )
+            )
         connection.execute(
             text(
                 """

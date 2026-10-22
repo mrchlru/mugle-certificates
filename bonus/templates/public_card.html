@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% block title %}{{ card.public_number }}{% endblock %}
-{% set show_birthday_unwrap = card.unwrap_pending %}
+{% set show_gift_unwrap = card.unwrap_pending and card.unwrap_kind in ['birthday', 'gift'] %}
 {% block header %}
-<header class="site-header wallet-header" id="wallet-page-header"{% if show_birthday_unwrap %} hidden{% endif %}>
+<header class="site-header wallet-header" id="wallet-page-header">
   <span class="brand">
     <img src="/static/logo-teams.png" alt="Teams Bonus" width="52" height="52">
   </span>
@@ -15,28 +15,14 @@
 {% endblock %}
 {% block main_class %}wallet-wrap{% endblock %}
 {% block head_scripts %}
-{% if show_birthday_unwrap %}
+{% if show_gift_unwrap %}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Unbounded:wght@700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/birthday/birthday-unwrap.css?v={{ asset_v|default('1') }}">
-<style>
-  :root {
-    --font-unbounded: "Unbounded", system-ui, sans-serif;
-    --font-manrope: "Manrope", system-ui, sans-serif;
-  }
-  body:has(.bday-shell) .topbar { display: none; }
-  body:has([data-bday-root]:not([hidden])) .wallet-wrap { padding: 0; width: 100%; max-width: none; }
-</style>
+<link rel="stylesheet" href="/static/gift/gift-unwrap.css?v={{ asset_v|default('1') }}">
 {% endif %}
 {% endblock %}
 {% block content %}
-{% if show_birthday_unwrap %}
-{% set preview = false %}
-{% set mark_url = "/c/" ~ card_token ~ "/gift-opened" %}
-{% include "_birthday_unwrap.html" %}
-{% endif %}
-<div id="card-main" {% if show_birthday_unwrap %}hidden{% endif %}>
 <p class="wallet-hint">Покажите штрихкод управляющему в ресторане.</p>
 {% include "_card.html" %}
 {% if google_wallet_enabled|default(false) and google_wallet_href|default('')
@@ -67,18 +53,53 @@
   {% include "_history.html" %}
 {% endwith %}
 {% include "_partners_dialog.html" %}
-</div>
 {% endblock %}
 {% block scripts %}
-{% if show_birthday_unwrap %}
-<script src="/static/birthday/confetti.js?v={{ asset_v|default('1') }}"></script>
-<script src="/static/birthday/birthday-unwrap.js?v={{ asset_v|default('1') }}"></script>
+{% if show_gift_unwrap %}
+<script src="/static/gift/gift-unwrap.js?v={{ asset_v|default('1') }}"></script>
 <script>
+(function () {
+  var kind = {{ card.unwrap_kind|tojson }};
+  var color = {{ card.color|tojson }};
+  var firstName = {{ card.first_name|tojson }};
+  var segmentName = {{ card.segment_name|tojson }};
+  var cardId = {{ card.id|tojson }};
+  var markUrl = {{ ("/c/" ~ card_token ~ "/gift-opened")|tojson }};
+  var storageKey = "gift-opened:" + String(cardId);
+
+  function alreadyOpened() {
+    try { return window.localStorage.getItem(storageKey) === "1"; } catch (e) { return false; }
+  }
+  function markLocal() {
+    try { window.localStorage.setItem(storageKey, "1"); } catch (e) { /* ignore */ }
+  }
+  function markServer() {
+    try {
+      if (navigator.sendBeacon) { navigator.sendBeacon(markUrl); return; }
+    } catch (e) { /* fallback */ }
+    try { fetch(markUrl, { method: "POST", credentials: "same-origin", keepalive: true }); } catch (e2) { /* ignore */ }
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
-    if (typeof bootBirthdayUnwrap === "function") {
-      bootBirthdayUnwrap();
-    }
+    if (alreadyOpened()) { return; }
+    var card = document.querySelector(".wallet-card");
+    if (!card || typeof GiftUnwrap === "undefined" || !GiftUnwrap.mount) { return; }
+    GiftUnwrap.mount({
+      card: card,
+      kind: kind,
+      color: color,
+      firstName: firstName || undefined,
+      segmentName: segmentName || undefined,
+      brand: "Mugle Rest",
+      sealText: "mr",
+      onGo: function () {
+        markLocal();
+        markServer();
+        if (typeof bindTiltCards === "function") { bindTiltCards(); }
+      }
+    });
   });
+})();
 </script>
 {% endif %}
 {% endblock %}

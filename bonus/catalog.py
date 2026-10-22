@@ -167,6 +167,17 @@ def parse_accrual_period(raw: str) -> AccrualPeriod:
         raise BonusError("Неизвестная периодичность начисления") from exc
 
 
+UNWRAP_KINDS = ("", "birthday", "gift")
+
+
+def parse_unwrap_kind(raw: object) -> str:
+    """Читает вид распаковки из формы: нет / birthday / gift."""
+    value = str(raw or "").strip().lower()
+    if value in {"birthday", "gift"}:
+        return value
+    return ""
+
+
 def create_segment(
     db: Session,
     name: str,
@@ -174,7 +185,7 @@ def create_segment(
     *,
     requires_expiry: bool = False,
     single_use: bool = False,
-    birthday_unwrap: bool = False,
+    unwrap_kind: str = "",
     discount_percent: int = 0,
     use_days: object = ALL_DAYS,
     accrual_days: object = WEEKDAYS,
@@ -191,7 +202,7 @@ def create_segment(
         accrual_period=accrual_period,
         requires_expiry=requires_expiry,
         single_use=single_use,
-        birthday_unwrap=birthday_unwrap,
+        unwrap_kind=parse_unwrap_kind(unwrap_kind),
         discount_percent=normalize_discount(discount_percent),
         use_days=normalize_days(use_days, default=ALL_DAYS),
         accrual_days=normalize_days(accrual_days, default=WEEKDAYS),
@@ -212,7 +223,7 @@ def update_segment(
     accrual_period: AccrualPeriod,
     requires_expiry: bool,
     single_use: bool = False,
-    birthday_unwrap: bool = False,
+    unwrap_kind: str = "",
     discount_percent: int = 0,
     use_days: object = ALL_DAYS,
     accrual_days: object = WEEKDAYS,
@@ -228,7 +239,7 @@ def update_segment(
     segment.accrual_period = accrual_period
     segment.requires_expiry = requires_expiry
     segment.single_use = single_use
-    segment.birthday_unwrap = birthday_unwrap
+    segment.unwrap_kind = parse_unwrap_kind(unwrap_kind)
     segment.discount_percent = normalize_discount(discount_percent)
     segment.use_days = normalize_days(use_days, default=ALL_DAYS)
     segment.accrual_days = normalize_days(accrual_days, default=WEEKDAYS)

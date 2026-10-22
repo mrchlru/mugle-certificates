@@ -117,7 +117,8 @@ class Segment(Base):
     )
     requires_expiry: Mapped[bool] = mapped_column(default=False)
     single_use: Mapped[bool] = mapped_column(default=False)
-    birthday_unwrap: Mapped[bool] = mapped_column(default=False)
+    # Распаковка: "" | "birthday" | "gift" (бартер и прочие подарки).
+    unwrap_kind: Mapped[str] = mapped_column(String(16), default="")
     discount_percent: Mapped[int] = mapped_column(Integer, default=0)
     # Маска дней ISO: 1=Пн … 7=Вс, например "12345" = будни.
     use_days: Mapped[str] = mapped_column(String(16), default="1234567")

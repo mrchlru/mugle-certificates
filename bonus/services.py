@@ -82,7 +82,7 @@ def issue_certificate(db: Session, draft: IssueDraft, actor: User | None) -> Iss
         birth_date=draft.birth_date,
         status=CertificateStatus.active,
         expires_on=draft.expires_on,
-        unwrap_pending=_unwrap_pending_for_segment(db, draft.segment_id),
+        unwrap_pending=bool(_unwrap_kind_for_segment(db, draft.segment_id)),
         issued_by_id=None if actor is None else actor.id,
     )
     db.add(certificate)
@@ -1061,12 +1061,20 @@ def _temporary_number() -> str:
     return f"TMP-{secrets.token_hex(4)}"
 
 
-def _unwrap_pending_for_segment(db: Session, segment_id: int | None) -> bool:
-    """При выпуске: нужна ли распаковка (флаг сегмента «День рождения»)."""
+def _unwrap_kind_for_segment(db: Session, segment_id: int | None) -> str:
+    """Вид распаковки сегмента: '' | 'birthday' | 'gift'."""
     if segment_id is None:
-        return False
+        return ""
     segment = db.get(Segment, segment_id)
-    return bool(segment is not None and getattr(segment, "birthday_unwrap", False))
+    if segment is None:
+        return ""
+    kind = (getattr(segment, "unwrap_kind", None) or "").strip().lower()
+    if kind in {"birthday", "gift"}:
+        return kind
+    # Совместимость со старым boolean birthday_unwrap.
+    if getattr(segment, "birthday_unwrap", False):
+        return "birthday"
+    return ""
 
 
 def _normalize_login(login: str) -> str:

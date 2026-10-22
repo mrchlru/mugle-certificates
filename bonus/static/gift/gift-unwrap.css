@@ -1,0 +1,108 @@
+/*
+ * gift-unwrap.css — стили экрана распаковки подарочной карты (День рождения, бартер и др.).
+ * Эталон: reference-prototype.html. Классы с префиксом gu-, на остальную страницу не влияют.
+ * Цвета фона и печати выставляет gift-unwrap.js из цвета карточки (переменные --gu-*).
+ */
+.gu {
+  --gu-ink: #140809;
+  --gu-paper: #F4EBDD;
+  --gu-paper-2: #E6D7C2;
+  --gu-paper-3: #D6C4AB;
+  --gu-muted: #B7A59A;
+  --gu-focus: #19B8A3;
+  --gu-display: "Unbounded", "Arial Black", system-ui, sans-serif;
+  --gu-body: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* ниже значения по умолчанию; реальные ставит JS из цвета карточки */
+  --gu-bg-top: #221012; --gu-bg-bottom: #140809; --gu-glow: rgba(185,28,28,.4);
+  --gu-seal: #B91C1C; --gu-seal-hi: #E04040; --gu-seal-lo: #7E1010; --gu-seal-ink: #F7D9D2;
+  --gu-k: 1;
+
+  position: fixed; inset: 0; z-index: 1000; overflow: hidden;
+  background:
+    radial-gradient(120% 60% at 50% 62%, var(--gu-glow), transparent 62%),
+    linear-gradient(180deg, var(--gu-bg-top), var(--gu-bg-bottom));
+  color: var(--gu-paper); font-family: var(--gu-body);
+  -webkit-user-select: none; user-select: none;
+  color-scheme: dark;
+}
+.gu--embedded { position: absolute; z-index: 1; border-radius: inherit; } /* для предпросмотра внутри блока */
+.gu *, .gu *::before, .gu *::after { box-sizing: border-box; }
+.gu button { font-family: inherit; }
+.gu button:focus-visible { outline: 2px solid var(--gu-focus); outline-offset: 3px; }
+
+/* колонка 430px по центру (на десктопе); на телефоне во всю ширину */
+.gu__col { position: relative; width: 100%; max-width: 430px; height: 100%; margin: 0 auto; }
+
+.gu__bar { position: absolute; inset: 0 0 auto 0; height: 56px; padding: env(safe-area-inset-top, 0px) 20px 0; box-sizing: content-box; display: flex; align-items: center; justify-content: space-between; z-index: 5; }
+.gu__tag { font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--gu-muted); }
+.gu__x { width: 36px; height: 36px; border: 0; border-radius: 50%; cursor: pointer; background: rgba(244,235,221,.1); color: var(--gu-paper); font-size: 20px; line-height: 1; }
+
+.gu__heads { position: absolute; inset: calc(60px + env(safe-area-inset-top, 0px)) 0 auto 0; height: 110px; z-index: 4; }
+.gu__head { position: absolute; inset: 0 24px auto; transition: opacity .6s ease, transform .6s ease; }
+.gu__head h1 { margin: 0; font: 700 28px/1.1 var(--gu-display); letter-spacing: -.02em; text-wrap: balance; color: var(--gu-paper); }
+.gu__head p { margin: 10px 0 0; font-size: 15px; line-height: 1.4; color: var(--gu-muted); max-width: 30ch; }
+.gu__head--b { opacity: 0; transform: translateY(10px); }
+.gu.is-reveal .gu__head--a { opacity: 0; transform: translateY(-10px); }
+.gu.is-reveal .gu__head--b { opacity: 1; transform: none; }
+
+/* подарок: область 320x400, масштабируется --gu-k */
+.gu__giftwrap { position: absolute; left: 50%; top: calc(190px + env(safe-area-inset-top, 0px)); width: 320px; height: 400px; margin-left: -160px; transform-origin: 50% 0; transform: scale(var(--gu-k)); z-index: 3; }
+.gu__gift { position: relative; width: 100%; height: 100%; perspective: 900px; }
+.gu__part { position: absolute; left: 0; top: 120px; width: 320px; height: 220px; transition: transform .7s cubic-bezier(.5,0,.2,1), opacity .6s ease; }
+.gu__env-back { background: var(--gu-paper-2); border-radius: 10px; z-index: 1; box-shadow: 0 24px 40px rgba(0,0,0,.4); }
+.gu__env-front { z-index: 3; border-radius: 10px; background: linear-gradient(160deg, #FBF4E9, var(--gu-paper) 55%, #EADCC8); clip-path: polygon(0 28%, 50% 62%, 100% 28%, 100% 100%, 0 100%); }
+/* клапан: шарнир по верхней кромке, раскрывается углом ВВЕРХ (широкая часть внизу) */
+.gu__flap { z-index: 4; transform-origin: 50% 0; transform-style: preserve-3d; transition: transform .9s cubic-bezier(.45,0,.2,1), opacity 1s; }
+.gu__flap i { position: absolute; inset: 0; clip-path: polygon(0 0, 100% 0, 50% 62%); backface-visibility: hidden; -webkit-backface-visibility: hidden; border-radius: 10px 10px 0 0; }
+.gu__flap-out { background: linear-gradient(180deg, #FFF8EE, var(--gu-paper)); }
+.gu__flap-in { background: linear-gradient(0deg, var(--gu-paper-3), var(--gu-paper-2)); transform: rotateY(180deg); } /* именно rotateY */
+.gu__seal {
+  position: absolute; left: 50%; top: 256px; width: 68px; height: 68px; margin: -34px 0 0 -34px; z-index: 6;
+  border-radius: 50%; display: grid; place-items: center;
+  background: radial-gradient(circle at 35% 30%, var(--gu-seal-hi), var(--gu-seal) 55%, var(--gu-seal-lo));
+  box-shadow: 0 6px 14px rgba(0,0,0,.35), inset 0 -3px 6px rgba(0,0,0,.3), inset 0 2px 3px rgba(255,255,255,.25);
+  transition: transform .45s ease, opacity .45s ease;
+}
+.gu__seal span { font: 700 17px/1 var(--gu-display); color: var(--gu-seal-ink); letter-spacing: -.04em; text-shadow: 0 1px 0 rgba(0,0,0,.25); }
+.gu__seal::after { content: ""; position: absolute; inset: 6px; border-radius: 50%; border: 1.5px solid rgba(255,255,255,.25); }
+.gu__hit { position: absolute; left: 0; top: 120px; width: 320px; height: 220px; z-index: 8; border: 0; background: none; cursor: pointer; border-radius: 10px; }
+
+/* карта: внутри лежит реальный элемент карты в натуральном размере, уменьшенный до 270px */
+.gu__card { position: absolute; left: 25px; top: 140px; width: 270px; z-index: 2; transform-origin: 50% 0; transform: translateY(0) scale(.5); opacity: 0; transition: transform 1s cubic-bezier(.2,.85,.2,1); pointer-events: none; }
+.gu__fit { transform-origin: 0 0; }
+/* У .wallet-card уже есть box-shadow — отдельный drop-shadow не нужен. */
+.gu__fit > * { margin: 0 !important; }
+
+/* ШАГИ (накапливаются) */
+.gu.is-seal .gu__seal { transform: scale(1.35); opacity: 0; }
+.gu.is-seal .gu__hit { pointer-events: none; }
+.gu.is-flap .gu__flap { transform: rotateX(180deg); }
+.gu.is-flap .gu__card { opacity: 1; }
+.gu.is-flapback .gu__flap { z-index: 0; }
+/* карта выезжает и растёт, конверт растворяется ОДНОВРЕМЕННО */
+.gu.is-card .gu__card { transform: translateY(-140px) scale(1); transition: transform 1.6s cubic-bezier(.32,.72,.2,1); }
+.gu.is-card .gu__env-back, .gu.is-card .gu__env-front, .gu.is-card .gu__flap, .gu.is-card .gu__seal { opacity: 0; transition: opacity 1s cubic-bezier(.4,0,.6,1); }
+.gu.is-card .gu__env-back { box-shadow: none; }
+.gu.is-reveal .gu__card { pointer-events: auto; } /* наклон и штрихкод работают только на раскрытой карте */
+
+/* низ: «Открыть» → «Перейти к карте» */
+.gu__foot { position: absolute; inset: auto 0 0 0; height: 150px; z-index: 6; }
+.gu__layer { position: absolute; inset: 0 20px calc(24px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; justify-content: flex-end; transition: opacity .5s ease, transform .5s ease; }
+.gu__layer--cta { opacity: 0; transform: translateY(14px); pointer-events: none; }
+.gu.is-seal .gu__layer--open { opacity: 0; pointer-events: none; transform: translateY(8px); }
+.gu.is-reveal .gu__layer--cta { opacity: 1; transform: none; pointer-events: auto; }
+.gu__btn { width: 100%; height: 56px; border: 0; border-radius: 28px; cursor: pointer; background: var(--gu-paper); color: var(--gu-ink); font: 800 16px/1 var(--gu-body); letter-spacing: .01em; display: flex; align-items: center; justify-content: center; gap: 8px; transition: transform .15s ease; }
+.gu__btn:active { transform: scale(.97); }
+.gu__btn svg { width: 18px; height: 18px; }
+
+.gu__fx { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 5; pointer-events: none; } /* под кнопкой */
+
+@keyframes gu-bob { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-6px) } }
+@keyframes gu-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(244,235,221,.35) } 60% { box-shadow: 0 0 0 12px rgba(244,235,221,0) } }
+.gu.is-idle .gu__gift { animation: gu-bob 3.2s ease-in-out infinite; }
+.gu.is-idle .gu__btn--pulse { animation: gu-pulse 2.2s ease-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .gu__part, .gu__card, .gu__flap, .gu__seal, .gu__head, .gu__layer { transition-duration: .01s !important; }
+  .gu.is-idle .gu__gift, .gu.is-idle .gu__btn--pulse { animation: none; }
+}

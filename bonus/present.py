@@ -73,6 +73,7 @@ class CardView:
     birthday_unwrap: bool
     gift_opened: bool
     unwrap_pending: bool
+    unwrap_kind: str
     first_name: str
     history: tuple[TxView, ...]
 
@@ -531,20 +532,28 @@ def _card_view(
         use_days=_use_days_mask(certificate),
         use_days_label=_use_days_caption(certificate),
         use_days_active=_use_days_active(certificate),
-        birthday_unwrap=_birthday_unwrap_enabled(db, certificate),
+        birthday_unwrap=_unwrap_kind_for_certificate(db, certificate) == "birthday",
         gift_opened=certificate.gift_opened_at is not None,
         unwrap_pending=bool(getattr(certificate, "unwrap_pending", False)),
+        unwrap_kind=_unwrap_kind_for_certificate(db, certificate),
         first_name=_first_name("" if holder is None else holder.full_name),
         history=history,
     )
 
 
-def _birthday_unwrap_enabled(db: Session, certificate: Certificate) -> bool:
-    """Сегмент карты с флажком «Анимация распаковки (День рождения)»."""
+def _unwrap_kind_for_certificate(db: Session, certificate: Certificate) -> str:
+    """Вид распаковки сегмента карты: '' | 'birthday' | 'gift'."""
     if certificate.segment_id is None:
-        return False
+        return ""
     segment = db.get(Segment, certificate.segment_id)
-    return bool(segment is not None and getattr(segment, "birthday_unwrap", False))
+    if segment is None:
+        return ""
+    kind = (getattr(segment, "unwrap_kind", None) or "").strip().lower()
+    if kind in {"birthday", "gift"}:
+        return kind
+    if getattr(segment, "birthday_unwrap", False):
+        return "birthday"
+    return ""
 
 
 def preview_birthday_card(db: Session, segment: Segment) -> CardView:
@@ -601,18 +610,29 @@ def preview_birthday_card(db: Session, segment: Segment) -> CardView:
         use_days=segment.use_days or "1234567",
         use_days_label="",
         use_days_active=tuple(),
-        birthday_unwrap=True,
+        birthday_unwrap=_preview_unwrap_kind(segment) == "birthday",
         gift_opened=False,
         unwrap_pending=True,
+        unwrap_kind=_preview_unwrap_kind(segment) or "birthday",
         first_name="Роман",
         history=tuple(),
     )
 
 
+def _preview_unwrap_kind(segment: Segment) -> str:
+    """Вид распаковки для предпросмотра сегмента."""
+    kind = (getattr(segment, "unwrap_kind", None) or "").strip().lower()
+    if kind in {"birthday", "gift"}:
+        return kind
+    if getattr(segment, "birthday_unwrap", False):
+        return "birthday"
+    return "birthday"
+
+
 def _first_name(full_name: str) -> str:
-    """Имя из «Фамилия Имя» (ровно два слова); иначе пусто."""
+    """Имя из «Фамилия Имя …»: второе слово; иначе пусто."""
     parts = [part for part in (full_name or "").split() if part]
-    if len(parts) == 2:
+    if len(parts) >= 2:
         return parts[1]
     return ""
 

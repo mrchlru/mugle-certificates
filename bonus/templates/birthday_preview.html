@@ -1,35 +1,48 @@
 {% extends "base.html" %}
 {% block title %}Распаковка — предпросмотр{% endblock %}
-{% block header %}{% endblock %}
-{% block main_class %}wallet-wrap birthday-preview-wrap{% endblock %}
+{% block header %}
+<header class="site-header wallet-header">
+  <span class="brand">
+    <img src="/static/logo-teams.png" alt="Teams Bonus" width="52" height="52">
+  </span>
+  <div class="header-side">
+    <a class="text-link" href="/hr/design">К оформлению</a>
+  </div>
+</header>
+{% endblock %}
+{% block main_class %}wallet-wrap{% endblock %}
 {% block head_scripts %}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Unbounded:wght@700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/birthday/birthday-unwrap.css?v={{ asset_v|default('1') }}">
-<style>
-  :root {
-    --font-unbounded: "Unbounded", system-ui, sans-serif;
-    --font-manrope: "Manrope", system-ui, sans-serif;
-  }
-  body:has(.bday-shell) .topbar,
-  body:has(.bday-shell) .site-header { display: none; }
-  .birthday-preview-wrap { padding: 0; width: 100%; max-width: none; }
-</style>
+<link rel="stylesheet" href="/static/gift/gift-unwrap.css?v={{ asset_v|default('1') }}">
 {% endblock %}
 {% block content %}
-{% set preview = true %}
-{% set mark_url = "" %}
-{% include "_birthday_unwrap.html" %}
+<p class="wallet-hint">Предпросмотр распаковки — статус «открыт» не записывается.</p>
+{% include "_card.html" %}
 {% endblock %}
 {% block scripts %}
-<script src="/static/birthday/confetti.js?v={{ asset_v|default('1') }}"></script>
-<script src="/static/birthday/birthday-unwrap.js?v={{ asset_v|default('1') }}"></script>
+<script src="/static/gift/gift-unwrap.js?v={{ asset_v|default('1') }}"></script>
 <script>
+(function () {
+  var kind = {{ card.unwrap_kind|tojson }};
+  var color = {{ card.color|tojson }};
+  var firstName = {{ card.first_name|tojson }};
+  var segmentName = {{ card.segment_name|tojson }};
   document.addEventListener("DOMContentLoaded", function () {
-    if (typeof bootBirthdayUnwrap === "function") {
-      bootBirthdayUnwrap();
-    }
+    var cardEl = document.querySelector(".wallet-card");
+    if (!cardEl || typeof GiftUnwrap === "undefined" || !GiftUnwrap.mount) { return; }
+    GiftUnwrap.mount({
+      card: cardEl,
+      kind: kind || "birthday",
+      color: color,
+      firstName: firstName || undefined,
+      segmentName: segmentName || undefined,
+      brand: "Mugle Rest",
+      sealText: "mr",
+      onGo: function () { window.history.back(); }
+    });
   });
+})();
 </script>
 {% endblock %}
