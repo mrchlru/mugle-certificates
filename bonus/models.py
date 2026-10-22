@@ -179,6 +179,8 @@ class Certificate(Base):
         index=True,
     )
     expires_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # True при выпуске из сегмента с распаковкой; False после первого открытия.
+    unwrap_pending: Mapped[bool] = mapped_column(default=False)
     gift_opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     issued_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: _utcnow())

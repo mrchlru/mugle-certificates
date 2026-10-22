@@ -1,5 +1,6 @@
 /**
  * birthday-unwrap.js — порт BirthdayUnwrap.tsx для Jinja-страницы.
+ * Распаковка один раз: при «Открыть» снимаем флаг в БД; повторный заход — обычная карта.
  */
 (function (global) {
   "use strict";
@@ -28,6 +29,28 @@
     }
   }
 
+  function persistOpened(cardId, markUrl) {
+    if (cardId) {
+      writeLocalOpened(cardId);
+    }
+    if (!markUrl) {
+      return;
+    }
+    try {
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon(markUrl);
+        return;
+      }
+    } catch (err) {
+      /* fallback below */
+    }
+    try {
+      fetch(markUrl, { method: "POST", credentials: "same-origin", keepalive: true });
+    } catch (err2) {
+      /* ignore */
+    }
+  }
+
   function mountBirthdayUnwrap(root) {
     if (!root) {
       return null;
@@ -38,6 +61,7 @@
     var nativeW = Number(root.getAttribute("data-native-w") || "360");
     var nativeH = Number(root.getAttribute("data-native-h") || "560");
     var step = 0;
+    var marked = false;
     var timers = [];
     var stopConfetti = null;
     var stage = root.querySelector("[data-bday-stage]");
@@ -53,7 +77,6 @@
         wallet.style.width = nativeW + "px";
         wallet.style.maxWidth = "none";
         wallet.style.margin = "0";
-        // Высота реальной карты после раскладки.
         nativeH = Math.max(wallet.offsetHeight || nativeH, 400);
       }
       cardFit.style.height = nativeH + "px";
@@ -118,10 +141,20 @@
       });
     }
 
+    function markOpened() {
+      if (preview || marked) {
+        return;
+      }
+      marked = true;
+      persistOpened(cardId, markUrl);
+    }
+
     function openGift() {
       if (step !== 0) {
         return;
       }
+      // Снимаем флаг в БД сразу при старте распаковки — один раз.
+      markOpened();
       var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       if (reduce) {
         step = 5;
@@ -154,22 +187,6 @@
         paintStep();
         launchConfetti();
       });
-    }
-
-    function markOpened() {
-      if (preview) {
-        return;
-      }
-      if (cardId) {
-        writeLocalOpened(cardId);
-      }
-      if (markUrl) {
-        try {
-          fetch(markUrl, { method: "POST", credentials: "same-origin" });
-        } catch (err) {
-          /* ignore */
-        }
-      }
     }
 
     function goToCard() {

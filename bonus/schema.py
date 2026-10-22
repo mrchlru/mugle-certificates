@@ -39,6 +39,10 @@ def ensure_schema(engine: Engine) -> None:
             )
         if "gift_opened_at" not in columns:
             statements.append("ALTER TABLE certificates ADD COLUMN gift_opened_at TIMESTAMP")
+        if "unwrap_pending" not in columns:
+            statements.append(
+                "ALTER TABLE certificates ADD COLUMN unwrap_pending BOOLEAN DEFAULT FALSE"
+            )
     if "card_templates" in tables:
         columns = {column["name"] for column in inspector.get_columns("card_templates")}
         if "discount_percent" not in columns:
@@ -99,8 +103,41 @@ def ensure_schema(engine: Engine) -> None:
             statements.append(
                 "ALTER TABLE segments ADD COLUMN birthday_unwrap BOOLEAN DEFAULT FALSE"
             )
-    if not statements:
+    if statements:
+        with engine.begin() as connection:
+            for statement in statements:
+                connection.execute(text(statement))
+    _backfill_unwrap_pending(engine)
+
+
+def _backfill_unwrap_pending(engine: Engine) -> None:
+    """Проставляет unwrap_pending картам сегментов с распаковкой, ещё не открытым."""
+    inspector = inspect(engine)
+    if "certificates" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("certificates")}
+    if "unwrap_pending" not in columns:
         return
     with engine.begin() as connection:
-        for statement in statements:
-            connection.execute(text(statement))
+        connection.execute(
+            text(
+                """
+                UPDATE certificates
+                SET unwrap_pending = TRUE
+                WHERE unwrap_pending IS NOT TRUE
+                  AND gift_opened_at IS NULL
+                  AND segment_id IN (
+                    SELECT id FROM segments WHERE birthday_unwrap IS TRUE
+                  )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                UPDATE certificates
+                SET unwrap_pending = FALSE
+                WHERE gift_opened_at IS NOT NULL AND unwrap_pending IS TRUE
+                """
+            )
+        )

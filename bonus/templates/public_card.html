@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ card.public_number }}{% endblock %}
-{% set show_birthday_unwrap = card.birthday_unwrap and not card.gift_opened %}
+{% set show_birthday_unwrap = card.unwrap_pending %}
 {% block header %}
 {% if not show_birthday_unwrap %}
 <header class="site-header wallet-header">

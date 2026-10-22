@@ -7,7 +7,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from bonus.models import Certificate, CertificateStatus, Role, Transaction, TxType, User
+from bonus.models import Certificate, CertificateStatus, Role, Segment, Transaction, TxType, User
 from bonus.security import generate_password, hash_password
 from bonus.values import MSK, as_utc, format_date, today_msk
 
@@ -82,6 +82,7 @@ def issue_certificate(db: Session, draft: IssueDraft, actor: User | None) -> Iss
         birth_date=draft.birth_date,
         status=CertificateStatus.active,
         expires_on=draft.expires_on,
+        unwrap_pending=_unwrap_pending_for_segment(db, draft.segment_id),
         issued_by_id=None if actor is None else actor.id,
     )
     db.add(certificate)
@@ -1058,6 +1059,14 @@ def _temporary_number() -> str:
     import secrets
 
     return f"TMP-{secrets.token_hex(4)}"
+
+
+def _unwrap_pending_for_segment(db: Session, segment_id: int | None) -> bool:
+    """При выпуске: нужна ли распаковка (флаг сегмента «День рождения»)."""
+    if segment_id is None:
+        return False
+    segment = db.get(Segment, segment_id)
+    return bool(segment is not None and getattr(segment, "birthday_unwrap", False))
 
 
 def _normalize_login(login: str) -> str:

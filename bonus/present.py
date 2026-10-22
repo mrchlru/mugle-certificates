@@ -72,6 +72,7 @@ class CardView:
     use_days_active: tuple[str, ...]
     birthday_unwrap: bool
     gift_opened: bool
+    unwrap_pending: bool
     first_name: str
     history: tuple[TxView, ...]
 
@@ -532,6 +533,7 @@ def _card_view(
         use_days_active=_use_days_active(certificate),
         birthday_unwrap=_birthday_unwrap_enabled(db, certificate),
         gift_opened=certificate.gift_opened_at is not None,
+        unwrap_pending=bool(getattr(certificate, "unwrap_pending", False)),
         first_name=_first_name("" if holder is None else holder.full_name),
         history=history,
     )
@@ -601,6 +603,7 @@ def preview_birthday_card(db: Session, segment: Segment) -> CardView:
         use_days_active=tuple(),
         birthday_unwrap=True,
         gift_opened=False,
+        unwrap_pending=True,
         first_name="Роман",
         history=tuple(),
     )

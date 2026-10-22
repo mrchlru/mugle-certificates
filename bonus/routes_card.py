@@ -66,14 +66,20 @@ def public_certificate(token: str, request: Request, db: Session = Depends(get_d
 
 @router.post("/c/{token}/gift-opened")
 def mark_gift_opened(token: str, db: Session = Depends(get_db)):
-    """Помечает подарочную распаковку открытой (один раз)."""
+    """Снимает флаг распаковки на карте (один раз) и пишет время открытия."""
     certificate = find_certificate(db, token)
     if certificate is None:
         return JSONResponse({"ok": False}, status_code=404)
+    changed = False
+    if getattr(certificate, "unwrap_pending", False):
+        certificate.unwrap_pending = False
+        changed = True
     if certificate.gift_opened_at is None:
         certificate.gift_opened_at = datetime.now(timezone.utc)
+        changed = True
+    if changed:
         db.commit()
-    return JSONResponse({"ok": True})
+    return JSONResponse({"ok": True, "unwrap_pending": False})
 
 
 @router.get("/c/{token}/google-wallet")
