@@ -2268,6 +2268,68 @@ body.partners-dialog-open {
   margin-top: 4px;
 }
 
+.unwrap-kind-field {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.unwrap-kind-field legend {
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.unwrap-kind-seg {
+  display: flex;
+  width: 100%;
+  padding: 3px;
+  border-radius: 18px;
+  background: #f0f0f0;
+  gap: 2px;
+}
+
+.unwrap-kind-opt {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.unwrap-kind-opt input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.unwrap-kind-opt span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 8px;
+  border-radius: 15px;
+  color: #6b6b6b;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  line-height: 1.15;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.unwrap-kind-opt input:checked + span {
+  background: #1c1c1c;
+  color: #fff;
+}
+
+.unwrap-kind-opt input:focus-visible + span {
+  outline: 2px solid var(--teal, #039980);
+  outline-offset: 2px;
+}
+
 .dash-intro {
   margin-bottom: 22px;
 }

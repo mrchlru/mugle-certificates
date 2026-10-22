@@ -42,13 +42,9 @@
           <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
           <span class="switch-copy">Разовый: после первого списания остаток сгорает</span>
         </label>
-        <label class="field">Распаковка
-          <select name="unwrap_kind">
-            <option value="">Нет</option>
-            <option value="birthday">День рождения</option>
-            <option value="gift">Подарок (бартер и др.)</option>
-          </select>
-        </label>
+        {% with selected_kind='' %}
+          {% include "_unwrap_kind_picker.html" %}
+        {% endwith %}
         {% with field_name='use_days', selected_days='1234567', legend='Дни использования', weekday_choices=weekday_choices %}
           {% include "_weekday_picker.html" %}
         {% endwith %}
@@ -90,13 +86,9 @@
               <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
               <span class="switch-copy">Разовый: после первого списания остаток сгорает</span>
             </label>
-            <label class="field">Распаковка
-              <select name="unwrap_kind">
-                <option value="" {% if not item.unwrap_kind %}selected{% endif %}>Нет</option>
-                <option value="birthday" {% if item.unwrap_kind == 'birthday' %}selected{% endif %}>День рождения</option>
-                <option value="gift" {% if item.unwrap_kind == 'gift' %}selected{% endif %}>Подарок (бартер и др.)</option>
-              </select>
-            </label>
+            {% with selected_kind=item.unwrap_kind or '' %}
+              {% include "_unwrap_kind_picker.html" %}
+            {% endwith %}
             {% with field_name='use_days', selected_days=item.use_days or '1234567', legend='Дни использования', weekday_choices=weekday_choices %}
               {% include "_weekday_picker.html" %}
             {% endwith %}
@@ -109,7 +101,7 @@
               <span class="status-pill {% if item.is_active %}is-on{% else %}is-off{% endif %}">
                 {% if item.is_active %}Активен{% else %}Скрыт{% endif %}
               </span>
-              <span class="muted design-meta">{{ accrual_label(item.accrual_period) }}{% if item.requires_expiry %} · со сроком{% endif %}{% if item.single_use %} · разовый{% endif %}{% if item.unwrap_kind == 'birthday' %} · ДР{% elif item.unwrap_kind == 'gift' %} · подарок{% endif %}{% if item.discount_percent %} · {{ item.discount_percent }}%{% endif %}</span>
+              <span class="muted design-meta">{{ accrual_label(item.accrual_period) }}{% if item.requires_expiry %} · со сроком{% endif %}{% if item.single_use %} · разовый{% endif %}{% if item.unwrap_kind == 'birthday' %} · ДР{% elif item.unwrap_kind == 'gift' %} · бартер{% endif %}{% if item.discount_percent %} · {{ item.discount_percent }}%{% endif %}</span>
               <button class="btn ghost compact" type="submit">Сохранить</button>
             </div>
           </form>

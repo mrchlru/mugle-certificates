@@ -1,0 +1,19 @@
+{# Ожидает: selected_kind ("" | birthday | gift) #}
+{% set _kind = selected_kind or '' %}
+<fieldset class="unwrap-kind-field">
+  <legend>Анимация распаковки</legend>
+  <div class="unwrap-kind-seg" role="radiogroup" aria-label="Анимация распаковки">
+    <label class="unwrap-kind-opt">
+      <input type="radio" name="unwrap_kind" value="" {% if not _kind %}checked{% endif %}>
+      <span>Нет</span>
+    </label>
+    <label class="unwrap-kind-opt">
+      <input type="radio" name="unwrap_kind" value="birthday" {% if _kind == 'birthday' %}checked{% endif %}>
+      <span>День рождения</span>
+    </label>
+    <label class="unwrap-kind-opt">
+      <input type="radio" name="unwrap_kind" value="gift" {% if _kind == 'gift' %}checked{% endif %}>
+      <span>Бартер</span>
+    </label>
+  </div>
+</fieldset>
