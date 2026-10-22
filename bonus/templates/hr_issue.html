@@ -113,6 +113,17 @@
       <label class="field">Комментарий
         <input name="note" maxlength="500">
       </label>
+      {% if user and user.role.value == 'admin' %}
+      <fieldset class="ledger-field">
+        <legend>Тест кошелька</legend>
+        <label class="switch">
+          <input type="checkbox" name="show_wallet_buttons" value="1">
+          <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+          <span class="switch-copy">Показывать кнопки добавления в кошелёк на этой карте</span>
+        </label>
+        <p class="muted design-hint">Только для главного администратора. Карта для проверки Google / Apple Wallet, даже если глобально кнопки скрыты.</p>
+      </fieldset>
+      {% endif %}
       <button class="btn wide" type="submit">Выписать сертификат</button>
     </form>
   </section>

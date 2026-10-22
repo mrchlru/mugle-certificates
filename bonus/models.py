@@ -183,12 +183,23 @@ class Certificate(Base):
     # True при выпуске из сегмента с распаковкой; False после первого открытия.
     unwrap_pending: Mapped[bool] = mapped_column(default=False)
     gift_opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Тестовая карта: кнопки кошелька видны даже при выключенной глобальной настройке.
+    show_wallet_buttons: Mapped[bool] = mapped_column(default=False)
     issued_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: _utcnow())
 
     holder: Mapped[User] = relationship(back_populates="certificates", foreign_keys=[holder_id])
     segment: Mapped[Segment | None] = relationship()
     template: Mapped[CardTemplate | None] = relationship()
+
+
+class AppSettings(Base):
+    """Единственная строка настроек приложения (id=1)."""
+
+    __tablename__ = "app_settings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    wallet_buttons_enabled: Mapped[bool] = mapped_column(default=False)
 
 
 class Transaction(Base):

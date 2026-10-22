@@ -56,6 +56,7 @@ class IssueDraft:
     ledger_sheet: str = "employee"
     company: str = ""
     birth_date: date | None = None
+    show_wallet_buttons: bool = False
 
 
 def issue_certificate(db: Session, draft: IssueDraft, actor: User | None) -> IssuedCertificate:
@@ -83,6 +84,7 @@ def issue_certificate(db: Session, draft: IssueDraft, actor: User | None) -> Iss
         status=CertificateStatus.active,
         expires_on=draft.expires_on,
         unwrap_pending=bool(_unwrap_kind_for_segment(db, draft.segment_id)),
+        show_wallet_buttons=bool(draft.show_wallet_buttons),
         issued_by_id=None if actor is None else actor.id,
     )
     db.add(certificate)

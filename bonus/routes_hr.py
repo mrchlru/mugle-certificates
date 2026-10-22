@@ -23,6 +23,7 @@ from bonus.catalog import (
     update_segment,
     update_template,
 )
+from bonus.app_settings import set_wallet_buttons_enabled, wallet_buttons_enabled
 from bonus.audit import credit_audit_detail, list_audit, write_audit
 from bonus.db import get_db
 from bonus.http import form_money, guard_csrf, optional_money, public_base, render, require
@@ -179,6 +180,7 @@ async def issue_submit(
         if discount == 0 and template is not None and template.discount_percent:
             discount = template.discount_percent
         one_shot = segment.single_use or ledger_is_single_use(sheet)
+        show_wallets = user.role == Role.admin and form.get("show_wallet_buttons") == "1"
         issued = issue_certificate(
             db,
             IssueDraft(
@@ -203,6 +205,7 @@ async def issue_submit(
                 ledger_sheet=sheet.value,
                 company=company,
                 birth_date=born,
+                show_wallet_buttons=show_wallets,
             ),
             user,
         )
@@ -236,7 +239,30 @@ def design_page(request: Request, db: Session = Depends(get_db), user: User = De
         weekday_choices=WEEKDAY_CHOICES,
         colors=CARD_COLORS,
         media_on_s3=s3_enabled(),
+        wallet_buttons_enabled=wallet_buttons_enabled(db),
     )
+
+
+@router.post("/hr/design/wallet-buttons")
+def design_wallet_buttons(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin)),
+    enabled: str = Form("0"),
+    csrf_token: str = Form(""),
+):
+    """Главный администратор включает или скрывает кнопки кошелька на картах."""
+    try:
+        guard_csrf(request, csrf_token)
+        set_wallet_buttons_enabled(db, enabled == "1")
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+    else:
+        flash(
+            request,
+            "Кнопки кошелька включены" if enabled == "1" else "Кнопки кошелька скрыты",
+        )
+    return RedirectResponse("/hr/design", status_code=303)
 
 
 @router.post("/hr/design/segments")

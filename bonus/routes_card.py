@@ -12,10 +12,11 @@ from bonus.apple_wallet import (
     pkpass_download_url,
     walletpasses_url,
 )
+from bonus.app_settings import certificate_shows_wallet_buttons
 from bonus.db import get_db
 from bonus.google_wallet import save_url, wallet_enabled
 from bonus.http import public_base, render, require
-from bonus.models import Role, User
+from bonus.models import Certificate, Role, User
 from bonus.partners import partner_cities
 from bonus.present import load_card, load_cards
 from bonus.services import find_certificate
@@ -29,6 +30,29 @@ def _card_page_extras() -> dict:
     return {
         "weekday_choices": WEEKDAY_CHOICES,
         "partner_cities": partner_cities(),
+    }
+
+
+def _wallet_ui(db: Session, certificate: Certificate, base: str) -> dict:
+    """Флаги и ссылки кнопок кошелька с учётом глобальной настройки и тестовой карты."""
+    if not certificate_shows_wallet_buttons(db, certificate):
+        return {
+            "google_wallet_enabled": False,
+            "google_wallet_href": "",
+            "apple_wallet_enabled": False,
+            "apple_wallet_href": "",
+            "walletpasses_enabled": False,
+            "walletpasses_href": "",
+        }
+    apple_on = apple_wallet_enabled()
+    pkpass_url = pkpass_download_url(certificate, base) if apple_on else ""
+    return {
+        "google_wallet_enabled": wallet_enabled(),
+        "google_wallet_href": f"/c/{certificate.token}/google-wallet",
+        "apple_wallet_enabled": apple_on,
+        "apple_wallet_href": f"/c/{certificate.token}/apple-wallet.pkpass" if apple_on else "",
+        "walletpasses_enabled": apple_on and bool(pkpass_url),
+        "walletpasses_href": walletpasses_url(pkpass_url) if pkpass_url else "",
     }
 
 
@@ -47,19 +71,12 @@ def public_certificate(token: str, request: Request, db: Session = Depends(get_d
         return render(request, "missing.html", status_code=404)
     base = public_base(request)
     card = load_card(db, certificate, base, None)
-    apple_on = apple_wallet_enabled()
-    pkpass_url = pkpass_download_url(certificate, base) if apple_on else ""
     return render(
         request,
         "public_card.html",
         card=card,
         card_token=certificate.token,
-        google_wallet_enabled=wallet_enabled(),
-        google_wallet_href=f"/c/{certificate.token}/google-wallet",
-        apple_wallet_enabled=apple_on,
-        apple_wallet_href=f"/c/{certificate.token}/apple-wallet.pkpass" if apple_on else "",
-        walletpasses_enabled=apple_on and bool(pkpass_url),
-        walletpasses_href=walletpasses_url(pkpass_url) if pkpass_url else "",
+        **_wallet_ui(db, certificate, base),
         **_card_page_extras(),
     )
 
@@ -88,7 +105,7 @@ def google_wallet_save(token: str, request: Request, db: Session = Depends(get_d
     certificate = find_certificate(db, token)
     if certificate is None:
         return render(request, "missing.html", status_code=404)
-    if not wallet_enabled():
+    if not certificate_shows_wallet_buttons(db, certificate) or not wallet_enabled():
         return render(request, "missing.html", status_code=404)
     base = public_base(request)
     url = save_url(certificate, certificate.holder, base_url=base)
@@ -97,13 +114,9 @@ def google_wallet_save(token: str, request: Request, db: Session = Depends(get_d
             request,
             "public_card.html",
             card=load_card(db, certificate, base, None),
-            google_wallet_enabled=False,
-            google_wallet_href="",
-            apple_wallet_enabled=False,
-            apple_wallet_href="",
-            walletpasses_enabled=False,
-            walletpasses_href="",
+            card_token=certificate.token,
             status_code=503,
+            **_wallet_ui(db, certificate, base),
             **_card_page_extras(),
         )
     return RedirectResponse(url, status_code=302)
@@ -115,7 +128,7 @@ def apple_wallet_pkpass(token: str, request: Request, db: Session = Depends(get_
     certificate = find_certificate(db, token)
     if certificate is None:
         return render(request, "missing.html", status_code=404)
-    if not apple_wallet_enabled():
+    if not certificate_shows_wallet_buttons(db, certificate) or not apple_wallet_enabled():
         return render(request, "missing.html", status_code=404)
     base = public_base(request)
     payload = build_pkpass(certificate, certificate.holder, base_url=base)
@@ -124,13 +137,9 @@ def apple_wallet_pkpass(token: str, request: Request, db: Session = Depends(get_
             request,
             "public_card.html",
             card=load_card(db, certificate, base, None),
-            google_wallet_enabled=wallet_enabled(),
-            google_wallet_href=f"/c/{certificate.token}/google-wallet",
-            apple_wallet_enabled=False,
-            apple_wallet_href="",
-            walletpasses_enabled=False,
-            walletpasses_href="",
+            card_token=certificate.token,
             status_code=503,
+            **_wallet_ui(db, certificate, base),
             **_card_page_extras(),
         )
     filename = f"{certificate.public_number or certificate.id}.pkpass"

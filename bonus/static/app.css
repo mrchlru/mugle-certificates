@@ -2330,6 +2330,10 @@ body.partners-dialog-open {
   outline-offset: 2px;
 }
 
+.design-wallet-settings {
+  margin-bottom: 20px;
+}
+
 .dash-intro {
   margin-bottom: 22px;
 }

@@ -43,6 +43,19 @@ def ensure_schema(engine: Engine) -> None:
             statements.append(
                 "ALTER TABLE certificates ADD COLUMN unwrap_pending BOOLEAN DEFAULT FALSE"
             )
+        if "show_wallet_buttons" not in columns:
+            statements.append(
+                "ALTER TABLE certificates ADD COLUMN show_wallet_buttons BOOLEAN DEFAULT FALSE"
+            )
+    if "app_settings" not in tables:
+        statements.append(
+            """
+            CREATE TABLE app_settings (
+                id INTEGER PRIMARY KEY,
+                wallet_buttons_enabled BOOLEAN DEFAULT FALSE
+            )
+            """
+        )
     if "card_templates" in tables:
         columns = {column["name"] for column in inspector.get_columns("card_templates")}
         if "discount_percent" not in columns:
@@ -113,6 +126,24 @@ def ensure_schema(engine: Engine) -> None:
                 connection.execute(text(statement))
     _migrate_unwrap_kind(engine)
     _backfill_unwrap_pending(engine)
+    _ensure_app_settings_row(engine)
+
+
+def _ensure_app_settings_row(engine: Engine) -> None:
+    """Гарантирует строку id=1 в app_settings."""
+    inspector = inspect(engine)
+    if "app_settings" not in inspector.get_table_names():
+        return
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO app_settings (id, wallet_buttons_enabled)
+                SELECT 1, FALSE
+                WHERE NOT EXISTS (SELECT 1 FROM app_settings WHERE id = 1)
+                """
+            )
+        )
 
 
 def _migrate_unwrap_kind(engine: Engine) -> None:
