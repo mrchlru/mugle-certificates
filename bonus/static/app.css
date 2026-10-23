@@ -2554,6 +2554,96 @@ body.partners-dialog-open {
   color: var(--muted);
 }
 
+.dash-table-select .dash-pick {
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.dash-table-select .dash-pick:hover {
+  background: rgba(3, 153, 128, 0.06);
+}
+
+.dash-table-select .dash-pick.is-picked {
+  background: rgba(3, 153, 128, 0.16);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.dash-extend {
+  margin: 0 0 14px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: var(--soft);
+}
+
+.dash-extend-count {
+  margin: 0 0 10px;
+  font-size: 13px;
+}
+
+.dash-extend-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.dash-chip {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  padding: 7px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.dash-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.dash-extend-custom {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.dash-step {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--line);
+  background: #fff;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.dash-extend-custom input[type="number"] {
+  width: 72px;
+  height: 34px;
+  border: 1px solid var(--line);
+  padding: 0 8px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.dash-days-label {
+  min-width: 4.5rem;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.dash-extend-status {
+  margin: 10px 0 0;
+  font-size: 13px;
+}
+
+.dash-extend-status.is-bad {
+  color: #b42318;
+}
+
 @media (max-width: 720px) {
   .filters { grid-template-columns: 1fr; }
   .wallet-amount { font-size: 28px; }

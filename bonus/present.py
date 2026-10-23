@@ -364,7 +364,7 @@ def admin_dashboard(db: Session) -> AdminDashboard:
     by_restaurant = _buckets_by_restaurant(db, month_start, reversed_ids)
     days = _day_series(db, chart_start, reversed_ids)
     recent_debits = _recent_debits(db, limit=8)
-    expiring = _expiring_cards(db, today, soon, limit=8)
+    expiring = _expiring_cards(db, today, soon, limit=40)
     top_balance = _top_balance_cards(db, limit=8)
 
     return AdminDashboard(

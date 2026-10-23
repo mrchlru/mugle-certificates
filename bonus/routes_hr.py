@@ -64,6 +64,7 @@ from bonus.services import (
     delete_certificate,
     issue_certificate,
     enqueue_certificates_for_sheets,
+    extend_certificates_days,
     list_active_certificate_ids,
     normalize_discount,
     push_certificate_to_sheets,
@@ -119,6 +120,42 @@ def admin_dashboard_page(
         "hr_dashboard.html",
         section="dashboard",
         dash=admin_dashboard(db),
+    )
+
+
+@router.post("/hr/dashboard/extend")
+def dashboard_extend(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(*DASHBOARD_ROLES)),
+    ids: str = Form(""),
+    days: str = Form("0"),
+    csrf_token: str = Form(""),
+):
+    """Массово продлевает срок выбранных карт с дашборда."""
+    try:
+        guard_csrf(request, csrf_token)
+        certificate_ids = _parse_id_list(ids)
+        day_count = int(days.strip())
+        count, numbers = extend_certificates_days(db, certificate_ids, day_count)
+        write_audit(
+            db,
+            actor=user,
+            action=AuditAction.certificate_expiry,
+            summary=f"Продление на {day_count} дн.: {count} карт",
+            target_type="certificate_batch",
+            detail=", ".join(numbers[:20]),
+        )
+    except (BonusError, ValueError) as exc:
+        message = exc.message if isinstance(exc, BonusError) else "Укажите число дней"
+        return JSONResponse({"ok": False, "message": message}, status_code=400)
+    return JSONResponse(
+        {
+            "ok": True,
+            "count": count,
+            "days": day_count,
+            "message": f"Продлено {count} карт на {_extend_label(day_count)}",
+        }
     )
 
 
@@ -1155,6 +1192,28 @@ def _expires(raw: str):
         return parse_date(raw)
     except MoneyError as exc:
         raise BonusError(exc.message) from exc
+
+
+def _parse_id_list(raw: str) -> list[int]:
+    """Разбирает «1,2,3» в список id карт."""
+    ids: list[int] = []
+    for part in raw.replace(";", ",").replace("\n", ",").split(","):
+        cleaned = part.strip()
+        if not cleaned:
+            continue
+        ids.append(int(cleaned))
+    return ids
+
+
+def _extend_label(days: int) -> str:
+    """Человекочитаемый срок: дни / месяцы / годы (360 дн. = 1 год)."""
+    if days >= 360 and days % 360 == 0:
+        years = days // 360
+        return f"{years} г."
+    if days >= 30 and days % 30 == 0:
+        months = days // 30
+        return f"{months} мес."
+    return f"{days} дн."
 
 
 def _discount(raw: str) -> int:

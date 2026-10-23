@@ -447,6 +447,42 @@ def set_certificate_expiry(db: Session, certificate: Certificate, expires_on: da
     _sync_usage(db, certificate, expired=expired)
 
 
+def extend_certificate_days(db: Session, certificate: Certificate, days: int) -> date:
+    """Продлевает срок на N дней от текущего (или от сегодня, если срок прошёл/пуст)."""
+    if days < 1 or days > 3600:
+        raise BonusError("Срок продления — от 1 до 3600 дней")
+    base = certificate.expires_on
+    today = today_msk()
+    if base is None or base < today:
+        base = today
+    new_expires = base + timedelta(days=days)
+    set_certificate_expiry(db, certificate, new_expires)
+    return new_expires
+
+
+def extend_certificates_days(
+    db: Session,
+    certificate_ids: list[int],
+    days: int,
+) -> tuple[int, list[str]]:
+    """Продлевает несколько карт. Возвращает (успешно, публичные номера)."""
+    unique_ids = sorted({int(item) for item in certificate_ids if item})
+    if not unique_ids:
+        raise BonusError("Выберите хотя бы одну карту")
+    if days < 1 or days > 3600:
+        raise BonusError("Срок продления — от 1 до 3600 дней")
+    done: list[str] = []
+    for certificate_id in unique_ids:
+        certificate = db.get(Certificate, certificate_id)
+        if certificate is None:
+            continue
+        extend_certificate_days(db, certificate, days)
+        done.append(certificate.public_number)
+    if not done:
+        raise BonusError("Не удалось продлить выбранные карты")
+    return len(done), done
+
+
 def apply_expiry_writeoff(db: Session, certificate: Certificate) -> bool:
     """Если срок прошёл — списывает весь остаток в журнал."""
     if certificate.expires_on is None or certificate.expires_on >= today_msk():

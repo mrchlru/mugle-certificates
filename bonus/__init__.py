@@ -1,3 +1,3 @@
 """Teams Bonus — корпоративные сертификаты (замена Statix Bonus)."""
 
-__version__ = "1.2.51-summary-sort"
+__version__ = "1.2.52-dash-extend"

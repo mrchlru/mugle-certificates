@@ -184,14 +184,34 @@
       {% endif %}
     </section>
 
-    <section class="dash-panel">
+    <section class="dash-panel" id="dash-expiring" data-csrf="{{ csrf }}">
       <div class="dash-panel-head">
         <h2>Скоро истекают</h2>
-        <p class="muted">Ближайшие 14 дней</p>
+        <p class="muted">Ближайшие 14 дней · клик по строке — выбор</p>
       </div>
       {% if dash.expiring %}
+      <div class="dash-extend" id="dash-extend" hidden>
+        <p class="dash-extend-count muted" id="dash-extend-count">Выбрано: 0</p>
+        <div class="dash-extend-chips" role="group" aria-label="Продлить на">
+          <button type="button" class="dash-chip" data-days="1">День</button>
+          <button type="button" class="dash-chip" data-days="7">Неделя</button>
+          <button type="button" class="dash-chip" data-days="14">2 недели</button>
+          <button type="button" class="dash-chip" data-days="30">Месяц</button>
+          <button type="button" class="dash-chip" data-days="90">3 месяца</button>
+          <button type="button" class="dash-chip" data-days="360">Год</button>
+        </div>
+        <div class="dash-extend-custom">
+          <span class="muted">Своё</span>
+          <button type="button" class="dash-step" id="dash-days-minus" aria-label="Меньше">−</button>
+          <input type="number" id="dash-days-input" min="1" max="3600" value="30" inputmode="numeric">
+          <button type="button" class="dash-step" id="dash-days-plus" aria-label="Больше">+</button>
+          <span class="dash-days-label" id="dash-days-label">1 мес.</span>
+          <button type="button" class="btn compact" id="dash-extend-apply">Продлить</button>
+        </div>
+        <p class="dash-extend-status muted" id="dash-extend-status" hidden></p>
+      </div>
       <div class="table-wrap">
-        <table class="dash-table">
+        <table class="dash-table dash-table-select">
           <thead>
             <tr>
               <th>Карта</th>
@@ -201,10 +221,10 @@
           </thead>
           <tbody>
             {% for card in dash.expiring %}
-            <tr>
+            <tr class="dash-pick" data-id="{{ card.id }}" tabindex="0" role="button" aria-pressed="false">
               <td>
                 <span class="cert-ref">
-                  <a href="/hr/c/{{ card.id }}">{{ card.public_number }}</a>
+                  <a href="/hr/c/{{ card.id }}" data-open-card>{{ card.public_number }}</a>
                   <span class="swatch" style="background: {{ card.color }}" title="{{ card.color }}"></span>
                 </span>
                 <br><span class="muted">{{ card.holder_name }} · {{ card.segment_name }}</span>
@@ -257,4 +277,156 @@
     </section>
   </div>
 </section>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  var root = document.getElementById("dash-expiring");
+  if (!root) return;
+  var panel = document.getElementById("dash-extend");
+  var countEl = document.getElementById("dash-extend-count");
+  var statusEl = document.getElementById("dash-extend-status");
+  var input = document.getElementById("dash-days-input");
+  var label = document.getElementById("dash-days-label");
+  var selected = {};
+
+  function daysLabel(days) {
+    var n = Math.max(1, Math.min(3600, Math.round(Number(days) || 1)));
+    if (n >= 360 && n % 360 === 0) {
+      var y = n / 360;
+      return y === 1 ? "1 г." : y + " г.";
+    }
+    if (n >= 30 && n % 30 === 0) return (n / 30) + " мес.";
+    return n + " дн.";
+  }
+
+  function stepSize(days) {
+    var n = Math.max(1, Math.round(Number(days) || 1));
+    if (n >= 360 && n % 360 === 0) return 360;
+    if (n >= 30 && n % 30 === 0) return 30;
+    return 1;
+  }
+
+  function syncLabel() {
+    if (!input || !label) return;
+    var n = Math.max(1, Math.min(3600, Math.round(Number(input.value) || 1)));
+    input.value = String(n);
+    label.textContent = daysLabel(n);
+  }
+
+  function selectedIds() {
+    return Object.keys(selected).filter(function (id) { return selected[id]; });
+  }
+
+  function renderSelection() {
+    var ids = selectedIds();
+    if (panel) panel.hidden = ids.length === 0;
+    if (countEl) countEl.textContent = "Выбрано: " + ids.length;
+    root.querySelectorAll(".dash-pick").forEach(function (row) {
+      var on = !!selected[row.getAttribute("data-id")];
+      row.classList.toggle("is-picked", on);
+      row.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+  }
+
+  function toggleRow(row) {
+    var id = row.getAttribute("data-id");
+    if (!id) return;
+    selected[id] = !selected[id];
+    renderSelection();
+  }
+
+  root.querySelectorAll(".dash-pick").forEach(function (row) {
+    row.addEventListener("click", function (event) {
+      if (event.target.closest("[data-open-card]")) return;
+      toggleRow(row);
+    });
+    row.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        toggleRow(row);
+      }
+    });
+  });
+
+  root.querySelectorAll(".dash-chip").forEach(function (chip) {
+    chip.addEventListener("click", function () {
+      var days = Number(chip.getAttribute("data-days") || 0);
+      if (days > 0) extendSelected(days);
+    });
+  });
+
+  var minus = document.getElementById("dash-days-minus");
+  var plus = document.getElementById("dash-days-plus");
+  var apply = document.getElementById("dash-extend-apply");
+  if (minus) {
+    minus.addEventListener("click", function () {
+      var n = Math.round(Number(input.value) || 1);
+      var step = stepSize(n);
+      input.value = String(Math.max(1, n - step));
+      syncLabel();
+    });
+  }
+  if (plus) {
+    plus.addEventListener("click", function () {
+      var n = Math.round(Number(input.value) || 1);
+      var step = stepSize(n);
+      var next = n + step;
+      if (n < 30 && next > 30) next = 30;
+      else if (n < 360 && n >= 30 && next > 360 && n % 30 === 0) next = 360;
+      input.value = String(Math.min(3600, next));
+      syncLabel();
+    });
+  }
+  if (input) {
+    input.addEventListener("input", syncLabel);
+    input.addEventListener("change", syncLabel);
+  }
+  if (apply) {
+    apply.addEventListener("click", function () {
+      extendSelected(Math.round(Number(input.value) || 0));
+    });
+  }
+
+  function extendSelected(days) {
+    var ids = selectedIds();
+    if (!ids.length) return;
+    if (!days || days < 1) {
+      showStatus("Укажите число дней", true);
+      return;
+    }
+    var body = new FormData();
+    body.append("csrf_token", root.getAttribute("data-csrf") || "");
+    body.append("ids", ids.join(","));
+    body.append("days", String(days));
+    showStatus("Продлеваю…", false);
+    fetch("/hr/dashboard/extend", { method: "POST", body: body, credentials: "same-origin" })
+      .then(function (response) {
+        return response.json().then(function (data) {
+          return { ok: response.ok, data: data };
+        });
+      })
+      .then(function (result) {
+        if (!result.ok) {
+          showStatus((result.data && result.data.message) || "Не удалось продлить", true);
+          return;
+        }
+        showStatus(result.data.message || "Готово", false);
+        window.setTimeout(function () { window.location.reload(); }, 700);
+      })
+      .catch(function () {
+        showStatus("Ошибка сети", true);
+      });
+  }
+
+  function showStatus(text, isBad) {
+    if (!statusEl) return;
+    statusEl.hidden = false;
+    statusEl.textContent = text;
+    statusEl.classList.toggle("is-bad", !!isBad);
+  }
+
+  syncLabel();
+})();
+</script>
 {% endblock %}
