@@ -49,8 +49,10 @@ from bonus.present import (
     ledger,
     list_staff,
     load_card,
+    normalize_sort,
     preview_birthday_card,
     search_certificates,
+    sort_choices,
 )
 from bonus.roles import AUDIT_ROLES, DASHBOARD_ROLES, STAFF_ROLES, parse_staff_role, role_label
 from bonus.security import flash
@@ -85,17 +87,21 @@ def dashboard(
     user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
     q: str = "",
     segment: int = 0,
+    sort: str = "name",
 ):
-    """Сводка и поиск сертификатов с фильтром по сегменту."""
+    """Сводка и поиск сертификатов с фильтром по сегменту и сортировкой."""
     segment_id = segment if segment > 0 else None
+    sort_key = normalize_sort(sort)
     return render(
         request,
         "hr.html",
         section="home",
-        stats=dashboard_stats(db),
-        cards=search_certificates(db, q, segment_id),
+        stats=dashboard_stats(db, segment_id),
+        cards=search_certificates(db, q, segment_id, sort=sort_key),
         query=q,
         segment_id=segment_id or 0,
+        sort=sort_key,
+        sort_options=sort_choices(),
         segments=list_segments(db),
         card_base=public_base(request),
     )

@@ -3,7 +3,7 @@
 {% block content %}
 <section class="stats">
   <article>
-    <p class="eyebrow">Активные</p>
+    <p class="eyebrow">Активные{% if segment_id %} · сегмент{% endif %}</p>
     <p class="stat">{{ stats.active_count }}</p>
   </article>
   <article>
@@ -23,13 +23,18 @@
     <option value="{{ item.id }}" {% if segment_id == item.id %}selected{% endif %}>{{ item.name }}</option>
     {% endfor %}
   </select>
+  <select name="sort" aria-label="Сортировка">
+    {% for key, label in sort_options %}
+    <option value="{{ key }}" {% if sort == key %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
   <button class="btn" type="submit">Найти</button>
 </form>
 {% if segments %}
 <nav class="segment-chips">
-  <a href="/hr?q={{ query }}" class="{% if not segment_id %}is-on{% endif %}">Все</a>
+  <a href="/hr?q={{ query }}&sort={{ sort }}" class="{% if not segment_id %}is-on{% endif %}">Все</a>
   {% for item in segments %}
-  <a href="/hr?q={{ query }}&segment={{ item.id }}" class="{% if segment_id == item.id %}is-on{% endif %}">{{ item.name }}</a>
+  <a href="/hr?q={{ query }}&segment={{ item.id }}&sort={{ sort }}" class="{% if segment_id == item.id %}is-on{% endif %}">{{ item.name }}</a>
   {% endfor %}
 </nav>
 {% endif %}
@@ -42,6 +47,7 @@
         <th>Сотрудник</th>
         <th>Сегмент</th>
         <th>Остаток</th>
+        <th>Срок</th>
         <th>Статус</th>
         <th>Ссылка</th>
       </tr>
@@ -63,6 +69,7 @@
         </td>
         <td>{{ card.segment_name or "—" }}</td>
         <td>{{ card.balance|money }}</td>
+        <td>{% if card.expires_on %}{{ card.expires_on|day }}{% else %}<span class="muted">без срока</span>{% endif %}</td>
         <td>{{ status_label(card.status, card.balance, card.expires_on, card.single_use) }}</td>
         <td>
           <button class="text-link" type="button" data-copy="{{ card_base }}/c/{{ card.token }}">Копировать</button>
@@ -75,4 +82,17 @@
 {% else %}
 <p class="muted">Сертификатов не нашлось. Выпишите первый или загрузите таблицу.</p>
 {% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  var form = document.querySelector("form.filters");
+  if (!form) return;
+  var sort = form.querySelector('select[name="sort"]');
+  var segment = form.querySelector('select[name="segment"]');
+  function submitForm() { form.submit(); }
+  if (sort) sort.addEventListener("change", submitForm);
+  if (segment) segment.addEventListener("change", submitForm);
+})();
+</script>
 {% endblock %}

@@ -1,3 +1,3 @@
 """Teams Bonus — корпоративные сертификаты (замена Statix Bonus)."""
 
-__version__ = "1.2.50-sheets-queue"
+__version__ = "1.2.51-summary-sort"

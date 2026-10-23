@@ -213,8 +213,33 @@ def recent_debits(db: Session, actor: User, limit: int = 8) -> list[TxView]:
     ]
 
 
-def search_certificates(db: Session, query: str, segment_id: int | None = None) -> list[CardView]:
-    """Список для HR. Поиск по имени и фильтр по сегменту."""
+_SORT_CHOICES: tuple[tuple[str, str], ...] = (
+    ("name", "По алфавиту"),
+    ("balance", "По балансу"),
+    ("expires", "По сроку"),
+)
+
+
+def sort_choices() -> tuple[tuple[str, str], ...]:
+    """Варианты сортировки сводки для селекта."""
+    return _SORT_CHOICES
+
+
+def normalize_sort(raw: str) -> str:
+    """Допустимый ключ сортировки; иначе алфавит."""
+    cleaned = (raw or "").strip().casefold()
+    allowed = {key for key, _label in _SORT_CHOICES}
+    return cleaned if cleaned in allowed else "name"
+
+
+def search_certificates(
+    db: Session,
+    query: str,
+    segment_id: int | None = None,
+    *,
+    sort: str = "name",
+) -> list[CardView]:
+    """Список для HR. Поиск, фильтр по сегменту и сортировка."""
     apply_due_expiries(db)
     statement = (
         select(Certificate, User)
@@ -243,41 +268,65 @@ def search_certificates(db: Session, query: str, segment_id: int | None = None) 
         if needle and needle not in haystack:
             continue
         found.append(_card_view(db, certificate, holder, "", ()))
-        if len(found) >= 300:
-            break
-    return found
+    ordered = _sort_cards(found, normalize_sort(sort))
+    return ordered[:300]
 
 
-def dashboard_stats(db: Session) -> DashboardStats:
-    """Сколько живых сертификатов, какой общий остаток и сколько списали сегодня."""
+def dashboard_stats(db: Session, segment_id: int | None = None) -> DashboardStats:
+    """Активные, сумма на балансах и списания за сегодня — с учётом сегмента."""
     apply_due_expiries(db)
+    active = Certificate.status == CertificateStatus.active
+    cert_filters = [active]
+    if segment_id is not None and segment_id > 0:
+        cert_filters.append(Certificate.segment_id == segment_id)
     active_count = int(
-        db.scalar(
-            select(func.count()).select_from(Certificate).where(Certificate.status == CertificateStatus.active)
-        )
-        or 0
+        db.scalar(select(func.count()).select_from(Certificate).where(*cert_filters)) or 0
     )
     total_balance = int(
         db.scalar(
-            select(func.coalesce(func.sum(Certificate.balance), 0)).where(
-                Certificate.status == CertificateStatus.active
-            )
+            select(func.coalesce(func.sum(Certificate.balance), 0)).where(*cert_filters)
         )
         or 0
     )
     start = _moscow_day_start()
     reversed_ids = select(Transaction.reversal_of_id).where(Transaction.reversal_of_id.is_not(None))
-    spent_today = int(
-        db.scalar(
-            select(func.coalesce(func.sum(Transaction.amount), 0)).where(
-                Transaction.tx_type == TxType.debit,
-                Transaction.created_at >= start,
-                Transaction.id.not_in(reversed_ids),
-            )
-        )
-        or 0
-    )
+    spent_filters = [
+        Transaction.tx_type == TxType.debit,
+        Transaction.created_at >= start,
+        Transaction.id.not_in(reversed_ids),
+    ]
+    spent_query = select(func.coalesce(func.sum(Transaction.amount), 0))
+    if segment_id is not None and segment_id > 0:
+        spent_query = spent_query.join(
+            Certificate, Transaction.certificate_id == Certificate.id
+        ).where(*spent_filters, Certificate.segment_id == segment_id)
+    else:
+        spent_query = spent_query.where(*spent_filters)
+    spent_today = int(db.scalar(spent_query) or 0)
     return DashboardStats(active_count=active_count, total_balance=total_balance, spent_today=spent_today)
+
+
+def _sort_cards(cards: list[CardView], sort: str) -> list[CardView]:
+    """Сортирует карточки: алфавит, баланс убыв., срок (без даты — внизу)."""
+    if sort == "balance":
+        return sorted(
+            cards,
+            key=lambda card: (-card.balance, card.holder_name.casefold(), card.public_number),
+        )
+    if sort == "expires":
+        return sorted(
+            cards,
+            key=lambda card: (
+                card.expires_on is None,
+                card.expires_on or date.max,
+                card.holder_name.casefold(),
+                card.public_number,
+            ),
+        )
+    return sorted(
+        cards,
+        key=lambda card: (card.holder_name.casefold(), card.public_number),
+    )
 
 
 def admin_dashboard(db: Session) -> AdminDashboard:
