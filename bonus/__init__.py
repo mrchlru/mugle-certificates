@@ -1,3 +1,3 @@
 """Teams Bonus — корпоративные сертификаты (замена Statix Bonus)."""
 
-__version__ = "1.2.52-dash-extend"
+__version__ = "1.2.53-export-mail"

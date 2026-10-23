@@ -48,6 +48,8 @@ class AuditAction(str, enum.Enum):
     import_rows = "import_rows"
     certificate_delete = "certificate_delete"
     template_delete = "template_delete"
+    link_export = "link_export"
+    link_delivery_mark = "link_delivery_mark"
 
 
 class CertificateStatus(str, enum.Enum):
@@ -242,6 +244,23 @@ class Transaction(Base):
     cheque_detail: Mapped[str] = mapped_column(Text, default="")
     reversal_of_id: Mapped[int | None] = mapped_column(ForeignKey("transactions.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: _utcnow(),
+        index=True,
+    )
+
+
+class LinkDelivery(Base):
+    """Отметка, что ссылка на карту уже отправлена получателю (рассылка)."""
+
+    __tablename__ = "link_deliveries"
+    __table_args__ = (UniqueConstraint("certificate_id", name="uq_link_delivery_cert"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    certificate_id: Mapped[int] = mapped_column(ForeignKey("certificates.id"), index=True)
+    group_label: Mapped[str] = mapped_column(String(200), default="")
+    marked_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    marked_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: _utcnow(),
         index=True,

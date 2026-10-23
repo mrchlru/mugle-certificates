@@ -54,7 +54,14 @@ from bonus.present import (
     search_certificates,
     sort_choices,
 )
-from bonus.roles import AUDIT_ROLES, DASHBOARD_ROLES, STAFF_ROLES, parse_staff_role, role_label
+from bonus.roles import (
+    AUDIT_ROLES,
+    DASHBOARD_ROLES,
+    EXPORT_ROLES,
+    STAFF_ROLES,
+    parse_staff_role,
+    role_label,
+)
 from bonus.security import flash
 from bonus.services import (
     BonusError,
@@ -966,6 +973,190 @@ def expires_submit(
 def ledger_page(request: Request, db: Session = Depends(get_db), user: User = Depends(require(Role.admin, Role.hr, Role.hrd))):
     """Журнал списаний и остальных операций."""
     return render(request, "hr_ledger.html", section="ledger", rows=ledger(db, user))
+
+
+@router.get("/hr/export")
+def export_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(*EXPORT_ROLES)),
+):
+    """Предпросмотр пакетной выгрузки ссылок на карты."""
+    from bonus.export_mail import (
+        build_preview,
+        card_link,
+        filters_query,
+        ledger_filter_choices,
+        load_export_rows,
+        load_place_facets,
+        parse_export_filters,
+    )
+
+    filters = _export_filters_from_request(request)
+    base = public_base(request)
+    rows = load_export_rows(db, filters, base_url=base)
+    companies, restaurants = load_place_facets(db)
+    preview = build_preview(
+        rows,
+        filters,
+        company_options=companies,
+        restaurant_options=restaurants,
+    )
+    query = filters_query(filters)
+    return render(
+        request,
+        "hr_export.html",
+        section="export",
+        filters=filters,
+        preview=preview,
+        ledger_choices=ledger_filter_choices(),
+        segments=list_segments(db),
+        templates=list_templates(db),
+        card_base=base,
+        download_query=query,
+        card_link=card_link,
+        page_ids=[row.certificate_id for row in preview.page_rows],
+        all_ids=[row.certificate_id for row in preview.rows],
+    )
+
+
+@router.get("/hr/export/download")
+def export_download(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(*EXPORT_ROLES)),
+    format: str = "zip",
+):
+    """Скачивает ZIP по группам или одну книгу Excel."""
+    from bonus.export_mail import (
+        build_workbook_bytes,
+        build_zip_bytes,
+        filters_query,
+        group_rows,
+        load_export_rows,
+        parse_export_filters,
+    )
+
+    filters = _export_filters_from_request(request)
+    base = public_base(request)
+    rows = load_export_rows(db, filters, base_url=base)
+    groups = group_rows(rows, filters.group_by)
+    fmt = (format or "zip").strip().casefold()
+    if fmt == "book":
+        payload = build_workbook_bytes(
+            groups,
+            base_url=base,
+            template=filters.message_template,
+        )
+        filename = "rassylka.xlsx"
+        media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    else:
+        payload = build_zip_bytes(
+            groups,
+            base_url=base,
+            template=filters.message_template,
+        )
+        filename = "rassylka.zip"
+        media = "application/zip"
+        fmt = "zip"
+    write_audit(
+        db,
+        actor=user,
+        action=AuditAction.link_export,
+        summary=f"Выгрузка ссылок: {len(rows)} карт, групп {len(groups)}, {fmt}",
+        target_type="export",
+        detail=filters_query(filters, extra={"format": fmt, "group_by": filters.group_by}),
+    )
+    return Response(
+        content=payload,
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/hr/export/mark")
+def export_mark(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(*EXPORT_ROLES)),
+    ids: str = Form(""),
+    group_label: str = Form(""),
+    csrf_token: str = Form(""),
+):
+    """Отмечает выбранные карты как отправленные."""
+    from bonus.export_mail import mark_delivered
+
+    try:
+        guard_csrf(request, csrf_token)
+        certificate_ids = _parse_id_list(ids)
+        count = mark_delivered(db, certificate_ids, actor=user, group_label=group_label)
+        write_audit(
+            db,
+            actor=user,
+            action=AuditAction.link_delivery_mark,
+            summary=f"Отмечено отправленных: {count}",
+            target_type="export",
+            detail=(group_label or "")[:400],
+        )
+    except BonusError as exc:
+        return JSONResponse({"ok": False, "message": exc.message}, status_code=400)
+    return JSONResponse({"ok": True, "count": count, "message": f"Отмечено: {count}"})
+
+
+@router.post("/hr/export/unmark")
+def export_unmark(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(*EXPORT_ROLES)),
+    ids: str = Form(""),
+    csrf_token: str = Form(""),
+):
+    """Снимает отметку рассылки с выбранных карт."""
+    from bonus.export_mail import unmark_delivered
+
+    try:
+        guard_csrf(request, csrf_token)
+        certificate_ids = _parse_id_list(ids)
+        count = unmark_delivered(db, certificate_ids)
+        write_audit(
+            db,
+            actor=user,
+            action=AuditAction.link_delivery_mark,
+            summary=f"Снята отметка рассылки: {count}",
+            target_type="export",
+        )
+    except BonusError as exc:
+        return JSONResponse({"ok": False, "message": exc.message}, status_code=400)
+    return JSONResponse({"ok": True, "count": count, "message": f"Снято: {count}"})
+
+
+def _export_filters_from_request(request: Request):
+    """Читает мультивыбор фильтров рассылки из query."""
+    from bonus.export_mail import parse_export_filters
+
+    params = request.query_params
+    page_raw = params.get("page") or "1"
+    try:
+        page = int(page_raw)
+    except ValueError:
+        page = 1
+    return parse_export_filters(
+        ledger=list(params.getlist("ledger")),
+        segment=list(params.getlist("segment")),
+        company=list(params.getlist("company")),
+        restaurant=list(params.getlist("restaurant")),
+        template=list(params.getlist("template")),
+        card_status=params.get("card_status") or "active",
+        delivery=params.get("delivery") or "undelivered",
+        issued_from=params.get("issued_from") or "",
+        issued_to=params.get("issued_to") or "",
+        expires_from=params.get("expires_from") or "",
+        expires_to=params.get("expires_to") or "",
+        q=params.get("q") or "",
+        group_by=params.get("group_by") or "restaurant",
+        page=page,
+        tpl=params.get("tpl") or "",
+    )
 
 
 @router.get("/hr/import")

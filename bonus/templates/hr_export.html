@@ -1,0 +1,302 @@
+{% extends "base.html" %}
+{% block title %}Рассылка{% endblock %}
+{% block content %}
+<section class="export-page" id="export-page" data-csrf="{{ csrf }}">
+  <header class="design-intro">
+    <h1>Рассылка</h1>
+    <p class="muted">Пакетная выгрузка ссылок на карты по ресторанам и ООО.</p>
+  </header>
+
+  <form class="export-filters design-panel" method="get" action="/hr/export" id="export-filters">
+    <div class="export-filter-grid">
+      <label class="field">Лист учёта
+        <select name="ledger" multiple size="5">
+          {% for value, label in ledger_choices %}
+          <option value="{{ value }}" {% if value in filters.ledger %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="field">Сегмент
+        <select name="segment" multiple size="5">
+          {% for item in segments %}
+          <option value="{{ item.id }}" {% if item.id in filters.segment_ids %}selected{% endif %}>{{ item.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="field">ООО
+        <select name="company" multiple size="5">
+          {% for item in preview.company_options %}
+          <option value="{{ item.key }}" {% if item.key in filters.companies %}selected{% endif %}>{{ item.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="field">Ресторан / офис
+        <select name="restaurant" multiple size="5">
+          {% for item in preview.restaurant_options %}
+          <option value="{{ item.key }}" {% if item.key in filters.restaurants %}selected{% endif %}>{{ item.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="field">Шаблон баннера
+        <select name="template" multiple size="5">
+          {% for item in templates %}
+          <option value="{{ item.id }}" {% if item.id in filters.template_ids %}selected{% endif %}>{{ item.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+
+    <div class="export-filter-row">
+      <label class="field">Статус карты
+        <select name="card_status">
+          <option value="active" {% if filters.card_status == 'active' %}selected{% endif %}>Только активные</option>
+          <option value="all" {% if filters.card_status == 'all' %}selected{% endif %}>Все</option>
+        </select>
+      </label>
+      <label class="field">Статус рассылки
+        <select name="delivery">
+          <option value="undelivered" {% if filters.delivery == 'undelivered' %}selected{% endif %}>Не отправлена</option>
+          <option value="delivered" {% if filters.delivery == 'delivered' %}selected{% endif %}>Отправлена</option>
+          <option value="all" {% if filters.delivery == 'all' %}selected{% endif %}>Все</option>
+        </select>
+      </label>
+      <label class="field">Разбить по
+        <select name="group_by">
+          <option value="restaurant" {% if filters.group_by == 'restaurant' %}selected{% endif %}>Ресторану</option>
+          <option value="company" {% if filters.group_by == 'company' %}selected{% endif %}>ООО</option>
+          <option value="segment" {% if filters.group_by == 'segment' %}selected{% endif %}>Сегменту</option>
+          <option value="none" {% if filters.group_by == 'none' %}selected{% endif %}>Без разбивки</option>
+        </select>
+      </label>
+      <label class="field">Поиск
+        <input name="q" value="{{ filters.query }}" placeholder="ФИО или номер карты">
+      </label>
+    </div>
+
+    <div class="export-filter-row">
+      <label class="field">Выпуск с
+        <input type="date" name="issued_from" value="{% if filters.issued_from %}{{ filters.issued_from.isoformat() }}{% endif %}">
+      </label>
+      <label class="field">Выпуск по
+        <input type="date" name="issued_to" value="{% if filters.issued_to %}{{ filters.issued_to.isoformat() }}{% endif %}">
+      </label>
+      <label class="field">Срок с
+        <input type="date" name="expires_from" value="{% if filters.expires_from %}{{ filters.expires_from.isoformat() }}{% endif %}">
+      </label>
+      <label class="field">Срок по
+        <input type="date" name="expires_to" value="{% if filters.expires_to %}{{ filters.expires_to.isoformat() }}{% endif %}">
+      </label>
+    </div>
+
+    <label class="field export-tpl">Текст для отправки
+      <textarea name="tpl" rows="3" id="export-tpl">{{ filters.message_template }}</textarea>
+      <span class="muted design-hint">Плейсхолдеры: {Имя}, {Тип}, {Номинал}, {Срок}, {Ссылка}. Для бессрочных фраза про срок убирается.</span>
+    </label>
+
+    <div class="export-actions">
+      <button class="btn" type="submit">Показать</button>
+      <a class="btn soft" id="export-zip" href="/hr/export/download?{{ download_query }}&amp;format=zip">Скачать ZIP</a>
+      <a class="btn soft" id="export-book" href="/hr/export/download?{{ download_query }}&amp;format=book">Скачать книгу</a>
+    </div>
+  </form>
+
+  <section class="stats export-stats">
+    <article>
+      <p class="eyebrow">Карт в выборке</p>
+      <p class="stat">{{ preview.total }}</p>
+    </article>
+    <article>
+      <p class="eyebrow">Групп</p>
+      <p class="stat">{{ preview.groups|length }}</p>
+    </article>
+  </section>
+
+  {% if preview.groups %}
+  <div class="export-groups">
+    {% for group in preview.groups %}
+    <details class="export-group design-panel">
+      <summary>
+        <strong>{{ group.label }}</strong>
+        <span class="muted">{{ group.rows|length }} карт</span>
+        <span class="export-group-actions">
+          <button type="button" class="text-link" data-mark-group="{{ group.key }}" data-ids="{% for row in group.rows %}{{ row.certificate_id }}{% if not loop.last %},{% endif %}{% endfor %}" data-label="{{ group.label }}">Отметить группу</button>
+          <button type="button" class="text-link" data-unmark-group data-ids="{% for row in group.rows %}{{ row.certificate_id }}{% if not loop.last %},{% endif %}{% endfor %}">Снять</button>
+        </span>
+      </summary>
+      <div class="table-wrap">
+        <table class="dash-table">
+          <thead>
+            <tr>
+              <th>№</th>
+              <th>ФИО</th>
+              <th>Должность</th>
+              <th>ООО</th>
+              <th>Ресторан</th>
+              <th>Сегмент</th>
+              <th>Номинал</th>
+              <th>Остаток</th>
+              <th>Срок</th>
+              <th>Рассылка</th>
+              <th>Ссылка</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in group.rows %}
+            <tr>
+              <td><a href="/hr/c/{{ row.certificate_id }}">{{ row.public_number }}</a></td>
+              <td>{{ row.full_name }}</td>
+              <td>{{ row.job_title or "—" }}</td>
+              <td>{{ row.company }}</td>
+              <td>{{ row.restaurant }}</td>
+              <td>{{ row.segment_name }}</td>
+              <td>{{ row.nominal|money }}</td>
+              <td>{{ row.balance|money }}</td>
+              <td>{% if row.expires_on %}{{ row.expires_on|day }}{% else %}<span class="muted">без срока</span>{% endif %}</td>
+              <td>
+                {% if row.delivered %}Отправлена{% else %}Не отправлена{% endif %}
+                <br>
+                <button type="button" class="text-link" data-mark-one="{{ row.certificate_id }}" data-label="{{ group.label }}">{% if row.delivered %}Обновить{% else %}Отметить{% endif %}</button>
+                {% if row.delivered %}
+                · <button type="button" class="text-link" data-unmark-one="{{ row.certificate_id }}">Снять</button>
+                {% endif %}
+              </td>
+              <td>
+                <button class="text-link" type="button" data-copy="{{ card_link(card_base, row.token) }}">Копировать</button>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </details>
+    {% endfor %}
+  </div>
+
+  {% if preview.total > preview.page_size %}
+  <nav class="export-pager muted">
+    Страница {{ preview.page }}
+    · строк на странице {{ preview.page_size }} из {{ preview.total }}
+    {% if preview.page > 1 %}
+    · <a href="/hr/export?{{ download_query }}&amp;page={{ preview.page - 1 }}">Назад</a>
+    {% endif %}
+    {% if preview.page * preview.page_size < preview.total %}
+    · <a href="/hr/export?{{ download_query }}&amp;page={{ preview.page + 1 }}">Дальше</a>
+    {% endif %}
+  </nav>
+  {% endif %}
+  {% else %}
+  <p class="muted">По выбранным фильтрам карт нет.</p>
+  {% endif %}
+
+  <p id="export-status" class="muted" hidden></p>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  var root = document.getElementById("export-page");
+  if (!root) return;
+  var csrf = root.getAttribute("data-csrf") || "";
+  var statusEl = document.getElementById("export-status");
+  var allIds = {{ all_ids|tojson }};
+  var form = document.getElementById("export-filters");
+  var tpl = document.getElementById("export-tpl");
+
+  function showStatus(text, isBad) {
+    if (!statusEl) return;
+    statusEl.hidden = false;
+    statusEl.textContent = text;
+    statusEl.classList.toggle("is-bad", !!isBad);
+  }
+
+  function postMark(url, ids, groupLabel) {
+    var body = new FormData();
+    body.append("csrf_token", csrf);
+    body.append("ids", ids.join(","));
+    if (groupLabel) body.append("group_label", groupLabel);
+    return fetch(url, { method: "POST", body: body, credentials: "same-origin" })
+      .then(function (response) {
+        return response.json().then(function (data) {
+          return { ok: response.ok, data: data };
+        });
+      });
+  }
+
+  function afterMark(result) {
+    if (!result.ok) {
+      showStatus((result.data && result.data.message) || "Ошибка", true);
+      return;
+    }
+    showStatus(result.data.message || "Готово", false);
+    window.setTimeout(function () { window.location.reload(); }, 600);
+  }
+
+  document.querySelectorAll("[data-mark-group]").forEach(function (button) {
+    button.addEventListener("click", function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      var ids = (button.getAttribute("data-ids") || "").split(",").filter(Boolean);
+      var label = button.getAttribute("data-label") || "";
+      postMark("/hr/export/mark", ids, label).then(afterMark).catch(function () {
+        showStatus("Ошибка сети", true);
+      });
+    });
+  });
+  document.querySelectorAll("[data-unmark-group]").forEach(function (button) {
+    button.addEventListener("click", function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      var ids = (button.getAttribute("data-ids") || "").split(",").filter(Boolean);
+      postMark("/hr/export/unmark", ids, "").then(afterMark).catch(function () {
+        showStatus("Ошибка сети", true);
+      });
+    });
+  });
+  document.querySelectorAll("[data-mark-one]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      var id = button.getAttribute("data-mark-one");
+      var label = button.getAttribute("data-label") || "";
+      postMark("/hr/export/mark", [id], label).then(afterMark).catch(function () {
+        showStatus("Ошибка сети", true);
+      });
+    });
+  });
+  document.querySelectorAll("[data-unmark-one]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      var id = button.getAttribute("data-unmark-one");
+      postMark("/hr/export/unmark", [id], "").then(afterMark).catch(function () {
+        showStatus("Ошибка сети", true);
+      });
+    });
+  });
+
+  function bindDownloadPrompt(anchor) {
+    if (!anchor) return;
+    anchor.addEventListener("click", function () {
+      if (!allIds || !allIds.length) return;
+      window.setTimeout(function () {
+        var ok = window.confirm("Отметить " + allIds.length + " карт как отправленные?");
+        if (!ok) return;
+        postMark("/hr/export/mark", allIds, "").then(afterMark).catch(function () {
+          showStatus("Ошибка сети", true);
+        });
+      }, 400);
+    });
+  }
+  bindDownloadPrompt(document.getElementById("export-zip"));
+  bindDownloadPrompt(document.getElementById("export-book"));
+
+  if (form && tpl) {
+    tpl.addEventListener("change", function () {
+      var zip = document.getElementById("export-zip");
+      var book = document.getElementById("export-book");
+      var params = new URLSearchParams(new FormData(form));
+      params.delete("page");
+      var query = params.toString();
+      if (zip) zip.href = "/hr/export/download?" + query + "&format=zip";
+      if (book) book.href = "/hr/export/download?" + query + "&format=book";
+    });
+  }
+})();
+</script>
+{% endblock %}

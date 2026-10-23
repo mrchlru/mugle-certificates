@@ -56,6 +56,18 @@ def ensure_schema(engine: Engine) -> None:
             )
             """
         )
+    if "link_deliveries" not in tables:
+        statements.append(
+            """
+            CREATE TABLE link_deliveries (
+                id INTEGER PRIMARY KEY,
+                certificate_id INTEGER NOT NULL UNIQUE,
+                group_label VARCHAR(200) DEFAULT '',
+                marked_by_id INTEGER,
+                marked_at TIMESTAMP
+            )
+            """
+        )
     if "card_templates" in tables:
         columns = {column["name"] for column in inspector.get_columns("card_templates")}
         if "discount_percent" not in columns:
