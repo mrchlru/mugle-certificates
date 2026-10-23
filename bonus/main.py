@@ -23,6 +23,7 @@ from bonus.routes_card import router as card_router
 from bonus.routes_desk import router as desk_router
 from bonus.routes_hr import router as hr_router
 from bonus.routes_iiko import router as iiko_router
+from bonus.sheets_queue import sheets_queue_worker
 
 
 @asynccontextmanager
@@ -32,15 +33,20 @@ async def _lifespan(_app: FastAPI):
     (settings.data_path() / "uploads").mkdir(parents=True, exist_ok=True)
     configure_database(settings.normalized_database_url())
     bootstrap(settings)
-    worker = asyncio.create_task(accrual_worker(), name="bonus-accrual")
+    workers = [
+        asyncio.create_task(accrual_worker(), name="bonus-accrual"),
+        asyncio.create_task(sheets_queue_worker(), name="bonus-sheets-queue"),
+    ]
     try:
         yield
     finally:
-        worker.cancel()
-        try:
-            await worker
-        except asyncio.CancelledError:
-            pass
+        for worker in workers:
+            worker.cancel()
+        for worker in workers:
+            try:
+                await worker
+            except asyncio.CancelledError:
+                pass
 
 
 def create_app() -> FastAPI:

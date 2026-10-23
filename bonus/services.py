@@ -123,7 +123,11 @@ def issue_certificate(
     db.refresh(certificate)
     db.refresh(holder)
     if sync_external:
-        _sync_issue(certificate, holder, draft.segment_name)
+        _sync_issue(db, certificate, holder, draft.segment_name)
+    else:
+        from bonus.sheets_queue import enqueue_certificate_ids
+
+        enqueue_certificate_ids(db, [certificate.id])
     return IssuedCertificate(user=holder, certificate=certificate, password=password)
 
 
@@ -1143,10 +1147,18 @@ def _public_number(compact: str) -> str:
     return f"MR-{int(digits):05d}"
 
 
-def _sync_issue(certificate: Certificate, holder: User, segment_name: str) -> None:
+def _sync_issue(
+    db: Session,
+    certificate: Certificate,
+    holder: User,
+    segment_name: str,
+) -> None:
+    from bonus.sheets_queue import enqueue_certificate_ids
     from bonus.sheets_sync import sync_certificate_issued
 
-    sync_certificate_issued(certificate, holder, segment_name=segment_name.strip())
+    ok = sync_certificate_issued(certificate, holder, segment_name=segment_name.strip())
+    if not ok:
+        enqueue_certificate_ids(db, [certificate.id])
     _sync_wallet(certificate, holder, expired=False)
 
 
@@ -1222,35 +1234,11 @@ def push_certificate_to_sheets(db: Session, certificate: Certificate) -> None:
     _sync_usage(db, certificate)
 
 
-def push_certificates_issued_batch(
-    db: Session,
-    certificate_ids: list[int],
-) -> tuple[int, int, int]:
-    """Пакетно дописывает выпуски в Google Sheets. Возвращает (written, skipped, errors)."""
-    from bonus.sheets_sync import SheetIssuedItem, sync_certificates_issued_batch
+def enqueue_certificates_for_sheets(db: Session, certificate_ids: list[int]) -> int:
+    """Ставит карты в фоновую очередь Google Sheets."""
+    from bonus.sheets_queue import enqueue_certificate_ids
 
-    if not certificate_ids:
-        return 0, 0, 0
-    certificates = db.scalars(
-        select(Certificate).where(Certificate.id.in_(certificate_ids)).order_by(Certificate.id)
-    ).all()
-    items: list[SheetIssuedItem] = []
-    for certificate in certificates:
-        holder = certificate.holder
-        if holder is None:
-            continue
-        segment_name = ""
-        if certificate.segment is not None:
-            segment_name = (certificate.segment.name or "").strip()
-        items.append(
-            SheetIssuedItem(
-                certificate=certificate,
-                holder=holder,
-                segment_name=segment_name,
-            )
-        )
-    result = sync_certificates_issued_batch(items)
-    return result.written, result.skipped, result.errors
+    return enqueue_certificate_ids(db, certificate_ids)
 
 
 def list_active_certificate_ids(db: Session) -> list[int]:

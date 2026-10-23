@@ -203,6 +203,27 @@ class AppSettings(Base):
     wallet_buttons_enabled: Mapped[bool] = mapped_column(default=False)
 
 
+class SheetsSyncJob(Base):
+    """Очередь дозаписи сертификата в Google Sheets (чтобы не упираться в квоту)."""
+
+    __tablename__ = "sheets_sync_jobs"
+    __table_args__ = (UniqueConstraint("certificate_id", name="uq_sheets_job_cert"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    certificate_id: Mapped[int] = mapped_column(ForeignKey("certificates.id"), index=True)
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: _utcnow(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: _utcnow(),
+    )
+
+
 class Transaction(Base):
     """Одна операция по сертификату. Суммы хранятся в копейках."""
 

@@ -51,14 +51,14 @@ def sync_certificate_issued(
     holder: User,
     *,
     segment_name: str = "",
-) -> None:
+) -> bool:
     """Добавляет строку карты на нужный лист сразу после выпуска (без дублей)."""
     if not sheets_enabled():
         logger.warning(
             "Google Sheets: выпуск %s не записан — нет spreadsheet id или ключа SA",
             certificate.public_number,
         )
-        return
+        return False
     try:
         kind = parse_ledger_sheet(certificate.ledger_sheet)
         worksheet = _worksheet(kind)
@@ -91,6 +91,7 @@ def sync_certificate_issued(
             worksheet.title,
             row_index,
         )
+        return True
     except Exception as exc:
         logger.exception(
             "Google Sheets: не удалось записать выпуск %s (%s). %s",
@@ -98,6 +99,7 @@ def sync_certificate_issued(
             exc,
             _permission_hint() if _is_permission_error(exc) else "",
         )
+        return False
 
 
 @dataclass(frozen=True)
@@ -116,6 +118,8 @@ class SheetBatchResult:
     written: int = 0
     skipped: int = 0
     errors: int = 0
+    ok_ids: tuple[int, ...] = ()
+    failed_ids: tuple[int, ...] = ()
 
 
 def sync_certificates_issued_batch(items: list[SheetIssuedItem]) -> SheetBatchResult:
@@ -131,16 +135,22 @@ def sync_certificates_issued_batch(items: list[SheetIssuedItem]) -> SheetBatchRe
             "Google Sheets: пакет из %s карт не записан — нет spreadsheet id или ключа SA",
             len(items),
         )
-        return SheetBatchResult(errors=len(items))
+        return SheetBatchResult(
+            errors=len(items),
+            failed_ids=tuple(item.certificate.id for item in items),
+        )
     written = 0
     skipped = 0
     errors = 0
+    ok_ids: list[int] = []
+    failed_ids: list[int] = []
     grouped: dict[LedgerSheet, list[SheetIssuedItem]] = {}
     for item in items:
         try:
             kind = parse_ledger_sheet(item.certificate.ledger_sheet)
         except Exception:
             errors += 1
+            failed_ids.append(item.certificate.id)
             logger.exception(
                 "Google Sheets: неизвестный лист учёта у %s",
                 item.certificate.public_number,
@@ -149,12 +159,13 @@ def sync_certificates_issued_batch(items: list[SheetIssuedItem]) -> SheetBatchRe
         grouped.setdefault(kind, []).append(item)
     for kind, group in grouped.items():
         try:
-            ok, skip, fail = _append_issued_group(kind, group)
+            ok, skip, done_ids = _append_issued_group(kind, group)
             written += ok
             skipped += skip
-            errors += fail
+            ok_ids.extend(done_ids)
         except Exception as exc:
             errors += len(group)
+            failed_ids.extend(item.certificate.id for item in group)
             logger.exception(
                 "Google Sheets: пакет на лист «%s» не записан (%s). %s",
                 ledger_title(kind),
@@ -167,14 +178,20 @@ def sync_certificates_issued_batch(items: list[SheetIssuedItem]) -> SheetBatchRe
         skipped,
         errors,
     )
-    return SheetBatchResult(written=written, skipped=skipped, errors=errors)
+    return SheetBatchResult(
+        written=written,
+        skipped=skipped,
+        errors=errors,
+        ok_ids=tuple(ok_ids),
+        failed_ids=tuple(failed_ids),
+    )
 
 
 def _append_issued_group(
     kind: LedgerSheet,
     group: list[SheetIssuedItem],
-) -> tuple[int, int, int]:
-    """Дописывает карты одного листа пачками; возвращает (written, skipped, errors)."""
+) -> tuple[int, int, list[int]]:
+    """Дописывает карты одного листа пачками; возвращает (written, skipped, ok_ids)."""
     import time
 
     worksheet = _worksheet(kind)
@@ -185,10 +202,12 @@ def _append_issued_group(
     }
     rows: list[list[str]] = []
     skipped = 0
+    ok_ids: list[int] = []
     for item in group:
         number = _normalize_card_number(item.certificate.public_number)
         if number in existing:
             skipped += 1
+            ok_ids.append(item.certificate.id)
             continue
         rows.append(
             _issue_row(
@@ -199,8 +218,9 @@ def _append_issued_group(
             )
         )
         existing.add(number)
+        ok_ids.append(item.certificate.id)
     written = 0
-    chunk_size = 100
+    chunk_size = 40
     for start in range(0, len(rows), chunk_size):
         chunk = rows[start : start + chunk_size]
         if not chunk:
@@ -208,8 +228,8 @@ def _append_issued_group(
         worksheet.append_rows(chunk, value_input_option="USER_ENTERED", table_range="A1")
         written += len(chunk)
         if start + chunk_size < len(rows):
-            time.sleep(1.2)
-    return written, skipped, 0
+            time.sleep(2.0)
+    return written, skipped, ok_ids
 
 
 def sync_certificate_usage(
@@ -625,11 +645,31 @@ def log_sheets_status() -> None:
         )
 
 
+def sheets_credentials_error() -> str:
+    """Пусто, если ключ SA читается; иначе текст ошибки для UI/логов."""
+    settings = get_settings()
+    if not settings.google_sheets_spreadsheet_id.strip():
+        return "Не задан GOOGLE_SHEETS_SPREADSHEET_ID"
+    if not _has_credentials(settings):
+        return "Не задан GOOGLE_SERVICE_ACCOUNT_JSON / FILE"
+    try:
+        _service_account_info(settings)
+    except Exception as exc:
+        return str(exc)
+    return ""
+
+
 def _parse_service_account_json(raw: str) -> dict[str, Any]:
-    """Разбирает JSON ключа; терпит кавычки и \\n из панелей хостинга."""
+    """Разбирает JSON ключа; терпит кавычки, сырые переносы PEM и \\n из панелей."""
     text = _normalize_service_account_json_text(raw)
     last_error: json.JSONDecodeError | None = None
-    for candidate in (text, _unescape_env_json_whitespace(text)):
+    candidates = (
+        text,
+        _unescape_env_json_whitespace(text),
+        _escape_raw_controls_in_json_strings(text),
+        _escape_raw_controls_in_json_strings(_unescape_env_json_whitespace(text)),
+    )
+    for candidate in candidates:
         try:
             data = json.loads(candidate)
         except json.JSONDecodeError as exc:
@@ -654,6 +694,45 @@ def _normalize_service_account_json_text(raw: str) -> str:
     if start >= 0 and end > start:
         return text[start : end + 1]
     return text
+
+
+def _escape_raw_controls_in_json_strings(text: str) -> str:
+    """Экранирует сырые \\n/\\r/\\t внутри JSON-строк (Timeweb ломает private_key)."""
+    out: list[str] = []
+    in_string = False
+    escape = False
+    for char in text:
+        if in_string:
+            if escape:
+                out.append(char)
+                escape = False
+                continue
+            if char == "\\":
+                out.append(char)
+                escape = True
+                continue
+            if char == '"':
+                out.append(char)
+                in_string = False
+                continue
+            if char == "\n":
+                out.append("\\n")
+                continue
+            if char == "\r":
+                out.append("\\r")
+                continue
+            if char == "\t":
+                out.append("\\t")
+                continue
+            if ord(char) < 32:
+                out.append(f"\\u{ord(char):04x}")
+                continue
+            out.append(char)
+            continue
+        if char == '"':
+            in_string = True
+        out.append(char)
+    return "".join(out)
 
 
 def _unescape_env_json_whitespace(text: str) -> str:

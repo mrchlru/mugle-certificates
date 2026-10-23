@@ -4,7 +4,7 @@ import json
 from collections.abc import Iterator
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
-from fastapi.responses import RedirectResponse, Response, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 from bonus.catalog import (
@@ -61,10 +61,10 @@ from bonus.services import (
     credit_certificate,
     delete_certificate,
     issue_certificate,
+    enqueue_certificates_for_sheets,
     list_active_certificate_ids,
     normalize_discount,
     push_certificate_to_sheets,
-    push_certificates_issued_batch,
     set_blocked,
     set_certificate_expiry,
     set_user_active,
@@ -255,11 +255,16 @@ def settings_page(
     user: User = Depends(require(Role.admin)),
 ):
     """Настройки главного администратора: кошельки и импорт."""
+    from bonus.sheets_queue import queue_stats
+    from bonus.sheets_sync import sheets_credentials_error
+
     return render(
         request,
         "hr_settings.html",
         section="settings",
         wallet_buttons_enabled=wallet_buttons_enabled(db),
+        sheets_queue=queue_stats(db),
+        sheets_credentials_error=sheets_credentials_error(),
     )
 
 
@@ -332,25 +337,10 @@ async def settings_import(
                 },
                 ensure_ascii=False,
             ) + "\n"
-        sheets_written = 0
-        sheets_skipped = 0
-        sheets_errors = 0
+        queued = enqueue_certificates_for_sheets(db, issued_ids) if issued_ids else 0
         if issued_ids:
             yield json.dumps(
-                {"type": "sheets", "phase": "start", "total": len(issued_ids)},
-                ensure_ascii=False,
-            ) + "\n"
-            sheets_written, sheets_skipped, sheets_errors = push_certificates_issued_batch(
-                db, issued_ids
-            )
-            yield json.dumps(
-                {
-                    "type": "sheets",
-                    "phase": "done",
-                    "written": sheets_written,
-                    "skipped": sheets_skipped,
-                    "errors": sheets_errors,
-                },
+                {"type": "sheets", "phase": "queued", "queued": queued, "total": len(issued_ids)},
                 ensure_ascii=False,
             ) + "\n"
         write_audit(
@@ -359,7 +349,7 @@ async def settings_import(
             action=AuditAction.import_rows,
             summary=(
                 f"Импорт (настройки): успешно {ok_count} из {total}; "
-                f"Sheets +{sheets_written}"
+                f"Sheets очередь +{queued}"
             ),
             target_type="import",
             detail=table.filename or "",
@@ -370,9 +360,7 @@ async def settings_import(
                 "ok": ok_count,
                 "fail": fail_count,
                 "total": total,
-                "sheets_written": sheets_written,
-                "sheets_skipped": sheets_skipped,
-                "sheets_errors": sheets_errors,
+                "sheets_queued": queued,
             },
             ensure_ascii=False,
         ) + "\n"
@@ -387,70 +375,75 @@ def settings_sheets_sync(
     user: User = Depends(require(Role.admin)),
     csrf_token: str = Form(""),
 ):
-    """Досинхронизирует активные сертификаты в Google Таблицу пакетами."""
+    """Ставит активные сертификаты в фоновую очередь Google Sheets."""
+    from bonus.sheets_queue import queue_stats
+    from bonus.sheets_sync import sheets_credentials_error
+
     try:
         guard_csrf(request, csrf_token)
     except BonusError as exc:
-        return StreamingResponse(
-            iter([json.dumps({"type": "error", "message": exc.message}, ensure_ascii=False) + "\n"]),
-            media_type="application/x-ndjson",
-        )
+        return JSONResponse({"ok": False, "message": exc.message}, status_code=400)
 
-    def generate() -> Iterator[str]:
-        ids = list_active_certificate_ids(db)
-        total = len(ids)
-        yield json.dumps({"type": "start", "total": total}, ensure_ascii=False) + "\n"
-        if total == 0:
-            yield json.dumps(
-                {"type": "done", "written": 0, "skipped": 0, "errors": 0, "total": 0},
-                ensure_ascii=False,
-            ) + "\n"
-            return
-        chunk_size = 150
-        written = 0
-        skipped = 0
-        errors = 0
-        for start in range(0, total, chunk_size):
-            chunk = ids[start : start + chunk_size]
-            w, s, e = push_certificates_issued_batch(db, chunk)
-            written += w
-            skipped += s
-            errors += e
-            done = min(start + chunk_size, total)
-            yield json.dumps(
-                {
-                    "type": "progress",
-                    "done": done,
-                    "total": total,
-                    "written": written,
-                    "skipped": skipped,
-                    "errors": errors,
-                },
-                ensure_ascii=False,
-            ) + "\n"
-        write_audit(
-            db,
-            actor=user,
-            action=AuditAction.import_rows,
-            summary=(
-                f"Sheets sync: +{written}, уже были {skipped}, ошибок {errors} "
-                f"из {total} активных"
-            ),
-            target_type="sheets",
-            detail="settings_sheets_sync",
-        )
-        yield json.dumps(
+    cred_error = sheets_credentials_error()
+    if cred_error:
+        return JSONResponse(
             {
-                "type": "done",
-                "written": written,
-                "skipped": skipped,
-                "errors": errors,
-                "total": total,
+                "ok": False,
+                "message": (
+                    "Ключ Google не читается: "
+                    f"{cred_error}. Исправьте GOOGLE_SERVICE_ACCOUNT_JSON в Timeweb "
+                    "(компактный JSON одной строкой) и нажмите снова."
+                ),
             },
-            ensure_ascii=False,
-        ) + "\n"
+            status_code=400,
+        )
 
-    return StreamingResponse(generate(), media_type="application/x-ndjson")
+    ids = list_active_certificate_ids(db)
+    queued = enqueue_certificates_for_sheets(db, ids)
+    stats = queue_stats(db)
+    write_audit(
+        db,
+        actor=user,
+        action=AuditAction.import_rows,
+        summary=f"Sheets очередь: поставлено {queued} из {len(ids)} активных",
+        target_type="sheets",
+        detail="settings_sheets_sync",
+    )
+    return JSONResponse(
+        {
+            "ok": True,
+            "queued": queued,
+            "total": len(ids),
+            "pending": stats["pending"],
+            "done": stats["done"],
+            "failed": stats["failed"],
+            "message": (
+                f"В очередь: {queued}. Фоновый воркер дописывает пачками "
+                f"(сейчас pending {stats['pending']})."
+            ),
+        }
+    )
+
+
+@router.get("/hr/settings/sheets-queue")
+def settings_sheets_queue_status(
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin)),
+):
+    """Статус фоновой очереди Google Sheets для опроса UI."""
+    from bonus.sheets_queue import queue_stats
+    from bonus.sheets_sync import sheets_credentials_error
+
+    stats = queue_stats(db)
+    return JSONResponse(
+        {
+            "ok": True,
+            "pending": stats["pending"],
+            "done": stats["done"],
+            "failed": stats["failed"],
+            "credentials_error": sheets_credentials_error(),
+        }
+    )
 
 
 @router.post("/hr/design/segments")
