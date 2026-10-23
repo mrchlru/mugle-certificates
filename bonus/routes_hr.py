@@ -1,7 +1,10 @@
 """Кабинет HR: сводка, выпуск, импорт и журнал."""
 
+import json
+from collections.abc import Iterator
+
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import RedirectResponse, Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 from bonus.catalog import (
@@ -92,6 +95,7 @@ def dashboard(
         query=q,
         segment_id=segment_id or 0,
         segments=list_segments(db),
+        card_base=public_base(request),
     )
 
 
@@ -239,12 +243,26 @@ def design_page(request: Request, db: Session = Depends(get_db), user: User = De
         weekday_choices=WEEKDAY_CHOICES,
         colors=CARD_COLORS,
         media_on_s3=s3_enabled(),
+    )
+
+
+@router.get("/hr/settings")
+def settings_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin)),
+):
+    """Настройки главного администратора: кошельки и импорт."""
+    return render(
+        request,
+        "hr_settings.html",
+        section="settings",
         wallet_buttons_enabled=wallet_buttons_enabled(db),
     )
 
 
-@router.post("/hr/design/wallet-buttons")
-def design_wallet_buttons(
+@router.post("/hr/settings/wallet-buttons")
+def settings_wallet_buttons(
     request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(require(Role.admin)),
@@ -262,7 +280,67 @@ def design_wallet_buttons(
             request,
             "Кнопки кошелька включены" if enabled == "1" else "Кнопки кошелька скрыты",
         )
-    return RedirectResponse("/hr/design", status_code=303)
+    return RedirectResponse("/hr/settings", status_code=303)
+
+
+@router.post("/hr/settings/import")
+async def settings_import(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin)),
+    table: UploadFile = File(...),
+    csrf_token: str = Form(""),
+):
+    """Потоковый импорт бартера и дней рождения с прогрессом по строкам."""
+    try:
+        guard_csrf(request, csrf_token)
+        payload = await table.read()
+        parsed = parse_table(table.filename or "import.xlsx", payload)
+    except BonusError as exc:
+        return StreamingResponse(
+            iter([json.dumps({"type": "error", "message": exc.message}, ensure_ascii=False) + "\n"]),
+            media_type="application/x-ndjson",
+        )
+
+    base = public_base(request)
+
+    def generate() -> Iterator[str]:
+        total = len(parsed)
+        yield json.dumps({"type": "start", "total": total}, ensure_ascii=False) + "\n"
+        ok_count = 0
+        fail_count = 0
+        for row in parsed:
+            result = _import_row(db, user, row, base, None)
+            if result.ok:
+                ok_count += 1
+            else:
+                fail_count += 1
+            yield json.dumps(
+                {
+                    "type": "row",
+                    "row": result.row_number,
+                    "ok": result.ok,
+                    "message": result.message,
+                    "public_number": result.public_number,
+                    "link": result.link,
+                    "total": total,
+                },
+                ensure_ascii=False,
+            ) + "\n"
+        write_audit(
+            db,
+            actor=user,
+            action=AuditAction.import_rows,
+            summary=f"Импорт (настройки): успешно {ok_count} из {total}",
+            target_type="import",
+            detail=table.filename or "",
+        )
+        yield json.dumps(
+            {"type": "done", "ok": ok_count, "fail": fail_count, "total": total},
+            ensure_ascii=False,
+        ) + "\n"
+
+    return StreamingResponse(generate(), media_type="application/x-ndjson")
 
 
 @router.post("/hr/design/segments")
@@ -1028,25 +1106,56 @@ def _import_row(
     base_url: str,
     template_id: int | None,
 ) -> ImportRowResult:
-    """Выпускает одну строку импорта с общим шаблоном оформления."""
+    """Выпускает одну строку импорта (общий шаблон или из колонки «Шаблон баннера»)."""
     if row.draft is None:
         return ImportRowResult(row_number=row.row_number, ok=False, message=row.error)
     try:
-        segment_id = _segment_id_by_name(db, row.draft.segment_name)
-        discount = row.draft.discount_percent
-        one_shot = row.draft.single_use
+        from bonus.ledger import ledger_needs_birth_date, parse_ledger_sheet
+        from bonus.models import CardTemplate
+
+        draft0 = row.draft
+        if not (draft0.company or "").strip():
+            raise BonusError("Укажите ООО")
+        if not (draft0.department or "").strip():
+            raise BonusError("Укажите ресторан или офис")
+        if not (draft0.job_title or "").strip():
+            raise BonusError("Укажите должность")
+        try:
+            sheet = parse_ledger_sheet(draft0.ledger_sheet or "employee")
+        except ValueError as exc:
+            raise BonusError(str(exc)) from exc
+        if ledger_needs_birth_date(sheet) and draft0.birth_date is None:
+            raise BonusError("Укажите дату рождения")
+        segment_id = _segment_id_by_name(db, draft0.segment_name)
+        resolved_template_id = template_id
+        color = draft0.color or "#00A8A8"
+        discount = draft0.discount_percent
+        one_shot = draft0.single_use
+        if resolved_template_id is None and (draft0.template_name or "").strip():
+            resolved_template_id = _template_id_by_name(db, draft0.template_name)
         if segment_id is not None:
             segment = db.get(Segment, segment_id)
             if segment is not None:
                 if discount == 0 and segment.discount_percent:
                     discount = segment.discount_percent
-                one_shot = segment.single_use
+                one_shot = segment.single_use or one_shot
+                if segment.requires_expiry and draft0.expires_on is None:
+                    raise BonusError("Укажите срок действия для этого сегмента")
+        if resolved_template_id is not None:
+            template = db.get(CardTemplate, resolved_template_id)
+            if template is not None:
+                if template.color:
+                    color = template.color
+                if discount == 0 and template.discount_percent:
+                    discount = template.discount_percent
         draft = replace(
-            row.draft,
+            draft0,
             segment_id=segment_id,
-            template_id=template_id,
+            template_id=resolved_template_id,
             discount_percent=discount,
-            single_use=one_shot,
+            single_use=one_shot or ledger_is_single_use(sheet),
+            color=normalize_color(color),
+            ledger_sheet=sheet.value,
         )
         issued = issue_certificate(db, draft, actor)
     except BonusError as exc:
@@ -1065,7 +1174,7 @@ def _import_row(
 def _segment_id_by_name(db: Session, name: str) -> int | None:
     cleaned = " ".join(name.split())
     if cleaned == "":
-        return None
+        raise BonusError("Укажите сегмент")
     found = db.scalar(select(Segment).where(Segment.name == cleaned))
     if found is None:
         found = db.scalar(select(Segment).where(Segment.name.ilike(cleaned)))
@@ -1073,4 +1182,25 @@ def _segment_id_by_name(db: Session, name: str) -> int | None:
         raise BonusError(f"Сегмент «{cleaned}» не найден")
     if not found.is_active:
         raise BonusError(f"Сегмент «{cleaned}» скрыт")
+    return found.id
+
+
+def _template_id_by_name(db: Session, name: str) -> int | None:
+    from bonus.models import CardTemplate
+
+    cleaned = " ".join(name.split())
+    if cleaned == "":
+        return None
+    found = db.scalar(
+        select(CardTemplate).where(CardTemplate.name == cleaned, CardTemplate.is_active.is_(True))
+    )
+    if found is None:
+        found = db.scalar(
+            select(CardTemplate).where(
+                CardTemplate.name.ilike(cleaned),
+                CardTemplate.is_active.is_(True),
+            )
+        )
+    if found is None:
+        raise BonusError(f"Шаблон «{cleaned}» не найден")
     return found.id

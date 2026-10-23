@@ -1,70 +1,117 @@
-"""Чтение Excel и CSV со старыми сертификатами."""
+"""Чтение Excel и CSV со старыми сертификатами и таблицей импорта бартер/ДР."""
 
 import csv
 import io
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.utils import get_column_letter
 
+from bonus.ledger import LedgerSheet
 from bonus.services import BonusError, IssueDraft, normalize_discount
 from bonus.values import MoneyError, parse_date, parse_money
 
 _ALIASES: dict[str, set[str]] = {
-    "full_name": {"фио", "ф.и.о.", "имя", "сотрудник", "fullname", "full_name", "name", "фио сотрудника"},
+    "full_name": {
+        "фио",
+        "ф.и.о.",
+        "имя",
+        "сотрудник",
+        "fullname",
+        "full_name",
+        "name",
+        "фио сотрудника",
+    },
     "login": {"логин", "login", "user"},
     "password": {"пароль", "password", "pass"},
     "nominal": {"номинал", "сумма", "nominal", "выдано", "сумма сертификата", "лимит"},
     "balance": {"остаток", "баланс", "balance", "осталось"},
     "note": {"комментарий", "примечание", "note", "коммент"},
-    "expires": {"срок", "действует до", "expires", "дата", "годен до"},
-    "department": {"отдел", "department", "подразделение"},
+    "expires": {
+        "срок",
+        "действует до",
+        "expires",
+        "годен до",
+        "срок действия",
+        "срок действия до",
+    },
+    "department": {
+        "отдел",
+        "department",
+        "подразделение",
+        "ресторан / офис",
+        "ресторан/офис",
+        "ресторан",
+    },
     "job_title": {"должность", "job_title", "позиция", "position", "роль"},
     "phone": {"телефон", "phone", "тел", "мобильный"},
     "discount": {"процент", "скидка", "discount", "%", "процент на карточке"},
     "segment": {"сегмент", "segment", "тип", "тип сертификата"},
+    "company": {"ооо", "company", "юрлицо", "организация"},
+    "birth_date": {"дата рождения", "др", "birth_date", "birthday", "день рождения"},
+    "ledger": {"лист учёта", "лист учета", "лист", "ledger", "ledger_sheet"},
+    "template": {"шаблон баннера", "шаблон", "баннер", "template", "оформление"},
+}
+
+_LEDGER_ALIASES: dict[str, str] = {
+    "бартер": LedgerSheet.barter.value,
+    "barter": LedgerSheet.barter.value,
+    "дни рождения": LedgerSheet.birthday.value,
+    "день рождения": LedgerSheet.birthday.value,
+    "birthday": LedgerSheet.birthday.value,
+    "подарочные на день рождения": LedgerSheet.gift_birthday.value,
+    "подарочные на др": LedgerSheet.gift_birthday.value,
+    "gift_birthday": LedgerSheet.gift_birthday.value,
+    "спасибо": LedgerSheet.thanks.value,
+    "thanks": LedgerSheet.thanks.value,
+    "карты сотрудников": LedgerSheet.employee.value,
+    "карта сотрудников": LedgerSheet.employee.value,
+    "employee": LedgerSheet.employee.value,
 }
 
 _SAMPLE_HEADERS: tuple[str, ...] = (
+    "Лист учёта",
     "ФИО",
-    "Отдел",
+    "ООО",
+    "Ресторан / офис",
     "Должность",
-    "Телефон",
-    "Номинал",
-    "Процент",
+    "Дата рождения",
     "Сегмент",
+    "Срок действия",
+    "Номинал",
+    "Шаблон баннера",
     "Комментарий",
-    "Срок",
-    "Остаток",
 )
 
-_SAMPLE_WIDTHS: tuple[int, ...] = (22, 14, 16, 18, 12, 10, 26, 16, 14, 12)
+_SAMPLE_WIDTHS: tuple[int, ...] = (14, 22, 14, 16, 18, 14, 26, 14, 12, 22, 28)
 
 _SAMPLE_ROWS: tuple[tuple[object, ...], ...] = (
     (
+        "Бартер",
         "Иванов Иван",
-        "Офис",
-        "Менеджер",
-        "+7 900 111-22-33",
-        10000,
-        30,
-        "Ежемесячные бонусы",
-        "Офис",
-        "31.12.2026",
+        "МУГЛЕ",
+        "ХВВ",
+        "Бартер",
         "",
+        "Бартер на все рестораны",
+        "31.12.2026",
+        10000,
+        "Бартер",
+        "Тестовая строка",
     ),
     (
+        "Дни рождения",
         "Петрова Анна",
-        "Кухня",
-        "Повар",
-        "+7 900 222-33-44",
-        5000,
+        "ТИРАМИСУ",
+        "ХВВ Ленина",
+        "Официант",
+        "15.05.1995",
+        "День рождения",
         "",
-        "Ланч",
-        "Кухня",
+        3000,
+        "День рождения",
         "",
-        3500,
     ),
 )
 
@@ -96,7 +143,7 @@ def build_sample_workbook() -> bytes:
     workbook = Workbook()
     sheet = workbook.active
     assert sheet is not None
-    sheet.title = "sertifikaty"
+    sheet.title = "Импорт"
     sheet.append(list(_SAMPLE_HEADERS))
     for row in _SAMPLE_ROWS:
         sheet.append(list(row))
@@ -109,8 +156,8 @@ def build_sample_workbook() -> bytes:
 
 def parse_table(filename: str, payload: bytes) -> list[ParsedRow]:
     """Разбирает xlsx или csv в черновики сертификатов."""
-    if len(payload) > 5_000_000:
-        raise BonusError("Файл больше 5 МБ")
+    if len(payload) > 8_000_000:
+        raise BonusError("Файл больше 8 МБ")
     if filename.lower().endswith(".xlsx"):
         grid = _read_xlsx(payload)
     else:
@@ -138,10 +185,19 @@ def _read_xlsx(payload: bytes) -> list[tuple[object, ...]]:
         workbook = load_workbook(io.BytesIO(payload), read_only=True, data_only=True)
     except Exception as exc:
         raise BonusError("Не удалось открыть Excel-файл") from exc
-    sheet = workbook.active
+    sheet = _pick_import_sheet(workbook)
     if sheet is None:
         raise BonusError("В книге нет листа")
     return [tuple(row) for row in sheet.iter_rows(values_only=True)]
+
+
+def _pick_import_sheet(workbook: object):
+    """Берёт лист «Импорт», иначе активный."""
+    names = getattr(workbook, "sheetnames", []) or []
+    for name in names:
+        if str(name).strip().casefold() == "импорт":
+            return workbook[name]  # type: ignore[index]
+    return getattr(workbook, "active", None)
 
 
 def _read_csv(payload: bytes) -> list[tuple[object, ...]]:
@@ -196,24 +252,59 @@ def _draft_from_cells(cells: tuple[object, ...], header: dict[str, int]) -> Issu
     try:
         nominal = parse_money(_cell(cells, header, "nominal"), blank_as_none=True)
         balance = parse_money(_cell(cells, header, "balance"), blank_as_none=True)
-        expires = parse_date(_cell(cells, header, "expires"))
+        expires = _as_date(_cell(cells, header, "expires"))
+        birth = _as_date(_cell(cells, header, "birth_date"))
         discount = _parse_discount(_cell(cells, header, "discount"))
     except MoneyError as exc:
         raise BonusError(exc.message) from exc
+    full_name = str(_cell(cells, header, "full_name") or "").strip()
+    if len(" ".join(full_name.split())) < 2:
+        raise BonusError("Укажите ФИО")
+    if nominal is None or nominal <= 0:
+        raise BonusError("Укажите номинал")
+    ledger_raw = str(_cell(cells, header, "ledger") or "").strip()
+    ledger_sheet = _parse_ledger_label(ledger_raw) if ledger_raw else LedgerSheet.employee.value
     return IssueDraft(
-        full_name=str(_cell(cells, header, "full_name") or "").strip(),
+        full_name=full_name,
         login=str(_cell(cells, header, "login") or "").strip(),
         password=str(_cell(cells, header, "password") or "").strip(),
-        nominal=0 if nominal is None else nominal,
+        nominal=nominal,
         balance=balance,
         note=str(_cell(cells, header, "note") or "").strip(),
-        expires_on=expires if isinstance(expires, date) or expires is None else None,
+        expires_on=expires,
         department=str(_cell(cells, header, "department") or "").strip(),
         job_title=str(_cell(cells, header, "job_title") or "").strip(),
         phone=str(_cell(cells, header, "phone") or "").strip(),
         discount_percent=discount,
         segment_name=str(_cell(cells, header, "segment") or "").strip(),
+        company=str(_cell(cells, header, "company") or "").strip(),
+        birth_date=birth,
+        ledger_sheet=ledger_sheet,
+        template_name=str(_cell(cells, header, "template") or "").strip(),
     )
+
+
+def _parse_ledger_label(raw: str) -> str:
+    key = " ".join(raw.casefold().split())
+    if key in _LEDGER_ALIASES:
+        return _LEDGER_ALIASES[key]
+    try:
+        return LedgerSheet(raw.strip()).value
+    except ValueError as exc:
+        raise BonusError(f"Неизвестный лист учёта «{raw}»") from exc
+
+
+def _as_date(raw: object) -> date | None:
+    if raw is None or str(raw).strip() == "":
+        return None
+    if isinstance(raw, datetime):
+        return raw.date()
+    if isinstance(raw, date):
+        return raw
+    parsed = parse_date(raw)
+    if isinstance(parsed, date):
+        return parsed
+    return None
 
 
 def _parse_discount(raw: object) -> int:

@@ -43,6 +43,7 @@
         <th>Сегмент</th>
         <th>Остаток</th>
         <th>Статус</th>
+        <th>Ссылка</th>
       </tr>
     </thead>
     <tbody>
@@ -63,6 +64,9 @@
         <td>{{ card.segment_name or "—" }}</td>
         <td>{{ card.balance|money }}</td>
         <td>{{ status_label(card.status, card.balance, card.expires_on, card.single_use) }}</td>
+        <td>
+          <button class="text-link" type="button" data-copy="{{ card_base }}/c/{{ card.token }}">Копировать</button>
+        </td>
       </tr>
       {% endfor %}
     </tbody>

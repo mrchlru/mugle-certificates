@@ -57,6 +57,7 @@ class IssueDraft:
     company: str = ""
     birth_date: date | None = None
     show_wallet_buttons: bool = False
+    template_name: str = ""
 
 
 def issue_certificate(db: Session, draft: IssueDraft, actor: User | None) -> IssuedCertificate:

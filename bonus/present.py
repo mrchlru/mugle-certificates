@@ -44,6 +44,7 @@ class CardView:
     id: int
     public_number: str
     short_code: str
+    token: str
     balance: int
     nominal: int
     note: str
@@ -506,6 +507,7 @@ def _card_view(
         id=certificate.id,
         public_number=certificate.public_number,
         short_code=certificate.short_code,
+        token=certificate.token,
         balance=certificate.balance,
         nominal=certificate.nominal,
         note=certificate.note,
@@ -584,6 +586,7 @@ def preview_birthday_card(db: Session, segment: Segment) -> CardView:
         id=0,
         public_number="TB-PREVIEW",
         short_code=short_code,
+        token="preview",
         balance=300000,
         nominal=300000,
         note="",

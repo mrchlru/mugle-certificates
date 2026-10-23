@@ -46,8 +46,12 @@ function bindCopy() {
   document.querySelectorAll("[data-copy]").forEach(function (button) {
     button.addEventListener("click", function () {
       const value = button.getAttribute("data-copy") || "";
+      const original = button.textContent;
       navigator.clipboard.writeText(value).then(function () {
         button.textContent = "Скопировано";
+        window.setTimeout(function () {
+          button.textContent = original;
+        }, 1500);
       });
     });
   });

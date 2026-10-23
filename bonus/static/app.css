@@ -2334,6 +2334,42 @@ body.partners-dialog-open {
   margin-bottom: 20px;
 }
 
+.import-progress {
+  margin-top: 18px;
+}
+
+.import-progress-bar {
+  height: 10px;
+  border-radius: 999px;
+  background: #ececec;
+  overflow: hidden;
+}
+
+.import-progress-bar span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: #039980;
+  transition: width 0.15s ease;
+}
+
+.import-log {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+  max-height: 280px;
+  overflow: auto;
+  font-size: 13px;
+}
+
+.import-log li {
+  padding: 4px 0;
+  border-bottom: 1px solid #eee;
+}
+
+.import-log li.is-ok { color: #0f7a5a; }
+.import-log li.is-bad { color: #b42318; }
+
 .dash-intro {
   margin-bottom: 22px;
 }

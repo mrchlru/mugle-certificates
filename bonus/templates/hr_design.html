@@ -9,24 +9,6 @@
     {% endif %}
   </header>
 
-  {% if user and user.role.value == 'admin' %}
-  <section class="design-panel design-wallet-settings">
-    <header class="design-panel-head">
-      <h2>Кошельки</h2>
-    </header>
-    <form method="post" action="/hr/design/wallet-buttons" class="design-create">
-      <input type="hidden" name="csrf_token" value="{{ csrf }}">
-      <label class="switch">
-        <input type="checkbox" name="enabled" value="1" {% if wallet_buttons_enabled|default(false) %}checked{% endif %}>
-        <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
-        <span class="switch-copy">Показывать кнопки добавления в кошелёк на картах</span>
-      </label>
-      <p class="muted design-hint">Пока выключено — кнопки Google / Apple Wallet скрыты у всех карт. Тестовую карту с кнопками можно выписать отдельно на странице «Выписать».</p>
-      <button class="btn" type="submit">Сохранить</button>
-    </form>
-  </section>
-  {% endif %}
-
   <div class="design-grid">
     <section class="design-panel">
       <header class="design-panel-head">
