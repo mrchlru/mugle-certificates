@@ -1,4 +1,4 @@
-"""Автоначисление и вечернее сгорание ежедневных бонусов."""
+"""Автоначисление и дневное сгорание ежедневных бонусов."""
 
 from __future__ import annotations
 
@@ -18,18 +18,20 @@ from bonus.weekdays import WEEKDAYS, allows_weekday
 logger = logging.getLogger("bonus.accrual")
 
 _MONTHLY_PREFIX = "Автоначисление: ежемесячно"
+_WEEKLY_PREFIX = "Автоначисление: еженедельно"
 _DAILY_PREFIX = "Автоначисление: ежедневно"
 _DAILY_BURN_PREFIX = "Сгорание остатка: ежедневно"
 
 
 def run_scheduled_accruals() -> int:
-    """Окно 04:00 — начисления; окно 23:00 — сгорание дневного остатка."""
+    """Окно 04:00 — начисления; окно 17:00 — сгорание дневного остатка."""
     db = open_session()
     try:
         now = datetime.now(MSK)
         total = 0
         if _accrual_window_open(now):
             total += apply_daily_accruals(db, now)
+            total += apply_weekly_accruals(db, now)
             total += apply_monthly_accruals(db, now)
         if _daily_burn_window_open(now):
             total += apply_daily_burns(db, now)
@@ -70,7 +72,7 @@ def apply_daily_accruals(db: Session, now: datetime | None = None) -> int:
 
 
 def apply_daily_burns(db: Session, now: datetime | None = None) -> int:
-    """В 23:00 МСК сжигает неиспользованный остаток ежедневных карт."""
+    """В 17:00 МСК сжигает неиспользованный остаток ежедневных карт."""
     moment = now or datetime.now(MSK)
     marker = _daily_burn_marker(moment)
     certificates = _daily_certificates(db)
@@ -93,6 +95,54 @@ def apply_daily_burns(db: Session, now: datetime | None = None) -> int:
         logger.info("Ежедневное сгорание %s", certificate.public_number)
     if done:
         print(f"Teams Bonus: ежедневное сгорание — {done} карт ({marker})", flush=True)
+    return done
+
+
+def apply_weekly_accruals(db: Session, now: datetime | None = None) -> int:
+    """Сбрасывает остаток и ставит номинал картам с «еженедельно», раз в ISO-неделю.
+
+    Как у ежемесячных: не накопительные, баланс обновляется к номиналу в 04:00 МСК
+    (после начала новой недели, обычно с понедельника). В неделю выпуска повторного
+    начисления нет — лимит уже выдан при выпуске.
+    """
+    moment = now or datetime.now(MSK)
+    year, week = _iso_year_week(moment)
+    marker = _weekly_marker(year, week)
+    certificates = db.scalars(
+        select(Certificate)
+        .join(Segment, Certificate.segment_id == Segment.id)
+        .where(
+            Segment.accrual_period == AccrualPeriod.weekly,
+            Segment.is_active.is_(True),
+            Certificate.status == CertificateStatus.active,
+            Certificate.nominal > 0,
+            Certificate.single_use.is_(False),
+        )
+        .order_by(Certificate.id)
+    ).all()
+    done = 0
+    for certificate in certificates:
+        if not _certificate_accepts_weekly(certificate, moment):
+            continue
+        if _has_marker(db, certificate.id, TxType.credit, marker):
+            continue
+        try:
+            reset_monthly_balance(db, certificate, marker)
+        except BonusError as exc:
+            logger.warning(
+                "Еженедельное начисление %s пропущено: %s",
+                certificate.public_number,
+                exc.message,
+            )
+            continue
+        done += 1
+        logger.info(
+            "Еженедельный сброс %s → номинал %s коп.",
+            certificate.public_number,
+            certificate.nominal,
+        )
+    if done:
+        print(f"Teams Bonus: еженедельное начисление — {done} карт ({marker})", flush=True)
     return done
 
 
@@ -143,7 +193,7 @@ def apply_monthly_accruals(db: Session, now: datetime | None = None) -> int:
 
 
 async def accrual_worker() -> None:
-    """Фоновый цикл: догон, затем сон до ближайших 04:00 или 23:00 МСК."""
+    """Фоновый цикл: догон, затем сон до ближайших 04:00 или 17:00 МСК."""
     while True:
         try:
             await asyncio.to_thread(run_scheduled_accruals)
@@ -172,21 +222,21 @@ def _daily_certificates(db: Session) -> list[Certificate]:
 
 
 def _accrual_window_open(now: datetime) -> bool:
-    """После 04:00 МСК можно (идемпотентно) начислять за сегодня / месяц."""
+    """После 04:00 МСК можно (идемпотентно) начислять за сегодня / неделю / месяц."""
     return (now.hour, now.minute, now.second) >= (4, 0, 0)
 
 
 def _daily_burn_window_open(now: datetime) -> bool:
-    """После 23:00 МСК можно (идемпотентно) сжечь дневной остаток."""
-    return (now.hour, now.minute, now.second) >= (23, 0, 0)
+    """После 17:00 МСК можно (идемпотентно) сжечь дневной остаток."""
+    return (now.hour, now.minute, now.second) >= (17, 0, 0)
 
 
 def _seconds_until_next_job() -> float:
-    """Сон до ближайших 04:00 или 23:00 Europe/Moscow."""
+    """Сон до ближайших 04:00 или 17:00 Europe/Moscow."""
     now = datetime.now(MSK)
     targets = [
         now.replace(hour=4, minute=0, second=0, microsecond=0),
-        now.replace(hour=23, minute=0, second=0, microsecond=0),
+        now.replace(hour=17, minute=0, second=0, microsecond=0),
     ]
     upcoming: list[datetime] = []
     for target in targets:
@@ -201,6 +251,10 @@ def _monthly_marker(year: int, month: int) -> str:
     return f"{_MONTHLY_PREFIX} {year:04d}-{month:02d}"
 
 
+def _weekly_marker(year: int, week: int) -> str:
+    return f"{_WEEKLY_PREFIX} {year:04d}-W{week:02d}"
+
+
 def _daily_marker(moment: datetime) -> str:
     day = moment.astimezone(MSK).date()
     return f"{_DAILY_PREFIX} {day.isoformat()}"
@@ -211,6 +265,13 @@ def _daily_burn_marker(moment: datetime) -> str:
     return f"{_DAILY_BURN_PREFIX} {day.isoformat()}"
 
 
+def _iso_year_week(moment: datetime) -> tuple[int, int]:
+    """ISO-год и номер недели (пн — начало недели)."""
+    day = moment.astimezone(MSK).date()
+    iso = day.isocalendar()
+    return int(iso.year), int(iso.week)
+
+
 def _certificate_accepts_daily(certificate: Certificate, moment: datetime) -> bool:
     """День в маске начисления, не день выпуска, не просрочена."""
     if certificate.expires_on is not None and certificate.expires_on < today_msk():
@@ -219,6 +280,18 @@ def _certificate_accepts_daily(certificate: Certificate, moment: datetime) -> bo
         return False
     created = as_utc(certificate.created_at).astimezone(MSK).date()
     if created >= moment.astimezone(MSK).date():
+        return False
+    return True
+
+
+def _certificate_accepts_weekly(certificate: Certificate, moment: datetime) -> bool:
+    """Не просрочена; в неделю выпуска автосброс не делается — лимит уже выдан при выпуске."""
+    if certificate.expires_on is not None and certificate.expires_on < today_msk():
+        return False
+    created = as_utc(certificate.created_at).astimezone(MSK)
+    created_yw = _iso_year_week(created)
+    now_yw = _iso_year_week(moment)
+    if created_yw >= now_yw:
         return False
     return True
 

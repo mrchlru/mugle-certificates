@@ -252,7 +252,7 @@ def reset_monthly_balance(db: Session, certificate: Certificate, comment: str) -
 
 
 def burn_daily_remainder(db: Session, certificate: Certificate, comment: str) -> None:
-    """Обнуляет остаток ежедневной карты в 23:00 МСК — без накопления на завтра."""
+    """Обнуляет остаток ежедневной карты в 17:00 МСК — без накопления на завтра."""
     text = comment.strip()[:300] or "Сгорание остатка: ежедневно"
     leftover = max(0, certificate.balance)
     if leftover > 0:
