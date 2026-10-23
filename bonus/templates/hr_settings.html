@@ -27,7 +27,7 @@
     <header class="design-panel-head">
       <h2>Импорт сертификатов</h2>
     </header>
-    <p class="muted design-hint">Загрузите Excel с листом «Импорт» (бартер и дни рождения). Колонки: Лист учёта, ФИО, ООО, Ресторан / офис, Должность, Дата рождения, Сегмент, Срок действия, Номинал, Шаблон баннера, Комментарий.</p>
+    <p class="muted design-hint">Загрузите Excel с листом «Импорт» (бартер и дни рождения). Колонки: Лист учёта, ФИО, ООО, Ресторан / офис, Должность, Дата рождения, Сегмент, Срок действия, Номинал, Шаблон баннера, Комментарий. После импорта карты пакетно уходят в Google Таблицу.</p>
     <form id="admin-import-form" class="design-create" enctype="multipart/form-data">
       <input type="hidden" name="csrf_token" value="{{ csrf }}">
       <label class="field">Файл Excel
@@ -45,22 +45,30 @@
       <ul id="admin-import-log" class="import-log"></ul>
     </div>
   </section>
+
+  <section class="design-panel" style="margin-top: 20px;">
+    <header class="design-panel-head">
+      <h2>Google Таблица</h2>
+    </header>
+    <p class="muted design-hint">Дозаписывает в таблицу активные сертификаты, которых ещё нет на листах учёта (бартер, дни рождения и остальные). Уже существующие номера не дублируются.</p>
+    <form id="admin-sheets-form" class="design-create">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <button class="btn" type="submit" id="admin-sheets-submit">Синхронизировать с Google Таблицей</button>
+    </form>
+    <div id="admin-sheets-progress" class="import-progress" hidden>
+      <div class="import-progress-bar"><span id="admin-sheets-bar"></span></div>
+      <p id="admin-sheets-status" class="muted">Готово</p>
+    </div>
+  </section>
 </section>
 {% endblock %}
 {% block scripts %}
 <script>
 (function () {
-  var form = document.getElementById("admin-import-form");
-  if (!form) return;
-  var submitBtn = document.getElementById("admin-import-submit");
-  var progress = document.getElementById("admin-import-progress");
-  var bar = document.getElementById("admin-import-bar");
-  var statusEl = document.getElementById("admin-import-status");
-  var logEl = document.getElementById("admin-import-log");
-  var fileInput = form.querySelector('input[type="file"]');
-  var fileName = form.querySelector("[data-empty]");
-
-  if (fileInput && fileName) {
+  function bindFileName(form) {
+    var fileInput = form.querySelector('input[type="file"]');
+    var fileName = form.querySelector("[data-empty]");
+    if (!fileInput || !fileName) return;
     fileInput.addEventListener("change", function () {
       fileName.textContent = fileInput.files && fileInput.files[0]
         ? fileInput.files[0].name
@@ -68,83 +76,171 @@
     });
   }
 
-  form.addEventListener("submit", function (event) {
-    event.preventDefault();
-    if (!fileInput || !fileInput.files || !fileInput.files[0]) return;
-    progress.hidden = false;
-    logEl.innerHTML = "";
-    bar.style.width = "0%";
-    statusEl.textContent = "Читаю файл…";
-    submitBtn.disabled = true;
-    var body = new FormData(form);
-    fetch("/hr/settings/import", { method: "POST", body: body, credentials: "same-origin" })
-      .then(function (response) {
-        if (!response.ok || !response.body) {
-          throw new Error("Не удалось начать импорт");
-        }
-        var reader = response.body.getReader();
-        var decoder = new TextDecoder();
-        var buffer = "";
-        var okCount = 0;
-        var failCount = 0;
-        function pump() {
-          return reader.read().then(function (result) {
-            if (result.done) {
-              statusEl.textContent = "Готово: успешно " + okCount + ", ошибок " + failCount;
-              submitBtn.disabled = false;
+  function readNdjson(response, onEvent) {
+    if (!response.ok || !response.body) {
+      return Promise.reject(new Error("Не удалось начать запрос"));
+    }
+    var reader = response.body.getReader();
+    var decoder = new TextDecoder();
+    var buffer = "";
+    function pump() {
+      return reader.read().then(function (result) {
+        if (result.done) return;
+        buffer += decoder.decode(result.value, { stream: true });
+        var parts = buffer.split("\n");
+        buffer = parts.pop() || "";
+        parts.forEach(function (line) {
+          line = line.trim();
+          if (!line) return;
+          var event;
+          try { event = JSON.parse(line); } catch (err) { return; }
+          onEvent(event);
+        });
+        return pump();
+      });
+    }
+    return pump();
+  }
+
+  var importForm = document.getElementById("admin-import-form");
+  if (importForm) {
+    bindFileName(importForm);
+    var submitBtn = document.getElementById("admin-import-submit");
+    var progress = document.getElementById("admin-import-progress");
+    var bar = document.getElementById("admin-import-bar");
+    var statusEl = document.getElementById("admin-import-status");
+    var logEl = document.getElementById("admin-import-log");
+    var fileInput = importForm.querySelector('input[type="file"]');
+
+    importForm.addEventListener("submit", function (event) {
+      event.preventDefault();
+      if (!fileInput || !fileInput.files || !fileInput.files[0]) return;
+      progress.hidden = false;
+      logEl.innerHTML = "";
+      bar.style.width = "0%";
+      statusEl.textContent = "Читаю файл…";
+      submitBtn.disabled = true;
+      var okCount = 0;
+      var failCount = 0;
+      fetch("/hr/settings/import", {
+        method: "POST",
+        body: new FormData(importForm),
+        credentials: "same-origin",
+      })
+        .then(function (response) {
+          return readNdjson(response, function (event) {
+            if (event.type === "start") {
+              statusEl.textContent = "Импорт: 0 из " + event.total;
+              bar.style.width = "0%";
               return;
             }
-            buffer += decoder.decode(result.value, { stream: true });
-            var parts = buffer.split("\n");
-            buffer = parts.pop() || "";
-            parts.forEach(function (line) {
-              line = line.trim();
-              if (!line) return;
-              var event;
-              try { event = JSON.parse(line); } catch (err) { return; }
-              if (event.type === "start") {
-                statusEl.textContent = "Импорт: 0 из " + event.total;
-                bar.style.width = "0%";
-                return;
+            if (event.type === "row") {
+              if (event.ok) okCount += 1; else failCount += 1;
+              var done = okCount + failCount;
+              var pct = event.total ? Math.round((done / event.total) * 80) : 0;
+              bar.style.width = pct + "%";
+              statusEl.textContent = "Импорт: " + done + " из " + event.total
+                + " · успешно " + okCount + " · ошибок " + failCount;
+              var li = document.createElement("li");
+              li.className = event.ok ? "is-ok" : "is-bad";
+              li.textContent = "Строка " + event.row + ": " + event.message
+                + (event.public_number ? " · " + event.public_number : "");
+              logEl.appendChild(li);
+              if (logEl.children.length > 200) {
+                logEl.removeChild(logEl.firstChild);
               }
-              if (event.type === "row") {
-                if (event.ok) okCount += 1; else failCount += 1;
-                var done = okCount + failCount;
-                var pct = event.total ? Math.round((done / event.total) * 100) : 0;
-                bar.style.width = pct + "%";
-                statusEl.textContent = "Импорт: " + done + " из " + event.total
-                  + " · успешно " + okCount + " · ошибок " + failCount;
-                var li = document.createElement("li");
-                li.className = event.ok ? "is-ok" : "is-bad";
-                li.textContent = "Строка " + event.row + ": " + event.message
-                  + (event.public_number ? " · " + event.public_number : "");
-                logEl.appendChild(li);
-                if (logEl.children.length > 200) {
-                  logEl.removeChild(logEl.firstChild);
-                }
-                return;
+              return;
+            }
+            if (event.type === "sheets") {
+              if (event.phase === "start") {
+                statusEl.textContent = "Пишу в Google Таблицу: " + event.total + " карт…";
+                bar.style.width = "85%";
+              } else if (event.phase === "done") {
+                statusEl.textContent = "Google Sheets: +" + event.written
+                  + (event.skipped ? ", уже были " + event.skipped : "")
+                  + (event.errors ? ", ошибок " + event.errors : "");
+                bar.style.width = "95%";
               }
-              if (event.type === "error") {
-                statusEl.textContent = event.message || "Ошибка импорта";
-                submitBtn.disabled = false;
+              return;
+            }
+            if (event.type === "error") {
+              statusEl.textContent = event.message || "Ошибка импорта";
+              submitBtn.disabled = false;
+            }
+            if (event.type === "done") {
+              var sheetsNote = "";
+              if (typeof event.sheets_written === "number") {
+                sheetsNote = " · Sheets +" + event.sheets_written;
+                if (event.sheets_errors) sheetsNote += ", ошибок " + event.sheets_errors;
               }
-              if (event.type === "done") {
-                statusEl.textContent = "Готово: успешно " + event.ok + " из " + event.total
-                  + (event.fail ? ", ошибок " + event.fail : "");
-                bar.style.width = "100%";
-                submitBtn.disabled = false;
-              }
-            });
-            return pump();
+              statusEl.textContent = "Готово: успешно " + event.ok + " из " + event.total
+                + (event.fail ? ", ошибок " + event.fail : "")
+                + sheetsNote;
+              bar.style.width = "100%";
+              submitBtn.disabled = false;
+            }
           });
-        }
-        return pump();
+        })
+        .catch(function (err) {
+          statusEl.textContent = err.message || "Ошибка сети";
+          submitBtn.disabled = false;
+        });
+    });
+  }
+
+  var sheetsForm = document.getElementById("admin-sheets-form");
+  if (sheetsForm) {
+    var sheetsBtn = document.getElementById("admin-sheets-submit");
+    var sheetsProgress = document.getElementById("admin-sheets-progress");
+    var sheetsBar = document.getElementById("admin-sheets-bar");
+    var sheetsStatus = document.getElementById("admin-sheets-status");
+
+    sheetsForm.addEventListener("submit", function (event) {
+      event.preventDefault();
+      sheetsProgress.hidden = false;
+      sheetsBar.style.width = "0%";
+      sheetsStatus.textContent = "Синхронизация…";
+      sheetsBtn.disabled = true;
+      fetch("/hr/settings/sheets-sync", {
+        method: "POST",
+        body: new FormData(sheetsForm),
+        credentials: "same-origin",
       })
-      .catch(function (err) {
-        statusEl.textContent = err.message || "Ошибка сети";
-        submitBtn.disabled = false;
-      });
-  });
+        .then(function (response) {
+          return readNdjson(response, function (ev) {
+            if (ev.type === "start") {
+              sheetsStatus.textContent = "Карт к проверке: " + ev.total;
+              return;
+            }
+            if (ev.type === "progress") {
+              var pct = ev.total ? Math.round((ev.done / ev.total) * 100) : 0;
+              sheetsBar.style.width = pct + "%";
+              sheetsStatus.textContent = "Проверено " + ev.done + " из " + ev.total
+                + " · +" + ev.written
+                + (ev.skipped ? ", уже были " + ev.skipped : "")
+                + (ev.errors ? ", ошибок " + ev.errors : "");
+              return;
+            }
+            if (ev.type === "error") {
+              sheetsStatus.textContent = ev.message || "Ошибка синхронизации";
+              sheetsBtn.disabled = false;
+            }
+            if (ev.type === "done") {
+              sheetsBar.style.width = "100%";
+              sheetsStatus.textContent = "Готово: +" + ev.written
+                + (ev.skipped ? ", уже были " + ev.skipped : "")
+                + (ev.errors ? ", ошибок " + ev.errors : "")
+                + " из " + ev.total;
+              sheetsBtn.disabled = false;
+            }
+          });
+        })
+        .catch(function (err) {
+          sheetsStatus.textContent = err.message || "Ошибка сети";
+          sheetsBtn.disabled = false;
+        });
+    });
+  }
 })();
 </script>
 {% endblock %}

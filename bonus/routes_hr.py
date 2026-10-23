@@ -34,7 +34,7 @@ from dataclasses import replace
 
 from sqlalchemy import select
 
-from bonus.importer import ImportRowResult, build_sample_workbook, parse_table
+from bonus.importer import ImportRowResult, parse_table
 from bonus.storage import s3_enabled
 from bonus.models import AuditAction, CardTemplate, Role, Segment, User
 from bonus.ledger import (
@@ -61,8 +61,10 @@ from bonus.services import (
     credit_certificate,
     delete_certificate,
     issue_certificate,
+    list_active_certificate_ids,
     normalize_discount,
     push_certificate_to_sheets,
+    push_certificates_issued_batch,
     set_blocked,
     set_certificate_expiry,
     set_user_active,
@@ -309,10 +311,13 @@ async def settings_import(
         yield json.dumps({"type": "start", "total": total}, ensure_ascii=False) + "\n"
         ok_count = 0
         fail_count = 0
+        issued_ids: list[int] = []
         for row in parsed:
-            result = _import_row(db, user, row, base, None)
+            result = _import_row(db, user, row, base, None, sync_external=False)
             if result.ok:
                 ok_count += 1
+                if result.certificate_id is not None:
+                    issued_ids.append(result.certificate_id)
             else:
                 fail_count += 1
             yield json.dumps(
@@ -327,16 +332,121 @@ async def settings_import(
                 },
                 ensure_ascii=False,
             ) + "\n"
+        sheets_written = 0
+        sheets_skipped = 0
+        sheets_errors = 0
+        if issued_ids:
+            yield json.dumps(
+                {"type": "sheets", "phase": "start", "total": len(issued_ids)},
+                ensure_ascii=False,
+            ) + "\n"
+            sheets_written, sheets_skipped, sheets_errors = push_certificates_issued_batch(
+                db, issued_ids
+            )
+            yield json.dumps(
+                {
+                    "type": "sheets",
+                    "phase": "done",
+                    "written": sheets_written,
+                    "skipped": sheets_skipped,
+                    "errors": sheets_errors,
+                },
+                ensure_ascii=False,
+            ) + "\n"
         write_audit(
             db,
             actor=user,
             action=AuditAction.import_rows,
-            summary=f"Импорт (настройки): успешно {ok_count} из {total}",
+            summary=(
+                f"Импорт (настройки): успешно {ok_count} из {total}; "
+                f"Sheets +{sheets_written}"
+            ),
             target_type="import",
             detail=table.filename or "",
         )
         yield json.dumps(
-            {"type": "done", "ok": ok_count, "fail": fail_count, "total": total},
+            {
+                "type": "done",
+                "ok": ok_count,
+                "fail": fail_count,
+                "total": total,
+                "sheets_written": sheets_written,
+                "sheets_skipped": sheets_skipped,
+                "sheets_errors": sheets_errors,
+            },
+            ensure_ascii=False,
+        ) + "\n"
+
+    return StreamingResponse(generate(), media_type="application/x-ndjson")
+
+
+@router.post("/hr/settings/sheets-sync")
+def settings_sheets_sync(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin)),
+    csrf_token: str = Form(""),
+):
+    """Досинхронизирует активные сертификаты в Google Таблицу пакетами."""
+    try:
+        guard_csrf(request, csrf_token)
+    except BonusError as exc:
+        return StreamingResponse(
+            iter([json.dumps({"type": "error", "message": exc.message}, ensure_ascii=False) + "\n"]),
+            media_type="application/x-ndjson",
+        )
+
+    def generate() -> Iterator[str]:
+        ids = list_active_certificate_ids(db)
+        total = len(ids)
+        yield json.dumps({"type": "start", "total": total}, ensure_ascii=False) + "\n"
+        if total == 0:
+            yield json.dumps(
+                {"type": "done", "written": 0, "skipped": 0, "errors": 0, "total": 0},
+                ensure_ascii=False,
+            ) + "\n"
+            return
+        chunk_size = 150
+        written = 0
+        skipped = 0
+        errors = 0
+        for start in range(0, total, chunk_size):
+            chunk = ids[start : start + chunk_size]
+            w, s, e = push_certificates_issued_batch(db, chunk)
+            written += w
+            skipped += s
+            errors += e
+            done = min(start + chunk_size, total)
+            yield json.dumps(
+                {
+                    "type": "progress",
+                    "done": done,
+                    "total": total,
+                    "written": written,
+                    "skipped": skipped,
+                    "errors": errors,
+                },
+                ensure_ascii=False,
+            ) + "\n"
+        write_audit(
+            db,
+            actor=user,
+            action=AuditAction.import_rows,
+            summary=(
+                f"Sheets sync: +{written}, уже были {skipped}, ошибок {errors} "
+                f"из {total} активных"
+            ),
+            target_type="sheets",
+            detail="settings_sheets_sync",
+        )
+        yield json.dumps(
+            {
+                "type": "done",
+                "written": written,
+                "skipped": skipped,
+                "errors": errors,
+                "total": total,
+            },
             ensure_ascii=False,
         ) + "\n"
 
@@ -823,74 +933,33 @@ def ledger_page(request: Request, db: Session = Depends(get_db), user: User = De
 
 
 @router.get("/hr/import")
-def import_form(request: Request, db: Session = Depends(get_db), user: User = Depends(require(Role.admin, Role.hr, Role.hrd))):
-    """Загрузка таблицы из старого Statix Bonus."""
-    templates = list_templates(db)
-    return render(
-        request,
-        "hr_import.html",
-        section="import",
-        results=None,
-        templates=templates,
-        selected_template_id=templates[0].id if templates else 0,
-    )
+def import_form(request: Request, user: User = Depends(require(Role.admin, Role.hr, Role.hrd))):
+    """Старый раздел импорта — перенесён в Настройки."""
+    if user.role == Role.admin:
+        return RedirectResponse("/hr/settings", status_code=303)
+    flash(request, "Импорт сертификатов перенесён в Настройки (только admin).", "bad")
+    return RedirectResponse("/hr", status_code=303)
 
 
 @router.post("/hr/import")
-def import_submit(
+def import_submit_redirect(
     request: Request,
-    db: Session = Depends(get_db),
     user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
-    table: UploadFile = File(...),
-    template_id: int = Form(0),
-    csrf_token: str = Form(""),
 ):
-    """Переносит строки таблицы в сертификаты с одним общим дизайном."""
-    try:
-        guard_csrf(request, csrf_token)
-        template = resolve_template(db, template_id)
-        payload = table.file.read()
-        parsed = parse_table(table.filename or "table.csv", payload)
-    except BonusError as exc:
-        flash(request, exc.message, "bad")
-        return RedirectResponse("/hr/import", status_code=303)
-    shared_template_id = None if template is None else template.id
-    results = [
-        _import_row(db, user, row, public_base(request), shared_template_id) for row in parsed
-    ]
-    ok_count = sum(1 for item in results if item.ok)
-    write_audit(
-        db,
-        actor=user,
-        action=AuditAction.import_rows,
-        summary=f"Импорт: успешно {ok_count} из {len(results)}",
-        target_type="import",
-        detail=table.filename or "",
-    )
-    return render(
-        request,
-        "hr_import.html",
-        section="import",
-        results=results,
-        templates=list_templates(db),
-        selected_template_id=shared_template_id or 0,
-    )
+    """POST на старый импорт тоже ведёт в Настройки."""
+    return import_form(request, user)
 
 
 @router.get("/hr/import/sample.xlsx")
-def sample_xlsx(user: User = Depends(require(Role.admin, Role.hr, Role.hrd))) -> Response:
-    """Пример таблицы Excel с актуальными колонками и шириной."""
-    return Response(
-        content=build_sample_workbook(),
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=sertifikaty.xlsx"},
-    )
+def sample_xlsx(user: User = Depends(require(Role.admin))):
+    """Пример таблицы Excel — скачивать из Настроек."""
+    return RedirectResponse("/hr/settings", status_code=303)
 
 
 @router.get("/hr/import/sample.csv")
-def sample_csv(user: User = Depends(require(Role.admin, Role.hr, Role.hrd))) -> Response:
-    """Старый адрес примера — отдаём актуальный Excel."""
-    return sample_xlsx(user)
+def sample_csv(user: User = Depends(require(Role.admin))):
+    """Старый адрес примера — в Настройки."""
+    return RedirectResponse("/hr/settings", status_code=303)
 
 
 @router.get("/hr/staff")
@@ -1105,6 +1174,8 @@ def _import_row(
     row,
     base_url: str,
     template_id: int | None,
+    *,
+    sync_external: bool = True,
 ) -> ImportRowResult:
     """Выпускает одну строку импорта (общий шаблон или из колонки «Шаблон баннера»)."""
     if row.draft is None:
@@ -1157,7 +1228,7 @@ def _import_row(
             color=normalize_color(color),
             ledger_sheet=sheet.value,
         )
-        issued = issue_certificate(db, draft, actor)
+        issued = issue_certificate(db, draft, actor, sync_external=sync_external)
     except BonusError as exc:
         db.rollback()
         return ImportRowResult(row_number=row.row_number, ok=False, message=exc.message)
@@ -1168,6 +1239,7 @@ def _import_row(
         login=issued.user.login,
         public_number=issued.certificate.public_number,
         link=f"{base_url}/c/{issued.certificate.token}",
+        certificate_id=issued.certificate.id,
     )
 
 

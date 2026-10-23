@@ -100,6 +100,118 @@ def sync_certificate_issued(
         )
 
 
+@dataclass(frozen=True)
+class SheetIssuedItem:
+    """Один выпуск для пакетной записи в Google Sheets."""
+
+    certificate: Certificate
+    holder: User
+    segment_name: str = ""
+
+
+@dataclass(frozen=True)
+class SheetBatchResult:
+    """Итог пакетной синхронизации выпусков."""
+
+    written: int = 0
+    skipped: int = 0
+    errors: int = 0
+
+
+def sync_certificates_issued_batch(items: list[SheetIssuedItem]) -> SheetBatchResult:
+    """Пишет пачку выпусков пакетами append_rows — без поштучных update_cell.
+
+    Нужна при импорте: поштучная запись упирается в квоту Sheets API.
+    Уже существующие номера на листе пропускает.
+    """
+    if not items:
+        return SheetBatchResult()
+    if not sheets_enabled():
+        logger.warning(
+            "Google Sheets: пакет из %s карт не записан — нет spreadsheet id или ключа SA",
+            len(items),
+        )
+        return SheetBatchResult(errors=len(items))
+    written = 0
+    skipped = 0
+    errors = 0
+    grouped: dict[LedgerSheet, list[SheetIssuedItem]] = {}
+    for item in items:
+        try:
+            kind = parse_ledger_sheet(item.certificate.ledger_sheet)
+        except Exception:
+            errors += 1
+            logger.exception(
+                "Google Sheets: неизвестный лист учёта у %s",
+                item.certificate.public_number,
+            )
+            continue
+        grouped.setdefault(kind, []).append(item)
+    for kind, group in grouped.items():
+        try:
+            ok, skip, fail = _append_issued_group(kind, group)
+            written += ok
+            skipped += skip
+            errors += fail
+        except Exception as exc:
+            errors += len(group)
+            logger.exception(
+                "Google Sheets: пакет на лист «%s» не записан (%s). %s",
+                ledger_title(kind),
+                exc,
+                _permission_hint() if _is_permission_error(exc) else "",
+            )
+    logger.info(
+        "Google Sheets: пакет — записано %s, уже были %s, ошибок %s",
+        written,
+        skipped,
+        errors,
+    )
+    return SheetBatchResult(written=written, skipped=skipped, errors=errors)
+
+
+def _append_issued_group(
+    kind: LedgerSheet,
+    group: list[SheetIssuedItem],
+) -> tuple[int, int, int]:
+    """Дописывает карты одного листа пачками; возвращает (written, skipped, errors)."""
+    import time
+
+    worksheet = _worksheet(kind)
+    existing = {
+        _normalize_card_number(str(value))
+        for index, value in enumerate(worksheet.col_values(1), start=1)
+        if index > 1 and str(value).strip()
+    }
+    rows: list[list[str]] = []
+    skipped = 0
+    for item in group:
+        number = _normalize_card_number(item.certificate.public_number)
+        if number in existing:
+            skipped += 1
+            continue
+        rows.append(
+            _issue_row(
+                kind,
+                item.certificate,
+                item.holder,
+                segment_name=item.segment_name,
+            )
+        )
+        existing.add(number)
+    written = 0
+    chunk_size = 100
+    for start in range(0, len(rows), chunk_size):
+        chunk = rows[start : start + chunk_size]
+        if not chunk:
+            continue
+        worksheet.append_rows(chunk, value_input_option="USER_ENTERED", table_range="A1")
+        written += len(chunk)
+        if start + chunk_size < len(rows):
+            time.sleep(1.2)
+    return written, skipped, 0
+
+
 def sync_certificate_usage(
     certificate: Certificate,
     holder: User,

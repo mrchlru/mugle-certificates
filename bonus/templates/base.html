@@ -52,7 +52,6 @@
       <a href="/hr/new" {% if section == 'issue' %}class="is-on"{% endif %}>Выписать</a>
       <a href="/hr/design" {% if section == 'design' %}class="is-on"{% endif %}>Оформление</a>
       <a href="/hr/ledger" {% if section == 'ledger' %}class="is-on"{% endif %}>Журнал</a>
-      <a href="/hr/import" {% if section == 'import' %}class="is-on"{% endif %}>Импорт</a>
       {% if user and user.role.value == 'admin' %}
       <a href="/hr/settings" {% if section == 'settings' %}class="is-on"{% endif %}>Настройки</a>
       {% endif %}

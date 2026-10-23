@@ -136,6 +136,7 @@ class ImportRowResult:
     password: str = ""
     public_number: str = ""
     link: str = ""
+    certificate_id: int | None = None
 
 
 def build_sample_workbook() -> bytes:

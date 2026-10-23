@@ -60,8 +60,17 @@ class IssueDraft:
     template_name: str = ""
 
 
-def issue_certificate(db: Session, draft: IssueDraft, actor: User | None) -> IssuedCertificate:
-    """Создаёт сертификат и, если логина ещё нет, учётную запись сотрудника."""
+def issue_certificate(
+    db: Session,
+    draft: IssueDraft,
+    actor: User | None,
+    *,
+    sync_external: bool = True,
+) -> IssuedCertificate:
+    """Создаёт сертификат и, если логина ещё нет, учётную запись сотрудника.
+
+    sync_external=False — без Google Sheets/Wallet (пакетный импорт синхронизирует сам).
+    """
     holder, password = _holder_for_issue(db, draft)
     nominal, balance = _opening_amounts(draft.nominal, draft.balance)
     certificate = Certificate(
@@ -113,7 +122,8 @@ def issue_certificate(db: Session, draft: IssueDraft, actor: User | None) -> Iss
     db.commit()
     db.refresh(certificate)
     db.refresh(holder)
-    _sync_issue(certificate, holder, draft.segment_name)
+    if sync_external:
+        _sync_issue(certificate, holder, draft.segment_name)
     return IssuedCertificate(user=holder, certificate=certificate, password=password)
 
 
@@ -1210,6 +1220,48 @@ def _sheet_usages(db: Session, certificate_id: int) -> list:
 def push_certificate_to_sheets(db: Session, certificate: Certificate) -> None:
     """Дозаписывает карту и все расходы из журнала в Google Sheets."""
     _sync_usage(db, certificate)
+
+
+def push_certificates_issued_batch(
+    db: Session,
+    certificate_ids: list[int],
+) -> tuple[int, int, int]:
+    """Пакетно дописывает выпуски в Google Sheets. Возвращает (written, skipped, errors)."""
+    from bonus.sheets_sync import SheetIssuedItem, sync_certificates_issued_batch
+
+    if not certificate_ids:
+        return 0, 0, 0
+    certificates = db.scalars(
+        select(Certificate).where(Certificate.id.in_(certificate_ids)).order_by(Certificate.id)
+    ).all()
+    items: list[SheetIssuedItem] = []
+    for certificate in certificates:
+        holder = certificate.holder
+        if holder is None:
+            continue
+        segment_name = ""
+        if certificate.segment is not None:
+            segment_name = (certificate.segment.name or "").strip()
+        items.append(
+            SheetIssuedItem(
+                certificate=certificate,
+                holder=holder,
+                segment_name=segment_name,
+            )
+        )
+    result = sync_certificates_issued_batch(items)
+    return result.written, result.skipped, result.errors
+
+
+def list_active_certificate_ids(db: Session) -> list[int]:
+    """ID активных карт для досинхронизации в Google Sheets."""
+    return list(
+        db.scalars(
+            select(Certificate.id)
+            .where(Certificate.status == CertificateStatus.active)
+            .order_by(Certificate.id)
+        ).all()
+    )
 
 
 _TRANSLIT = {
