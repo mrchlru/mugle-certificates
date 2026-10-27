@@ -10,7 +10,15 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from bonus.config import get_settings
-from bonus.models import AccrualPeriod, CardTemplate, Certificate, Role, Segment, User
+from bonus.models import (
+    AccrualPeriod,
+    CardTemplate,
+    Certificate,
+    CertificatePart,
+    Role,
+    Segment,
+    User,
+)
 from bonus.services import BonusError, normalize_discount
 from bonus.storage import (
     delete_template_object,
@@ -253,6 +261,47 @@ def set_segment_active(db: Session, segment: Segment, active: bool) -> None:
     """Прячет или снова показывает сегмент в формах."""
     segment.is_active = active
     db.commit()
+
+
+def delete_segment(db: Session, segment: Segment, actor: User) -> str:
+    """Полностью удаляет сегмент. Только admin.
+
+    Нельзя удалить, если на сегмент уже есть карты или части комбо-карт.
+    С шаблонов привязка снимается.
+    """
+    if actor.role != Role.admin:
+        raise BonusError("Удалять сегменты может только главный администратор")
+    segment_id = segment.id
+    name = segment.name
+    used_card = db.scalar(
+        select(Certificate.id).where(Certificate.segment_id == segment_id).limit(1)
+    )
+    if used_card is not None:
+        raise BonusError(
+            f"Сегмент «{name}» нельзя удалить: есть выпущенные карты. "
+            "Сначала скройте сегмент или перенесите карты."
+        )
+    parts = db.scalar(
+        select(CertificatePart.id).where(CertificatePart.segment_id == segment_id).limit(1)
+    )
+    if parts is not None:
+        raise BonusError(
+            f"Сегмент «{name}» нельзя удалить: он есть в частях выпущенных карт. "
+            "Сначала скройте сегмент."
+        )
+    db.execute(
+        update(CardTemplate)
+        .where(CardTemplate.segment_id == segment_id)
+        .values(segment_id=None)
+    )
+    db.execute(
+        update(CardTemplate)
+        .where(CardTemplate.segment2_id == segment_id)
+        .values(segment2_id=None)
+    )
+    db.delete(segment)
+    db.commit()
+    return name
 
 
 def save_template(

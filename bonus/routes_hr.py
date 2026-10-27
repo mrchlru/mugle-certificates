@@ -19,6 +19,7 @@ from bonus.catalog import (
     parse_unwrap_kind,
     resolve_segment,
     resolve_template,
+    delete_segment,
     delete_template,
     save_template,
     set_segment_active,
@@ -669,6 +670,37 @@ def segment_active(
         flash(request, exc.message, "bad")
     else:
         flash(request, "Сегмент обновлён")
+    return RedirectResponse("/hr/design", status_code=303)
+
+
+@router.post("/hr/design/segments/{segment_id}/delete")
+def segment_delete(
+    segment_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin)),
+    csrf_token: str = Form(""),
+):
+    """Удаляет сегмент навсегда. Только admin."""
+    segment = db.get(Segment, segment_id)
+    try:
+        guard_csrf(request, csrf_token)
+        if segment is None:
+            raise BonusError("Сегмент не найден")
+        name = delete_segment(db, segment, user)
+        write_audit(
+            db,
+            actor=user,
+            action=AuditAction.segment_delete,
+            summary=f"Удаление сегмента {name}",
+            target_type="segment",
+            target_id=segment_id,
+            detail=name,
+        )
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+    else:
+        flash(request, f"Сегмент «{name}» удалён")
     return RedirectResponse("/hr/design", status_code=303)
 
 

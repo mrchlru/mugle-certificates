@@ -49,6 +49,7 @@ class AuditAction(str, enum.Enum):
     import_rows = "import_rows"
     certificate_delete = "certificate_delete"
     template_delete = "template_delete"
+    segment_delete = "segment_delete"
     link_export = "link_export"
     link_delivery_mark = "link_delivery_mark"
 

@@ -40,6 +40,7 @@ _ACTION_LABELS: dict[str, str] = {
     AuditAction.import_rows.value: "Импорт карт",
     AuditAction.certificate_delete.value: "Удаление карты",
     AuditAction.template_delete.value: "Удаление шаблона",
+    AuditAction.segment_delete.value: "Удаление сегмента",
     AuditAction.link_export.value: "Выгрузка ссылок",
     AuditAction.link_delivery_mark.value: "Отметка рассылки",
 }
