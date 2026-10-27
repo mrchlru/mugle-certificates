@@ -681,7 +681,7 @@ def segment_delete(
     user: User = Depends(require(Role.admin)),
     csrf_token: str = Form(""),
 ):
-    """Удаляет сегмент навсегда. Только admin."""
+    """Убирает сегмент из каталога новых карт. Только admin."""
     segment = db.get(Segment, segment_id)
     try:
         guard_csrf(request, csrf_token)
@@ -692,7 +692,7 @@ def segment_delete(
             db,
             actor=user,
             action=AuditAction.segment_delete,
-            summary=f"Удаление сегмента {name}",
+            summary=f"Удаление сегмента из каталога {name}",
             target_type="segment",
             target_id=segment_id,
             detail=name,
@@ -700,7 +700,10 @@ def segment_delete(
     except BonusError as exc:
         flash(request, exc.message, "bad")
     else:
-        flash(request, f"Сегмент «{name}» удалён")
+        flash(
+            request,
+            f"Сегмент «{name}» убран из каталога. Ранее выпущенные карты сохраняют настройки.",
+        )
     return RedirectResponse("/hr/design", status_code=303)
 
 
@@ -858,7 +861,7 @@ def template_delete(
     user: User = Depends(require(Role.admin)),
     csrf_token: str = Form(""),
 ):
-    """Удаляет шаблон и файлы. Только admin."""
+    """Убирает шаблон из каталога новых карт. Только admin."""
     template = db.get(CardTemplate, template_id)
     try:
         guard_csrf(request, csrf_token)
@@ -869,7 +872,7 @@ def template_delete(
             db,
             actor=user,
             action=AuditAction.template_delete,
-            summary=f"Удаление шаблона {name}",
+            summary=f"Удаление шаблона из каталога {name}",
             target_type="template",
             target_id=template_id,
             detail=name,
@@ -877,7 +880,10 @@ def template_delete(
     except BonusError as exc:
         flash(request, exc.message, "bad")
     else:
-        flash(request, f"Шаблон «{name}» удалён")
+        flash(
+            request,
+            f"Шаблон «{name}» убран из каталога. Ранее выпущенные карты сохраняют визуал.",
+        )
     return RedirectResponse("/hr/design", status_code=303)
 
 

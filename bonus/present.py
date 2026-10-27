@@ -200,9 +200,14 @@ class StaffView:
 
 
 def load_cards(db: Session, holder_id: int, base_url: str, actor: User) -> list[CardView]:
-    """Все сертификаты одного сотрудника."""
+    """Все сертификаты одного сотрудника (без мягко удалённых)."""
     certificates = db.scalars(
-        select(Certificate).where(Certificate.holder_id == holder_id).order_by(Certificate.id.desc())
+        select(Certificate)
+        .where(
+            Certificate.holder_id == holder_id,
+            Certificate.is_deleted.is_(False),
+        )
+        .order_by(Certificate.id.desc())
     ).all()
     return [load_card(db, certificate, base_url, actor) for certificate in certificates]
 
@@ -311,6 +316,7 @@ def search_certificates(
     statement = (
         select(Certificate, User)
         .join(User, Certificate.holder_id == User.id)
+        .where(Certificate.is_deleted.is_(False))
         .order_by(Certificate.id.desc())
     )
     if segment_id is not None and segment_id > 0:
@@ -897,14 +903,20 @@ def _moscow_days_ago(days: int) -> datetime:
 
 
 def _count_certs(db: Session, *clauses: object) -> int:
-    statement = select(func.count()).select_from(Certificate)
+    statement = (
+        select(func.count())
+        .select_from(Certificate)
+        .where(Certificate.is_deleted.is_(False))
+    )
     for clause in clauses:
         statement = statement.where(clause)
     return int(db.scalar(statement) or 0)
 
 
 def _sum_balance(db: Session, *clauses: object) -> int:
-    statement = select(func.coalesce(func.sum(Certificate.balance), 0))
+    statement = select(func.coalesce(func.sum(Certificate.balance), 0)).where(
+        Certificate.is_deleted.is_(False)
+    )
     for clause in clauses:
         statement = statement.where(clause)
     return int(db.scalar(statement) or 0)

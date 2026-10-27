@@ -75,8 +75,8 @@
     function q(s) { return root.querySelector(s); }
 
     q('.ce__tag').textContent = TEXTS.tag;
-    q('h1').textContent = TEXTS.title;
-    q('.ce__sub').textContent = TEXTS.sub(o, fmtDate(o.expiredOn));
+    q('h1').textContent = o.title || TEXTS.title;
+    q('.ce__sub').textContent = o.sub || TEXTS.sub(o, fmtDate(o.expiredOn));
     q('.ce__hint').textContent = o.hint || TEXTS.hint;
 
     var fit = q('.ce__fit');

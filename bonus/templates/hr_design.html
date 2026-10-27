@@ -115,7 +115,7 @@
               <button class="btn soft compact" type="submit">{{ 'Скрыть' if item.is_active else 'Показать' }}</button>
             </form>
             {% if user and user.role.value == 'admin' %}
-            <form method="post" action="/hr/design/segments/{{ item.id }}/delete" class="design-side-action" onsubmit="return confirm('Удалить сегмент «{{ item.name }}» навсегда? Если на него есть карты — удаление будет отклонено.');">
+            <form method="post" action="/hr/design/segments/{{ item.id }}/delete" class="design-side-action" onsubmit="return confirm('Убрать сегмент «{{ item.name }}» из каталога новых карт? Ранее выпущенные карты сохранят свои настройки.');">
               <input type="hidden" name="csrf_token" value="{{ csrf }}">
               <button class="btn danger compact" type="submit">Удалить</button>
             </form>
@@ -272,7 +272,7 @@
                 <button class="btn soft compact" type="submit">{{ 'Отключить' if item.is_active else 'Включить' }}</button>
               </form>
               {% if user and user.role.value == 'admin' %}
-              <form method="post" action="/hr/design/templates/{{ item.id }}/delete" class="design-side-action" onsubmit="return confirm('Удалить шаблон «{{ item.name }}» навсегда?');">
+              <form method="post" action="/hr/design/templates/{{ item.id }}/delete" class="design-side-action" onsubmit="return confirm('Убрать шаблон «{{ item.name }}» из каталога новых карт? Ранее выпущенные карты сохранят визуал.');">
                 <input type="hidden" name="csrf_token" value="{{ csrf }}">
                 <button class="btn danger compact" type="submit">Удалить</button>
               </form>

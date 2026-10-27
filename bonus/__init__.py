@@ -1,3 +1,3 @@
 """Teams Bonus — корпоративные сертификаты (замена Statix Bonus)."""
 
-__version__ = "1.2.63-delete-segment"
+__version__ = "1.2.65-unavailable-card"

@@ -130,6 +130,8 @@ class Segment(Base):
     accrual_days: Mapped[str] = mapped_column(String(16), default="12345")
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(default=True)
+    # Мягкое удаление: скрыт из каталога новых карт, старые карты сохраняют FK.
+    is_deleted: Mapped[bool] = mapped_column(default=False)
 
 
 class CardTemplate(Base):
@@ -149,6 +151,8 @@ class CardTemplate(Base):
     )
     discount_percent: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(default=True)
+    # Мягкое удаление: не для новых карт; выпущенные сохраняют визуал по template_id.
+    is_deleted: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: _utcnow())
 
 
@@ -188,6 +192,8 @@ class Certificate(Base):
         default=CertificateStatus.active,
         index=True,
     )
+    # Мягкое удаление: ссылка открывает анимацию «карта недоступна», из списков HR скрыта.
+    is_deleted: Mapped[bool] = mapped_column(default=False, index=True)
     expires_on: Mapped[date | None] = mapped_column(Date, nullable=True)
     # True при выпуске из сегмента с распаковкой; False после первого открытия.
     unwrap_pending: Mapped[bool] = mapped_column(default=False)

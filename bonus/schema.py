@@ -47,6 +47,10 @@ def ensure_schema(engine: Engine) -> None:
             statements.append(
                 "ALTER TABLE certificates ADD COLUMN show_wallet_buttons BOOLEAN DEFAULT FALSE"
             )
+        if "is_deleted" not in columns:
+            statements.append(
+                "ALTER TABLE certificates ADD COLUMN is_deleted BOOLEAN DEFAULT FALSE"
+            )
     if "app_settings" not in tables:
         statements.append(
             """
@@ -86,6 +90,10 @@ def ensure_schema(engine: Engine) -> None:
             statements.append("ALTER TABLE card_templates ADD COLUMN segment_id INTEGER")
         if "segment2_id" not in columns:
             statements.append("ALTER TABLE card_templates ADD COLUMN segment2_id INTEGER")
+        if "is_deleted" not in columns:
+            statements.append(
+                "ALTER TABLE card_templates ADD COLUMN is_deleted BOOLEAN DEFAULT FALSE"
+            )
     if "certificate_parts" not in tables:
         statements.append(
             """
@@ -154,6 +162,10 @@ def ensure_schema(engine: Engine) -> None:
         if "unwrap_kind" not in columns:
             statements.append(
                 "ALTER TABLE segments ADD COLUMN unwrap_kind VARCHAR(16) DEFAULT ''"
+            )
+        if "is_deleted" not in columns:
+            statements.append(
+                "ALTER TABLE segments ADD COLUMN is_deleted BOOLEAN DEFAULT FALSE"
             )
     if statements:
         with engine.begin() as connection:

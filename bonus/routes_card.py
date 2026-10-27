@@ -17,7 +17,7 @@ from bonus.app_settings import certificate_shows_wallet_buttons
 from bonus.db import get_db
 from bonus.google_wallet import save_url, wallet_enabled
 from bonus.http import public_base, render, require
-from bonus.models import Certificate, Role, User
+from bonus.models import Certificate, CertificateStatus, Role, User
 from bonus.partners import partner_cities
 from bonus.present import load_card, load_cards
 from bonus.services import find_certificate
@@ -73,8 +73,9 @@ def public_certificate(token: str, request: Request, db: Session = Depends(get_d
         return render(request, "missing.html", status_code=404)
     base = public_base(request)
     card = load_card(db, certificate, base, None)
-    is_expired = _certificate_expired(certificate)
-    if is_expired:
+    reason = _unavailable_reason(certificate)
+    is_unavailable = reason is not None
+    if is_unavailable:
         # Штрихкод и номер не отдаём на страницу — иначе скрытие обходится через DevTools.
         card = replace(
             card,
@@ -84,9 +85,10 @@ def public_certificate(token: str, request: Request, db: Session = Depends(get_d
             short_code="",
             unwrap_pending=False,
         )
+    title, subtitle = _unavailable_copy(reason, card.first_name, certificate)
     wallet = (
         _empty_wallet_ui()
-        if is_expired
+        if is_unavailable
         else _wallet_ui(db, certificate, base)
     )
     return render(
@@ -94,21 +96,62 @@ def public_certificate(token: str, request: Request, db: Session = Depends(get_d
         "public_card.html",
         card=card,
         card_token=certificate.token,
-        card_expired=is_expired,
+        card_expired=is_unavailable,
+        expired_title=title,
+        expired_sub=subtitle,
         expires_on_iso=(
-            certificate.expires_on.isoformat() if certificate.expires_on else ""
+            certificate.expires_on.isoformat()
+            if reason == "expired" and certificate.expires_on
+            else ""
         ),
         **wallet,
         **_card_page_extras(),
     )
 
 
-def _certificate_expired(certificate: Certificate) -> bool:
-    """Срок карты истёк по московской дате сервера."""
+def _unavailable_reason(certificate: Certificate) -> str | None:
+    """Почему карта недоступна: deleted / blocked / expired, иначе None."""
+    if certificate.is_deleted:
+        return "deleted"
+    if certificate.status == CertificateStatus.blocked:
+        return "blocked"
+    if certificate.expires_on is not None and certificate.expires_on < today_msk():
+        return "expired"
+    return None
+
+
+def _unavailable_copy(
+    reason: str | None,
+    first_name: str,
+    certificate: Certificate,
+) -> tuple[str, str]:
+    """Заголовок и подзаголовок экрана CardExpired."""
+    who = f"{first_name}, карта" if first_name else "Карта"
+    if reason == "deleted":
+        return (
+            "Карта удалена",
+            f"{who} больше не действует, штрихкод скрыт.",
+        )
+    if reason == "blocked":
+        return (
+            "Карта деактивирована",
+            f"{who} временно недоступна, штрихкод скрыт.",
+        )
+    if reason == "expired" and certificate.expires_on is not None:
+        day = certificate.expires_on.strftime("%d.%m.%Y")
+        return (
+            "Срок действия карты закончился",
+            f"{who} действовала до {day}. Теперь она неактивна, штрихкод скрыт.",
+        )
     return (
-        certificate.expires_on is not None
-        and certificate.expires_on < today_msk()
+        "Срок действия карты закончился",
+        f"{who} больше не действует, штрихкод скрыт.",
     )
+
+
+def _certificate_expired(certificate: Certificate) -> bool:
+    """Карта недоступна: удалена, заблокирована или истёк срок."""
+    return _unavailable_reason(certificate) is not None
 
 
 def _empty_wallet_ui() -> dict:

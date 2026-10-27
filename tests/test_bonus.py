@@ -11,8 +11,13 @@ from sqlalchemy.orm import Session
 import bonus.db as database
 from bonus.catalog import (
     create_segment,
+    delete_segment,
+    delete_template,
     ensure_default_segments,
     list_segments,
+    list_templates,
+    resolve_segment,
+    resolve_template,
     save_template,
     update_segment,
     update_template,
@@ -164,7 +169,7 @@ def test_monthly_accrual_skips_issue_month() -> None:
     assert apply_monthly_accruals(db, now) == 0
 
 
-def test_admin_can_hard_delete_certificate() -> None:
+def test_admin_can_soft_delete_certificate() -> None:
     db = _db()
     admin = _person(db, "admin", Role.admin)
     hr = _person(db, "hr", Role.hr)
@@ -172,7 +177,12 @@ def test_admin_can_hard_delete_certificate() -> None:
     cert_id = issued.certificate.id
     public_number = delete_certificate(db, issued.certificate, admin)
     assert public_number
-    assert db.get(Certificate, cert_id) is None
+    cert = db.get(Certificate, cert_id)
+    assert cert is not None
+    assert cert.is_deleted is True
+    assert cert.status.value == "blocked"
+    with pytest.raises(BonusError):
+        delete_certificate(db, cert, admin)
     with pytest.raises(BonusError):
         delete_certificate(db, issue_certificate(db, _draft(100_000), hr).certificate, hr)
 
@@ -253,6 +263,67 @@ def test_issue_with_segment_color_and_template() -> None:
     assert template.image_path.endswith(".webp")
     assert template.logo_path.endswith(".webp")
     assert template.logo_path.startswith("logo-") or "logo-" in Path(template.logo_path).name
+
+
+def test_soft_delete_keeps_issued_card_links() -> None:
+    """Удаление из каталога не ломает выпущенные карты: настройки и визуал по FK."""
+    db = _db()
+    ensure_default_segments(db)
+    hr = _person(db, "hr", Role.hr)
+    admin = _person(db, "admin", Role.admin)
+    segment = create_segment(db, "Временный сегмент", AccrualPeriod.none)
+    template = save_template(
+        db,
+        name="Временный баннер",
+        filename="banner.png",
+        payload=_tiny_png(),
+        content_type="image/png",
+        color="#112233",
+        segment_id=segment.id,
+    )
+    banner_path = template.image_path
+    issued = issue_certificate(
+        db,
+        IssueDraft(
+            full_name="Старая Карта",
+            login="",
+            password="",
+            nominal=100_00,
+            balance=None,
+            note="",
+            expires_on=None,
+            segment_id=segment.id,
+            template_id=template.id,
+            color=template.color,
+        ),
+        hr,
+        sync_external=False,
+    )
+    cert_id = issued.certificate.id
+    delete_template(db, template, admin)
+    db.refresh(template)
+    assert template.is_deleted is True
+    assert template.is_active is False
+    assert template.image_path == banner_path
+    cert = db.get(Certificate, cert_id)
+    assert cert is not None
+    assert cert.template_id == template.id
+    assert cert.segment_id == segment.id
+    assert list_templates(db) == []
+    with pytest.raises(BonusError):
+        resolve_template(db, template.id)
+
+    delete_segment(db, segment, admin)
+    db.refresh(segment)
+    assert segment.is_deleted is True
+    assert "удалён" in segment.name
+    cert = db.get(Certificate, cert_id)
+    assert cert is not None
+    assert cert.segment_id == segment.id
+    assert segment.id not in {item.id for item in list_segments(db, active_only=False)}
+    with pytest.raises(BonusError):
+        resolve_segment(db, segment.id)
+    create_segment(db, "Временный сегмент", AccrualPeriod.none)
 
 
 def test_media_url_uses_s3_public_base(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -410,6 +481,29 @@ def test_credit_adds_bonuses_to_balance() -> None:
     credit_certificate(db, issued.certificate, hr, 250_000, "премия")
     assert issued.certificate.balance == 850_000
     assert issued.certificate.nominal == 1_250_000
+
+
+def test_unavailable_reason_covers_deleted_blocked_expired() -> None:
+    from bonus.routes_card import _unavailable_reason
+
+    db = _db()
+    hr = _person(db, "hr", Role.hr)
+    admin = _person(db, "admin", Role.admin)
+    active = issue_certificate(db, _draft(100_00), hr, sync_external=False).certificate
+    assert _unavailable_reason(active) is None
+
+    blocked = issue_certificate(db, _draft(100_00), hr, sync_external=False).certificate
+    set_blocked(db, blocked, hr, True)
+    assert _unavailable_reason(blocked) == "blocked"
+
+    expired = issue_certificate(db, _draft(100_00), hr, sync_external=False).certificate
+    set_certificate_expiry(db, expired, date(2020, 1, 1))
+    assert _unavailable_reason(expired) == "expired"
+
+    deleted = issue_certificate(db, _draft(100_00), hr, sync_external=False).certificate
+    delete_certificate(db, deleted, admin)
+    db.refresh(deleted)
+    assert _unavailable_reason(deleted) == "deleted"
 
 
 def test_blocked_and_expired_cannot_be_spent() -> None:

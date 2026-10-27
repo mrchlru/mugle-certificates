@@ -262,6 +262,8 @@ def debit_certificate(
         parts=parts or None,
         enforce_weekdays=enforce_weekdays,
     )
+    if certificate.is_deleted:
+        raise BonusError("Сертификат удалён")
     if certificate.status != CertificateStatus.active:
         raise BonusError("Сертификат заблокирован")
     if certificate.expires_on is not None and certificate.expires_on < today_msk():
@@ -541,44 +543,25 @@ def burn_daily_remainder(db: Session, certificate: Certificate, comment: str) ->
 
 
 def delete_certificate(db: Session, certificate: Certificate, actor: User) -> str:
-    """Полностью удаляет карту, журнал и строку в Google Sheets. Только admin."""
+    """Убирает карту из списков и Sheets; публичная ссылка показывает анимацию. Только admin."""
     if actor.role != Role.admin:
         raise BonusError("Удалять карты может только главный администратор")
+    if certificate.is_deleted:
+        raise BonusError("Карта уже удалена")
     public_number = certificate.public_number
     ledger_sheet = certificate.ledger_sheet
-    holder_id = certificate.holder_id
-    certificate_id = certificate.id
-    from sqlalchemy import delete as sa_delete
-
-    from bonus.models import LinkDelivery, SheetsSyncJob
-
-    db.execute(
-        update(Transaction)
-        .where(Transaction.certificate_id == certificate_id)
-        .values(reversal_of_id=None, part_id=None)
+    certificate.is_deleted = True
+    certificate.status = CertificateStatus.blocked
+    certificate.unwrap_pending = False
+    _add_transaction(
+        db,
+        certificate_id=certificate.id,
+        actor_id=actor.id,
+        tx_type=TxType.block,
+        amount=0,
+        balance_after=certificate.balance,
+        comment="Сертификат удалён из системы",
     )
-    db.execute(sa_delete(Transaction).where(Transaction.certificate_id == certificate_id))
-    db.execute(
-        sa_delete(CertificatePart).where(CertificatePart.certificate_id == certificate_id)
-    )
-    db.execute(
-        sa_delete(SheetsSyncJob).where(SheetsSyncJob.certificate_id == certificate_id)
-    )
-    db.execute(
-        sa_delete(LinkDelivery).where(LinkDelivery.certificate_id == certificate_id)
-    )
-    certificate.parts.clear()
-    db.delete(certificate)
-    holder = db.get(User, holder_id)
-    if holder is not None and holder.role == Role.employee:
-        other = db.scalar(
-            select(Certificate.id).where(
-                Certificate.holder_id == holder_id,
-                Certificate.id != certificate_id,
-            )
-        )
-        if other is None:
-            db.delete(holder)
     db.commit()
     from bonus.sheets_sync import delete_certificate_row
 

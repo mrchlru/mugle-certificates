@@ -6,15 +6,13 @@ from io import BytesIO
 from pathlib import Path
 
 from PIL import Image, ImageOps, UnidentifiedImageError
-from sqlalchemy import select, update
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from bonus.config import get_settings
 from bonus.models import (
     AccrualPeriod,
     CardTemplate,
-    Certificate,
-    CertificatePart,
     Role,
     Segment,
     User,
@@ -126,6 +124,8 @@ def ensure_default_segments(db: Session) -> None:
             changed = True
     for index, (name, period, needs_expiry, one_shot) in enumerate(DEFAULT_SEGMENTS):
         found = by_name.get(name.casefold())
+        if found is not None and found.is_deleted:
+            found = None
         if found is None:
             created = Segment(
                 name=name,
@@ -153,16 +153,24 @@ def ensure_default_segments(db: Session) -> None:
 
 
 def list_segments(db: Session, *, active_only: bool = True) -> list[Segment]:
-    """Сегменты для фильтра и формы выпуска."""
-    statement = select(Segment).order_by(Segment.sort_order, Segment.id)
+    """Сегменты для фильтра и формы выпуска (без мягко удалённых)."""
+    statement = (
+        select(Segment)
+        .where(Segment.is_deleted.is_(False))
+        .order_by(Segment.sort_order, Segment.id)
+    )
     if active_only:
         statement = statement.where(Segment.is_active.is_(True))
     return list(db.scalars(statement).all())
 
 
 def list_templates(db: Session, *, active_only: bool = True) -> list[CardTemplate]:
-    """Шаблоны-картинки для баннера карточки."""
-    statement = select(CardTemplate).order_by(CardTemplate.id.desc())
+    """Шаблоны-картинки для баннера карточки (без мягко удалённых)."""
+    statement = (
+        select(CardTemplate)
+        .where(CardTemplate.is_deleted.is_(False))
+        .order_by(CardTemplate.id.desc())
+    )
     if active_only:
         statement = statement.where(CardTemplate.is_active.is_(True))
     return list(db.scalars(statement).all())
@@ -203,7 +211,12 @@ def create_segment(
     cleaned = " ".join(name.split())
     if len(cleaned) < 2:
         raise BonusError("Укажите название сегмента")
-    if db.scalar(select(Segment.id).where(Segment.name == cleaned)) is not None:
+    if db.scalar(
+        select(Segment.id).where(
+            Segment.name == cleaned,
+            Segment.is_deleted.is_(False),
+        )
+    ) is not None:
         raise BonusError("Такой сегмент уже есть")
     segment = Segment(
         name=cleaned[:120],
@@ -217,6 +230,7 @@ def create_segment(
         accrual_days=normalize_days(accrual_days, default=WEEKDAYS),
         sort_order=1000 + int(db.scalar(select(Segment.id).order_by(Segment.id.desc()).limit(1)) or 0),
         is_active=True,
+        is_deleted=False,
     )
     db.add(segment)
     db.commit()
@@ -238,10 +252,18 @@ def update_segment(
     accrual_days: object = WEEKDAYS,
 ) -> Segment:
     """Меняет название, периодичность, срок, дни и процент."""
+    if segment.is_deleted:
+        raise BonusError("Удалённый сегмент нельзя менять — создайте новый")
     cleaned = " ".join(name.split())
     if len(cleaned) < 2:
         raise BonusError("Укажите название сегмента")
-    twin = db.scalar(select(Segment.id).where(Segment.name == cleaned, Segment.id != segment.id))
+    twin = db.scalar(
+        select(Segment.id).where(
+            Segment.name == cleaned,
+            Segment.id != segment.id,
+            Segment.is_deleted.is_(False),
+        )
+    )
     if twin is not None:
         raise BonusError("Сегмент с таким названием уже есть")
     segment.name = cleaned[:120]
@@ -259,47 +281,35 @@ def update_segment(
 
 def set_segment_active(db: Session, segment: Segment, active: bool) -> None:
     """Прячет или снова показывает сегмент в формах."""
+    if segment.is_deleted:
+        raise BonusError("Удалённый сегмент нельзя снова показать — создайте новый")
     segment.is_active = active
     db.commit()
 
 
 def delete_segment(db: Session, segment: Segment, actor: User) -> str:
-    """Полностью удаляет сегмент. Только admin.
+    """Убирает сегмент из каталога новых карт. Только admin.
 
-    Нельзя удалить, если на сегмент уже есть карты или части комбо-карт.
-    С шаблонов привязка снимается.
+    Выпущенные карты и их части сохраняют настройки (FK и снимки правил).
+    Связанные шаблоны тоже уходят из каталога, но файлы и визуал карт остаются.
     """
     if actor.role != Role.admin:
         raise BonusError("Удалять сегменты может только главный администратор")
+    if segment.is_deleted:
+        raise BonusError("Сегмент уже удалён из каталога")
     segment_id = segment.id
     name = segment.name
-    used_card = db.scalar(
-        select(Certificate.id).where(Certificate.segment_id == segment_id).limit(1)
-    )
-    if used_card is not None:
-        raise BonusError(
-            f"Сегмент «{name}» нельзя удалить: есть выпущенные карты. "
-            "Сначала скройте сегмент или перенесите карты."
+    _soft_delete_segment_row(segment)
+    for template in db.scalars(
+        select(CardTemplate).where(
+            CardTemplate.is_deleted.is_(False),
+            or_(
+                CardTemplate.segment_id == segment_id,
+                CardTemplate.segment2_id == segment_id,
+            ),
         )
-    parts = db.scalar(
-        select(CertificatePart.id).where(CertificatePart.segment_id == segment_id).limit(1)
-    )
-    if parts is not None:
-        raise BonusError(
-            f"Сегмент «{name}» нельзя удалить: он есть в частях выпущенных карт. "
-            "Сначала скройте сегмент."
-        )
-    db.execute(
-        update(CardTemplate)
-        .where(CardTemplate.segment_id == segment_id)
-        .values(segment_id=None)
-    )
-    db.execute(
-        update(CardTemplate)
-        .where(CardTemplate.segment2_id == segment_id)
-        .values(segment2_id=None)
-    )
-    db.delete(segment)
+    ).all():
+        _soft_delete_template_row(template)
     db.commit()
     return name
 
@@ -335,6 +345,7 @@ def save_template(
         segment2_id=secondary,
         discount_percent=normalize_discount(discount_percent),
         is_active=True,
+        is_deleted=False,
     )
     db.add(template)
     db.commit()
@@ -344,30 +355,41 @@ def save_template(
 
 def set_template_active(db: Session, template: CardTemplate, active: bool) -> None:
     """Отключает шаблон без удаления файла."""
+    if template.is_deleted:
+        raise BonusError("Удалённый шаблон нельзя снова включить — загрузите новый")
     template.is_active = active
     db.commit()
 
 
 def delete_template(db: Session, template: CardTemplate, actor: User) -> str:
-    """Полностью удаляет шаблон и файлы. Только admin."""
+    """Убирает шаблон из каталога новых карт. Только admin.
+
+    Файлы и certificate.template_id не трогаем — выпущенные карты сохраняют визуал.
+    """
     if actor.role != Role.admin:
         raise BonusError("Удалять шаблоны может только главный администратор")
+    if template.is_deleted:
+        raise BonusError("Шаблон уже удалён из каталога")
     name = template.name
-    banner_path = template.image_path or ""
-    logo_path = (template.logo_path or "").strip()
-    template_id = template.id
-    db.execute(
-        update(Certificate)
-        .where(Certificate.template_id == template_id)
-        .values(template_id=None)
-    )
-    db.delete(template)
+    _soft_delete_template_row(template)
     db.commit()
-    if banner_path:
-        delete_template_object(banner_path)
-    if logo_path:
-        delete_template_object(logo_path)
     return name
+
+
+def _soft_delete_segment_row(segment: Segment) -> None:
+    """Помечает сегмент удалённым и освобождает name/slug для нового в каталоге."""
+    segment.is_deleted = True
+    segment.is_active = False
+    base_name = (segment.name or "Сегмент")[:90]
+    segment.name = f"{base_name} (удалён #{segment.id})"[:120]
+    base_slug = (segment.slug or "segment")[:60]
+    segment.slug = f"{base_slug}__deleted_{segment.id}"[:80]
+
+
+def _soft_delete_template_row(template: CardTemplate) -> None:
+    """Помечает шаблон удалённым; файлы и FK у карт остаются."""
+    template.is_deleted = True
+    template.is_active = False
 
 
 def update_template(
@@ -387,6 +409,8 @@ def update_template(
     logo_content_type: str = "",
 ) -> CardTemplate:
     """Меняет название, цвет, сегмент(ы) и при необходимости баннер/логотип."""
+    if template.is_deleted:
+        raise BonusError("Удалённый шаблон нельзя менять — загрузите новый")
     cleaned = " ".join(name.split()) or template.name
     if len(cleaned) < 1:
         raise BonusError("Укажите название шаблона")
@@ -416,11 +440,11 @@ def update_template(
 
 
 def _optional_segment_id(db: Session, segment_id: int | None) -> int | None:
-    """Пустая привязка или id активного сегмента."""
+    """Пустая привязка или id активного сегмента из каталога."""
     if segment_id is None or segment_id <= 0:
         return None
     segment = db.get(Segment, segment_id)
-    if segment is None or not segment.is_active:
+    if segment is None or segment.is_deleted or not segment.is_active:
         raise BonusError("Выберите сегмент для шаблона или оставьте без привязки")
     return segment.id
 
@@ -500,9 +524,9 @@ def normalize_color(value: str) -> str:
 
 
 def resolve_segment(db: Session, segment_id: int) -> Segment:
-    """Достаёт активный сегмент или объясняет, что его нет."""
+    """Достаёт активный сегмент каталога или объясняет, что его нет."""
     segment = db.get(Segment, segment_id)
-    if segment is None or not segment.is_active:
+    if segment is None or segment.is_deleted or not segment.is_active:
         raise BonusError("Выберите сегмент")
     return segment
 
@@ -512,7 +536,7 @@ def resolve_template(db: Session, template_id: int | None) -> CardTemplate | Non
     if template_id is None or template_id <= 0:
         return None
     template = db.get(CardTemplate, template_id)
-    if template is None or not template.is_active:
+    if template is None or template.is_deleted or not template.is_active:
         raise BonusError("Выберите шаблон или оставьте без картинки")
     return template
 
