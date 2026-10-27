@@ -23,6 +23,11 @@
     <option value="{{ item.id }}" {% if segment_id == item.id %}selected{% endif %}>{{ item.name }}</option>
     {% endfor %}
   </select>
+  <select name="status" aria-label="Статус">
+    {% for key, label in status_options %}
+    <option value="{{ key }}" {% if status == key %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
   <select name="sort" aria-label="Сортировка">
     {% for key, label in sort_options %}
     <option value="{{ key }}" {% if sort == key %}selected{% endif %}>{{ label }}</option>
@@ -32,9 +37,9 @@
 </form>
 {% if segments %}
 <nav class="segment-chips">
-  <a href="/hr?q={{ query }}&sort={{ sort }}" class="{% if not segment_id %}is-on{% endif %}">Все</a>
+  <a href="/hr?q={{ query }}&sort={{ sort }}&status={{ status }}" class="{% if not segment_id %}is-on{% endif %}">Все</a>
   {% for item in segments %}
-  <a href="/hr?q={{ query }}&segment={{ item.id }}&sort={{ sort }}" class="{% if segment_id == item.id %}is-on{% endif %}">{{ item.name }}</a>
+  <a href="/hr?q={{ query }}&segment={{ item.id }}&sort={{ sort }}&status={{ status }}" class="{% if segment_id == item.id %}is-on{% endif %}">{{ item.name }}</a>
   {% endfor %}
 </nav>
 {% endif %}
@@ -80,7 +85,7 @@
   </table>
 </div>
 {% else %}
-<p class="muted">Сертификатов не нашлось. Выпишите первый или загрузите таблицу.</p>
+<p class="muted">{% if status == 'expired' %}Истекших сертификатов не нашлось.{% else %}Сертификатов не нашлось. Выпишите первый или загрузите таблицу.{% endif %}</p>
 {% endif %}
 {% endblock %}
 {% block scripts %}
@@ -88,11 +93,10 @@
 (function () {
   var form = document.querySelector("form.filters");
   if (!form) return;
-  var sort = form.querySelector('select[name="sort"]');
-  var segment = form.querySelector('select[name="segment"]');
-  function submitForm() { form.submit(); }
-  if (sort) sort.addEventListener("change", submitForm);
-  if (segment) segment.addEventListener("change", submitForm);
+  ["sort", "segment", "status"].forEach(function (name) {
+    var el = form.querySelector('select[name="' + name + '"]');
+    if (el) el.addEventListener("change", function () { form.submit(); });
+  });
 })();
 </script>
 {% endblock %}

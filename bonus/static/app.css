@@ -1234,7 +1234,7 @@ body.partners-dialog-open {
 
 .filters {
   display: grid;
-  grid-template-columns: 1fr 200px 180px auto;
+  grid-template-columns: 1fr 180px 160px 160px auto;
   gap: 8px;
 }
 

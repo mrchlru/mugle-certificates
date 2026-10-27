@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from bonus.catalog import media_url
@@ -219,10 +219,22 @@ _SORT_CHOICES: tuple[tuple[str, str], ...] = (
     ("expires", "По сроку"),
 )
 
+_STATUS_CHOICES: tuple[tuple[str, str], ...] = (
+    ("all", "Все статусы"),
+    ("active", "Активные"),
+    ("expired", "Истёкшие"),
+    ("blocked", "Заблокированные"),
+)
+
 
 def sort_choices() -> tuple[tuple[str, str], ...]:
     """Варианты сортировки сводки для селекта."""
     return _SORT_CHOICES
+
+
+def status_choices() -> tuple[tuple[str, str], ...]:
+    """Варианты фильтра статуса на сводке."""
+    return _STATUS_CHOICES
 
 
 def normalize_sort(raw: str) -> str:
@@ -232,15 +244,25 @@ def normalize_sort(raw: str) -> str:
     return cleaned if cleaned in allowed else "name"
 
 
+def normalize_status_filter(raw: str) -> str:
+    """Допустимый фильтр статуса; иначе все."""
+    cleaned = (raw or "").strip().casefold()
+    allowed = {key for key, _label in _STATUS_CHOICES}
+    return cleaned if cleaned in allowed else "all"
+
+
 def search_certificates(
     db: Session,
     query: str,
     segment_id: int | None = None,
     *,
     sort: str = "name",
+    status: str = "all",
 ) -> list[CardView]:
-    """Список для HR. Поиск, фильтр по сегменту и сортировка."""
+    """Список для HR. Поиск, фильтр по сегменту/статусу и сортировка."""
     apply_due_expiries(db)
+    status_key = normalize_status_filter(status)
+    today = today_msk()
     statement = (
         select(Certificate, User)
         .join(User, Certificate.holder_id == User.id)
@@ -248,6 +270,18 @@ def search_certificates(
     )
     if segment_id is not None and segment_id > 0:
         statement = statement.where(Certificate.segment_id == segment_id)
+    if status_key == "blocked":
+        statement = statement.where(Certificate.status == CertificateStatus.blocked)
+    elif status_key == "expired":
+        statement = statement.where(
+            Certificate.expires_on.is_not(None),
+            Certificate.expires_on < today,
+        )
+    elif status_key == "active":
+        statement = statement.where(
+            Certificate.status == CertificateStatus.active,
+            or_(Certificate.expires_on.is_(None), Certificate.expires_on >= today),
+        )
     rows = db.execute(statement).all()
     needle = query.strip().casefold()
     found: list[CardView] = []

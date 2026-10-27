@@ -50,9 +50,11 @@ from bonus.present import (
     list_staff,
     load_card,
     normalize_sort,
+    normalize_status_filter,
     preview_birthday_card,
     search_certificates,
     sort_choices,
+    status_choices,
 )
 from bonus.roles import (
     AUDIT_ROLES,
@@ -96,20 +98,26 @@ def dashboard(
     q: str = "",
     segment: int = 0,
     sort: str = "name",
+    status: str = "all",
 ):
-    """Сводка и поиск сертификатов с фильтром по сегменту и сортировкой."""
+    """Сводка и поиск сертификатов с фильтром по сегменту, статусу и сортировкой."""
     segment_id = segment if segment > 0 else None
     sort_key = normalize_sort(sort)
+    status_key = normalize_status_filter(status)
     return render(
         request,
         "hr.html",
         section="home",
         stats=dashboard_stats(db, segment_id),
-        cards=search_certificates(db, q, segment_id, sort=sort_key),
+        cards=search_certificates(
+            db, q, segment_id, sort=sort_key, status=status_key
+        ),
         query=q,
         segment_id=segment_id or 0,
         sort=sort_key,
         sort_options=sort_choices(),
+        status=status_key,
+        status_options=status_choices(),
         segments=list_segments(db),
         card_base=public_base(request),
     )
