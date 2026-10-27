@@ -44,7 +44,7 @@ from sqlalchemy import select
 
 from bonus.importer import ImportRowResult, parse_table
 from bonus.storage import s3_enabled
-from bonus.models import AuditAction, CardTemplate, Role, Segment, User
+from bonus.models import AuditAction, CardTemplate, Certificate, Role, Segment, User
 from bonus.ledger import (
     LEDGER_CHOICES,
     ledger_is_single_use,
@@ -52,6 +52,7 @@ from bonus.ledger import (
     parse_ledger_sheet,
 )
 from bonus.present import (
+    SUMMARY_PAGE_SIZE,
     admin_dashboard,
     dashboard_stats,
     ledger,
@@ -113,14 +114,24 @@ def dashboard(
     segment_id = segment if segment > 0 else None
     sort_key = normalize_sort(sort)
     status_key = normalize_status_filter(status)
+    page = search_certificates(
+        db,
+        q,
+        segment_id,
+        sort=sort_key,
+        status=status_key,
+        offset=0,
+        limit=SUMMARY_PAGE_SIZE,
+    )
     return render(
         request,
         "hr.html",
         section="home",
         stats=dashboard_stats(db, segment_id),
-        cards=search_certificates(
-            db, q, segment_id, sort=sort_key, status=status_key
-        ),
+        cards=page.cards,
+        cards_total=page.total,
+        cards_offset=page.next_offset,
+        cards_has_more=page.has_more,
         query=q,
         segment_id=segment_id or 0,
         sort=sort_key,
@@ -130,6 +141,43 @@ def dashboard(
         segments=list_segments(db),
         card_base=public_base(request),
     )
+
+
+@router.get("/hr/cards")
+def dashboard_cards_more(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
+    q: str = "",
+    segment: int = 0,
+    sort: str = "name",
+    status: str = "all",
+    offset: int = 0,
+):
+    """Фрагмент строк таблицы сводки для бесконечной подгрузки."""
+    segment_id = segment if segment > 0 else None
+    page = search_certificates(
+        db,
+        q,
+        segment_id,
+        sort=normalize_sort(sort),
+        status=normalize_status_filter(status),
+        offset=max(0, offset),
+        limit=SUMMARY_PAGE_SIZE,
+    )
+    response = render(
+        request,
+        "_hr_card_rows.html",
+        cards=page.cards,
+        card_base=public_base(request),
+        cards_total=page.total,
+        cards_offset=page.next_offset,
+        cards_has_more=page.has_more,
+    )
+    response.headers["X-Has-More"] = "1" if page.has_more else "0"
+    response.headers["X-Next-Offset"] = str(page.next_offset)
+    response.headers["X-Total"] = str(page.total)
+    return response
 
 
 @router.get("/hr/dashboard")
@@ -295,7 +343,10 @@ async def issue_submit(
         flash(request, exc.message, "bad")
         return RedirectResponse("/hr/new", status_code=303)
     flash(request, f"Сертификат {issued.certificate.public_number} выписан. Отправьте ссылку сотруднику.")
-    return RedirectResponse(f"/hr/c/{issued.certificate.id}", status_code=303)
+    return RedirectResponse(
+        f"/hr/c/{issued.certificate.id}?created=1",
+        status_code=303,
+    )
 
 
 @router.get("/hr/design")
@@ -790,14 +841,58 @@ def certificate_page(
     request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
+    created: int = 0,
 ):
     """Карточка, история и действия HR."""
+    from bonus.google_wallet import wallet_enabled
+    from bonus.sheets_queue import certificate_sync_status
+    from bonus.sheets_sync import sheets_enabled
+
     certificate = _certificate_or_redirect(db, request, certificate_id)
     if certificate is None:
         return RedirectResponse("/hr", status_code=303)
     card = load_card(db, certificate, public_base(request), user)
     share_url = f"{public_base(request)}/c/{certificate.token}"
-    return render(request, "hr_certificate.html", section="home", card=card, share_url=share_url)
+    sync_status = certificate_sync_status(db, certificate.id)
+    syncing = sync_status == "pending" or (
+        created == 1 and sync_status == "none"
+    )
+    return render(
+        request,
+        "hr_certificate.html",
+        section="home",
+        card=card,
+        share_url=share_url,
+        sync_status=sync_status,
+        syncing=syncing,
+        sync_failed=sync_status == "failed",
+        sync_sheets=sheets_enabled(),
+        sync_wallet=wallet_enabled(),
+    )
+
+
+@router.get("/hr/c/{certificate_id}/sync-status")
+def certificate_sync_status_api(
+    certificate_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
+):
+    """JSON-статус фоновой записи карты в Google Sheets после выпуска."""
+    from bonus.sheets_queue import certificate_sync_status
+
+    certificate = db.get(Certificate, certificate_id)
+    if certificate is None:
+        return JSONResponse({"ok": False, "status": "none"}, status_code=404)
+    status = certificate_sync_status(db, certificate_id)
+    return JSONResponse(
+        {
+            "ok": True,
+            "status": status,
+            "ready": status == "done",
+            "failed": status == "failed",
+            "pending": status == "pending",
+        }
+    )
 
 
 @router.post("/hr/c/{certificate_id}/credit")

@@ -44,6 +44,7 @@
 </nav>
 {% endif %}
 {% if cards %}
+<p class="muted summary-count" id="summary-count">Показано {{ cards|length }} из {{ cards_total }}</p>
 <div class="table-wrap">
   <table>
     <thead>
@@ -57,32 +58,21 @@
         <th>Ссылка</th>
       </tr>
     </thead>
-    <tbody>
-      {% for card in cards %}
-      <tr>
-        <td>
-          <span class="cert-ref">
-            <a href="/hr/c/{{ card.id }}">{{ card.public_number }}</a>
-            <span class="swatch" style="background: {{ card.color }}" title="{{ card.color }}"></span>
-          </span>
-        </td>
-        <td>
-          {{ card.holder_name }}
-          {% if card.department or card.job_title or card.phone %}
-          <br><span class="muted">{% if card.department %}{{ card.department }}{% endif %}{% if card.job_title %}{% if card.department %} · {% endif %}{{ card.job_title }}{% endif %}{% if card.phone %}{% if card.department or card.job_title %} · {% endif %}{{ card.phone }}{% endif %}</span>
-          {% endif %}
-        </td>
-        <td>{{ card.segment_name or "—" }}</td>
-        <td>{{ card.balance|money }}</td>
-        <td>{% if card.expires_on %}{{ card.expires_on|day }}{% else %}<span class="muted">без срока</span>{% endif %}</td>
-        <td>{{ status_label(card.status, card.balance, card.expires_on, card.single_use) }}</td>
-        <td>
-          <button class="text-link" type="button" data-copy="{{ card_base }}/c/{{ card.token }}">Копировать</button>
-        </td>
-      </tr>
-      {% endfor %}
+    <tbody id="summary-cards-body"
+           data-offset="{{ cards_offset }}"
+           data-has-more="{{ '1' if cards_has_more else '0' }}"
+           data-total="{{ cards_total }}"
+           data-q="{{ query }}"
+           data-segment="{{ segment_id }}"
+           data-sort="{{ sort }}"
+           data-status="{{ status }}">
+      {% include "_hr_card_rows.html" %}
     </tbody>
   </table>
+</div>
+<div id="summary-load-more" class="summary-load-more" {% if not cards_has_more %}hidden{% endif %}>
+  <div class="summary-load-bar" aria-hidden="true"><span></span></div>
+  <p class="muted">Подгружаем ещё карты…</p>
 </div>
 {% else %}
 <p class="muted">{% if status == 'expired' %}Истекших сертификатов не нашлось.{% else %}Сертификатов не нашлось. Выпишите первый или загрузите таблицу.{% endif %}</p>
@@ -92,11 +82,84 @@
 <script>
 (function () {
   var form = document.querySelector("form.filters");
-  if (!form) return;
-  ["sort", "segment", "status"].forEach(function (name) {
-    var el = form.querySelector('select[name="' + name + '"]');
-    if (el) el.addEventListener("change", function () { form.submit(); });
-  });
+  if (form) {
+    ["sort", "segment", "status"].forEach(function (name) {
+      var el = form.querySelector('select[name="' + name + '"]');
+      if (el) el.addEventListener("change", function () { form.submit(); });
+    });
+  }
+
+  var body = document.getElementById("summary-cards-body");
+  var sentinel = document.getElementById("summary-load-more");
+  var countEl = document.getElementById("summary-count");
+  if (!body || !sentinel) return;
+
+  var loading = false;
+
+  function shownCount() {
+    return body.querySelectorAll("tr").length;
+  }
+
+  function updateCount() {
+    if (!countEl) return;
+    var total = Number(body.getAttribute("data-total") || "0");
+    countEl.textContent = "Показано " + shownCount() + " из " + total;
+  }
+
+  function loadMore() {
+    if (loading || body.getAttribute("data-has-more") !== "1") return;
+    loading = true;
+    sentinel.hidden = false;
+    var params = new URLSearchParams({
+      q: body.getAttribute("data-q") || "",
+      segment: body.getAttribute("data-segment") || "0",
+      sort: body.getAttribute("data-sort") || "name",
+      status: body.getAttribute("data-status") || "all",
+      offset: body.getAttribute("data-offset") || "0"
+    });
+    fetch("/hr/cards?" + params.toString(), { credentials: "same-origin" })
+      .then(function (res) {
+        if (!res.ok) throw new Error("load failed");
+        var hasMore = res.headers.get("X-Has-More");
+        var nextOffset = res.headers.get("X-Next-Offset");
+        var total = res.headers.get("X-Total");
+        return res.text().then(function (html) {
+          return { html: html, hasMore: hasMore, nextOffset: nextOffset, total: total };
+        });
+      })
+      .then(function (payload) {
+        var wrap = document.createElement("tbody");
+        wrap.innerHTML = payload.html;
+        while (wrap.firstChild) body.appendChild(wrap.firstChild);
+        if (payload.nextOffset) body.setAttribute("data-offset", payload.nextOffset);
+        if (payload.total) body.setAttribute("data-total", payload.total);
+        var more = payload.hasMore === "1";
+        body.setAttribute("data-has-more", more ? "1" : "0");
+        sentinel.hidden = !more;
+        updateCount();
+      })
+      .catch(function () {
+        sentinel.querySelector("p").textContent = "Не удалось подгрузить. Прокрутите ещё раз.";
+      })
+      .finally(function () {
+        loading = false;
+      });
+  }
+
+  if ("IntersectionObserver" in window) {
+    var observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) loadMore();
+      });
+    }, { rootMargin: "240px 0px" });
+    observer.observe(sentinel);
+  } else {
+    window.addEventListener("scroll", function () {
+      if (sentinel.hidden || loading) return;
+      var rect = sentinel.getBoundingClientRect();
+      if (rect.top < window.innerHeight + 200) loadMore();
+    });
+  }
 })();
 </script>
 {% endblock %}

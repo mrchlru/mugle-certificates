@@ -1,0 +1,23 @@
+{% for card in cards %}
+<tr>
+  <td>
+    <span class="cert-ref">
+      <a href="/hr/c/{{ card.id }}">{{ card.public_number }}</a>
+      <span class="swatch" style="background: {{ card.color }}" title="{{ card.color }}"></span>
+    </span>
+  </td>
+  <td>
+    {{ card.holder_name }}
+    {% if card.department or card.job_title or card.phone %}
+    <br><span class="muted">{% if card.department %}{{ card.department }}{% endif %}{% if card.job_title %}{% if card.department %} · {% endif %}{{ card.job_title }}{% endif %}{% if card.phone %}{% if card.department or card.job_title %} · {% endif %}{{ card.phone }}{% endif %}</span>
+    {% endif %}
+  </td>
+  <td>{{ card.segment_name or "—" }}</td>
+  <td>{{ card.balance|money }}</td>
+  <td>{% if card.expires_on %}{{ card.expires_on|day }}{% else %}<span class="muted">без срока</span>{% endif %}</td>
+  <td>{{ status_label(card.status, card.balance, card.expires_on, card.single_use) }}</td>
+  <td>
+    <button class="text-link" type="button" data-copy="{{ card_base }}/c/{{ card.token }}">Копировать</button>
+  </td>
+</tr>
+{% endfor %}

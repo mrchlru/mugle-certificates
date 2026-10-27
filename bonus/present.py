@@ -89,6 +89,26 @@ class DashboardStats:
 
 
 @dataclass(frozen=True)
+class CertificateSearchPage:
+    """Страница сводки с ленивой подгрузкой."""
+
+    cards: tuple[CardView, ...]
+    total: int
+    offset: int
+    limit: int
+
+    @property
+    def has_more(self) -> bool:
+        """Есть ли ещё карты после текущей страницы."""
+        return self.offset + len(self.cards) < self.total
+
+    @property
+    def next_offset(self) -> int:
+        """Смещение для следующего запроса."""
+        return self.offset + len(self.cards)
+
+
+@dataclass(frozen=True)
 class DashBucket:
     """Именованная группа для полосок дашборда."""
 
@@ -251,6 +271,9 @@ def normalize_status_filter(raw: str) -> str:
     return cleaned if cleaned in allowed else "all"
 
 
+SUMMARY_PAGE_SIZE = 30
+
+
 def search_certificates(
     db: Session,
     query: str,
@@ -258,8 +281,13 @@ def search_certificates(
     *,
     sort: str = "name",
     status: str = "all",
-) -> list[CardView]:
-    """Список для HR. Поиск, фильтр по сегменту/статусу и сортировка."""
+    offset: int = 0,
+    limit: int = SUMMARY_PAGE_SIZE,
+) -> CertificateSearchPage:
+    """Список для HR. Поиск, фильтр по сегменту/статусу и сортировка.
+
+    Возвращает страницу: по умолчанию 30 карт, дальше — через offset.
+    """
     apply_due_expiries(db)
     status_key = normalize_status_filter(status)
     today = today_msk()
@@ -303,7 +331,15 @@ def search_certificates(
             continue
         found.append(_card_view(db, certificate, holder, "", ()))
     ordered = _sort_cards(found, normalize_sort(sort))
-    return ordered[:300]
+    start = max(0, int(offset))
+    page_size = max(1, min(int(limit), 100))
+    page = ordered[start : start + page_size]
+    return CertificateSearchPage(
+        cards=tuple(page),
+        total=len(ordered),
+        offset=start,
+        limit=page_size,
+    )
 
 
 def dashboard_stats(db: Session, segment_id: int | None = None) -> DashboardStats:

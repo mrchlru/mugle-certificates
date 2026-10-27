@@ -80,6 +80,52 @@ def queue_stats(db: Session) -> dict[str, int]:
     }
 
 
+def certificate_sync_status(db: Session, certificate_id: int) -> str:
+    """Статус синка карты: pending | done | failed | none."""
+    job = db.scalar(
+        select(SheetsSyncJob).where(SheetsSyncJob.certificate_id == certificate_id)
+    )
+    if job is None:
+        return "none"
+    status = (job.status or "").strip().lower()
+    if status in {"pending", "done", "failed"}:
+        return status
+    return "pending"
+
+
+def mark_certificate_job(
+    db: Session,
+    certificate_id: int,
+    status: str,
+    last_error: str = "",
+) -> None:
+    """Обновляет статус задачи очереди для одной карты."""
+    job = db.scalar(
+        select(SheetsSyncJob).where(SheetsSyncJob.certificate_id == certificate_id)
+    )
+    now = _utcnow()
+    if job is None:
+        db.add(
+            SheetsSyncJob(
+                certificate_id=certificate_id,
+                status=status,
+                attempts=1 if status != "pending" else 0,
+                last_error=(last_error or "")[:500],
+                created_at=now,
+                updated_at=now,
+            )
+        )
+    else:
+        job.status = status
+        job.last_error = (last_error or "")[:500]
+        job.updated_at = now
+        if status == "done":
+            job.attempts = max(job.attempts, 1)
+        elif status == "failed":
+            job.attempts += 1
+    db.commit()
+
+
 def process_sheets_queue_once(limit: int = _BATCH_SIZE) -> dict[str, int]:
     """Обрабатывает одну пачку pending-задач. Для воркера и тестов."""
     cred_error = sheets_credentials_error()

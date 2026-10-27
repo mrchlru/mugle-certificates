@@ -1205,13 +1205,67 @@ def _sync_issue(
     holder: User,
     segment_name: str,
 ) -> None:
-    from bonus.sheets_queue import enqueue_certificate_ids
-    from bonus.sheets_sync import sync_certificate_issued
+    """Ставит карту в очередь Sheets и пишет во внешние системы в фоне.
 
-    ok = sync_certificate_issued(certificate, holder, segment_name=segment_name.strip())
-    if not ok:
-        enqueue_certificate_ids(db, [certificate.id])
-    _sync_wallet(certificate, holder, expired=False)
+    HTTP-ответ после выпуска не ждёт Google Sheets / Wallet — страница карты
+    открывается сразу, статус синка показывается в блоке ссылки.
+    """
+    del holder, segment_name  # сегмент подтянем в фоновом потоке из БД
+    from bonus.sheets_queue import enqueue_certificate_ids
+
+    enqueue_certificate_ids(db, [certificate.id])
+    _start_issue_external_sync(certificate.id)
+
+
+def _start_issue_external_sync(certificate_id: int) -> None:
+    """Запускает фоновую запись выпуска в Sheets и Wallet."""
+    import threading
+
+    thread = threading.Thread(
+        target=_run_issue_external_sync,
+        args=(certificate_id,),
+        daemon=True,
+        name=f"issue-sync-{certificate_id}",
+    )
+    thread.start()
+
+
+def _run_issue_external_sync(certificate_id: int) -> None:
+    """Пишет одну только что выписанную карту в Sheets и Wallet вне запроса."""
+    import logging
+
+    from bonus.db import open_session
+    from bonus.sheets_queue import mark_certificate_job
+    from bonus.sheets_sync import sheets_enabled, sync_certificate_issued
+
+    logger = logging.getLogger("bonus.services")
+    db = open_session()
+    try:
+        certificate = db.get(Certificate, certificate_id)
+        if certificate is None or certificate.holder is None:
+            mark_certificate_job(db, certificate_id, "failed", "Сертификат не найден")
+            return
+        holder = certificate.holder
+        segment_name = ""
+        if certificate.segment is not None:
+            segment_name = (certificate.segment.name or "").strip()
+        if not sheets_enabled():
+            mark_certificate_job(db, certificate_id, "done")
+        else:
+            ok = sync_certificate_issued(
+                certificate, holder, segment_name=segment_name
+            )
+            if ok:
+                mark_certificate_job(db, certificate_id, "done")
+            # иначе job остаётся pending — доберёт воркер очереди
+        _sync_wallet(certificate, holder, expired=False)
+    except Exception:
+        logger.exception(
+            "Фоновая синхронизация выпуска не удалась для certificate_id=%s",
+            certificate_id,
+        )
+    finally:
+        db.close()
 
 
 def _sync_usage(

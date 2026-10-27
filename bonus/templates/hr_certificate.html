@@ -12,10 +12,36 @@
       {% if card.phone %}{% if card.department or card.job_title %} · {% endif %}{{ card.phone }}{% endif %}
     </p>
     {% endif %}
-    <div class="flash secret">
-      <p class="eyebrow">Ссылка сотруднику</p>
-      <p class="share">{{ share_url }}</p>
-      <button class="text-link" type="button" data-copy="{{ share_url }}">Скопировать</button>
+    <div class="flash secret" id="share-box"
+         data-sync-url="/hr/c/{{ card.id }}/sync-status"
+         data-syncing="{{ '1' if syncing|default(false) else '0' }}">
+      <div id="share-ready" {% if syncing|default(false) or sync_failed|default(false) %}hidden{% endif %}>
+        <p class="eyebrow">Ссылка сотруднику</p>
+        <p class="share">{{ share_url }}</p>
+        <button class="text-link" type="button" data-copy="{{ share_url }}">Скопировать</button>
+      </div>
+      <div id="share-syncing" class="share-sync" {% if not syncing|default(false) %}hidden{% endif %}>
+        <p class="eyebrow">Создаём карту</p>
+        <div class="share-sync-bar" aria-hidden="true"><span></span></div>
+        <p class="share-sync-text" id="share-sync-text">
+          {% if sync_sheets|default(false) and sync_wallet|default(false) %}
+          Записываем в Google Таблицу и Google Wallet…
+          {% elif sync_sheets|default(false) %}
+          Записываем в Google Таблицу…
+          {% elif sync_wallet|default(false) %}
+          Записываем в Google Wallet…
+          {% else %}
+          Сохраняем карту…
+          {% endif %}
+        </p>
+        <p class="muted share-sync-hint">Ссылка появится здесь, как только запись завершится.</p>
+      </div>
+      <div id="share-failed" class="share-sync is-bad" {% if not sync_failed|default(false) %}hidden{% endif %}>
+        <p class="eyebrow">Не удалось записать во внешние системы</p>
+        <p class="muted">Карта в системе уже есть. Ссылку можно скопировать; Google Таблица догонит из очереди или через «Настройки».</p>
+        <p class="share">{{ share_url }}</p>
+        <button class="text-link" type="button" data-copy="{{ share_url }}">Скопировать</button>
+      </div>
     </div>
     <form method="post" action="/hr/c/{{ card.id }}/name" class="stack">
       <input type="hidden" name="csrf_token" value="{{ csrf }}">
@@ -84,4 +110,66 @@
 {% with items=card.history %}
   {% include "_history.html" %}
 {% endwith %}
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  var box = document.getElementById("share-box");
+  if (!box || box.getAttribute("data-syncing") !== "1") return;
+  var url = box.getAttribute("data-sync-url");
+  var ready = document.getElementById("share-ready");
+  var syncing = document.getElementById("share-syncing");
+  var failed = document.getElementById("share-failed");
+  var tries = 0;
+  var maxTries = 90;
+
+  function showReady() {
+    if (syncing) syncing.hidden = true;
+    if (failed) failed.hidden = true;
+    if (ready) ready.hidden = false;
+  }
+  function showFailed() {
+    if (syncing) syncing.hidden = true;
+    if (ready) ready.hidden = true;
+    if (failed) failed.hidden = false;
+  }
+
+  function poll() {
+    tries += 1;
+    fetch(url, { credentials: "same-origin" })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (!data || !data.ok) {
+          if (tries >= maxTries) showFailed();
+          else window.setTimeout(poll, 1200);
+          return;
+        }
+        if (data.failed) {
+          showFailed();
+          return;
+        }
+        if (data.ready) {
+          showReady();
+          return;
+        }
+        // Нет задачи в очереди — карта уже в системе, ссылку можно отдать.
+        if (data.status === "none" && tries >= 6) {
+          showReady();
+          return;
+        }
+        if (tries >= maxTries) {
+          showFailed();
+          return;
+        }
+        window.setTimeout(poll, 1000);
+      })
+      .catch(function () {
+        if (tries >= maxTries) showFailed();
+        else window.setTimeout(poll, 1500);
+      });
+  }
+
+  window.setTimeout(poll, 400);
+})();
+</script>
 {% endblock %}
