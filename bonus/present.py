@@ -633,13 +633,16 @@ def _card_view(
     template_path = ""
     logo_url = "/static/logo.svg"
     logo_custom = False
+    template_name = ""
     if certificate.template_id is not None:
         from bonus.catalog import template_logo_is_custom, template_logo_url
         from bonus.models import CardTemplate
 
         template = db.get(CardTemplate, certificate.template_id)
-        if template is not None and template.image_path:
-            template_path = media_url(template.image_path)
+        if template is not None:
+            template_name = (template.name or "").strip()
+            if template.image_path:
+                template_path = media_url(template.image_path)
         logo_url = template_logo_url(template)
         logo_custom = template_logo_is_custom(template)
     cert_parts = list_parts(db, certificate.id)
@@ -670,9 +673,8 @@ def _card_view(
     if cert_parts:
         primary = min(cert_parts, key=lambda part: (part.sort_order, part.id))
         spend_ok = allows_weekday(primary.use_days, today)
-    segment_label = " + ".join(
-        part.segment_name for part in cert_parts if part.segment_name
-    ) or _segment_name(db, certificate.segment_id)
+    # Подпись на карточке — название шаблона из «Оформление», иначе сегмент.
+    segment_label = template_name or _segment_name(db, certificate.segment_id)
     return CardView(
         id=certificate.id,
         public_number=certificate.public_number,

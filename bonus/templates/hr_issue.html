@@ -108,9 +108,9 @@
       </fieldset>
       <label class="field">Шаблон баннера
         <select name="template_id" id="template-select">
-          <option value="0" data-discount="0" data-image="" data-logo="" data-color="" data-segment="" data-segment2="">Без картинки</option>
+          <option value="0" data-discount="0" data-image="" data-logo="" data-color="" data-segment="" data-segment2="" data-name="">Без картинки</option>
           {% for item in templates %}
-          <option value="{{ item.id }}" data-discount="{{ item.discount_percent or 0 }}" data-image="{{ media_url(item.image_path) }}" data-logo="{% if item.logo_path %}{{ media_url(item.logo_path) }}{% endif %}" data-color="{{ item.color or '' }}" data-segment="{{ item.segment_id or '' }}" data-segment2="{{ item.segment2_id or '' }}">{{ item.name }}{% if item.segment2_id %} · комбо{% endif %}{% if item.discount_percent %} · {{ item.discount_percent }}%{% endif %}</option>
+          <option value="{{ item.id }}" data-name="{{ item.name }}" data-discount="{{ item.discount_percent or 0 }}" data-image="{{ media_url(item.image_path) }}" data-logo="{% if item.logo_path %}{{ media_url(item.logo_path) }}{% endif %}" data-color="{{ item.color or '' }}" data-segment="{{ item.segment_id or '' }}" data-segment2="{{ item.segment2_id or '' }}">{{ item.name }}{% if item.segment2_id %} · комбо{% endif %}{% if item.discount_percent %} · {{ item.discount_percent }}%{% endif %}</option>
           {% endfor %}
         </select>
       </label>
@@ -327,9 +327,10 @@
     card.style.setProperty("--card", color ? color.value : "#00A8A8");
     var name = (nameInput && nameInput.value.trim()) || "Имя сотрудника";
     var segment = "";
-    if (comboMode && comboNames) {
-      segment = (comboNames.textContent || "").trim().toLowerCase();
-    } else if (select && select.selectedIndex > 0) {
+    if (templates && templates.selectedIndex > 0) {
+      segment = (templates.options[templates.selectedIndex].getAttribute("data-name") || "").trim().toLowerCase();
+    }
+    if (!segment && select && select.selectedIndex > 0) {
       segment = (select.options[select.selectedIndex].getAttribute("data-name") || "").trim().toLowerCase();
     }
     holderEl.textContent = segment ? name + ", " + segment : name;
