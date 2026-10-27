@@ -113,7 +113,7 @@ def test_daily_burn_leaves_monthly() -> None:
     issued.certificate.created_at = datetime(2026, 10, 1, 10, 0, tzinfo=MSK)
     db.commit()
 
-    moment = datetime(2026, 10, 27, 17, 30, tzinfo=MSK)
+    moment = datetime(2026, 10, 27, 23, 59, tzinfo=MSK)
     burned = apply_daily_burns(db, moment)
     assert burned >= 1
     db.refresh(issued.certificate)
