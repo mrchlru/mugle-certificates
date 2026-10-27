@@ -1,8 +1,9 @@
 {% extends "base.html" %}
 {% block title %}{{ card.public_number }}{% endblock %}
-{% set show_gift_unwrap = card.unwrap_pending and card.unwrap_kind in ['birthday', 'gift'] %}
+{% set card_is_expired = card_expired|default(false) %}
+{% set show_gift_unwrap = (not card_is_expired) and card.unwrap_pending and card.unwrap_kind in ['birthday', 'gift'] %}
 {% block header %}
-<header class="site-header wallet-header" id="wallet-page-header">
+<header class="site-header wallet-header" id="wallet-page-header"{% if card_is_expired %} hidden{% endif %}>
   <span class="brand">
     <img src="/static/logo-teams.png" alt="Teams Bonus" width="52" height="52">
   </span>
@@ -15,16 +16,23 @@
 {% endblock %}
 {% block main_class %}wallet-wrap{% endblock %}
 {% block head_scripts %}
-{% if show_gift_unwrap %}
+{% if card_is_expired or show_gift_unwrap %}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Unbounded:wght@700&display=swap" rel="stylesheet">
+{% endif %}
+{% if card_is_expired %}
+<link rel="stylesheet" href="/static/expired/card-expired.css?v={{ asset_v|default('1') }}">
+{% elif show_gift_unwrap %}
 <link rel="stylesheet" href="/static/gift/gift-unwrap.css?v={{ asset_v|default('1') }}">
 {% endif %}
 {% endblock %}
 {% block content %}
+{% if not card_is_expired %}
 <p class="wallet-hint">Покажите штрихкод управляющему в ресторане.</p>
+{% endif %}
 {% include "_card.html" %}
+{% if not card_is_expired %}
 {% if google_wallet_enabled|default(false) and google_wallet_href|default('')
    or apple_wallet_enabled|default(false) and apple_wallet_href|default('')
    or walletpasses_enabled|default(false) and walletpasses_href|default('') %}
@@ -53,9 +61,56 @@
   {% include "_history.html" %}
 {% endwith %}
 {% include "_partners_dialog.html" %}
+{% endif %}
 {% endblock %}
 {% block scripts %}
-{% if show_gift_unwrap %}
+{% if card_is_expired %}
+<script src="/static/expired/card-expired.js?v={{ asset_v|default('1') }}"></script>
+<script>
+(function () {
+  var firstName = {{ card.first_name|tojson }};
+  var expiredOn = {{ expires_on_iso|default('')|tojson }};
+
+  function startExpired() {
+    var cardEl = document.querySelector(".wallet-card");
+    if (!cardEl || typeof CardExpired === "undefined" || !CardExpired.mount) return;
+    CardExpired.mount({
+      card: cardEl,
+      expiredOn: expiredOn || undefined,
+      firstName: firstName || undefined,
+      barcodeSelector: ".wallet-code"
+    });
+  }
+
+  function whenImagesReady(cardEl, done) {
+    var images = cardEl ? cardEl.querySelectorAll("img") : [];
+    if (!images.length) { done(); return; }
+    var left = images.length;
+    function tick() {
+      left -= 1;
+      if (left <= 0) done();
+    }
+    images.forEach(function (img) {
+      if (img.complete) { tick(); return; }
+      img.addEventListener("load", tick, { once: true });
+      img.addEventListener("error", tick, { once: true });
+    });
+    window.setTimeout(done, 1200);
+  }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    var cardEl = document.querySelector(".wallet-card");
+    var started = false;
+    function run() {
+      if (started) return;
+      started = true;
+      startExpired();
+    }
+    whenImagesReady(cardEl, run);
+  });
+})();
+</script>
+{% elif show_gift_unwrap %}
 <script src="/static/gift/gift-unwrap.js?v={{ asset_v|default('1') }}"></script>
 <script>
 (function () {

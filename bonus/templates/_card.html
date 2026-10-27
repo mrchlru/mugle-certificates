@@ -29,8 +29,10 @@
     <div class="wallet-code" data-tilt-ignore data-tilt-above>
       {% if card.barcode_svg %}
       <div class="wallet-barcode" aria-hidden="true">{{ card.barcode_svg|safe }}</div>
+      {% elif not card.barcode_value %}
+      <div class="wallet-barcode is-hidden" aria-hidden="true"></div>
       {% endif %}
-      <p class="wallet-code-number">{{ card.barcode_value }}</p>
+      <p class="wallet-code-number">{% if card.barcode_value %}{{ card.barcode_value }}{% else %}••••-••••{% endif %}</p>
     </div>
     <p class="wallet-meta">{{ card.public_number }} · {{ status_label(card.status, card.balance, card.expires_on, card.single_use) }}</p>
   </div>

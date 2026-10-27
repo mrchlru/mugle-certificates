@@ -1,0 +1,93 @@
+/*
+ * card-expired.css — экран «Срок действия карты закончился». Префикс ce-.
+ * Эталон: reference-prototype.html. Один экран для всех типов карт, акцент бирюзовый (--ce-accent).
+ * Конечное состояние описано в базовых правилах, а анимация идёт только при .is-play,
+ * поэтому при prefers-reduced-motion экран сразу показывается готовым.
+ */
+.ce {
+  --ce-accent: #19B8A3;
+  --ce-accent-ink: #052A25;
+  --ce-paper: #EAF2F0;
+  --ce-muted: #8FA3A0;
+  --ce-display: "Unbounded", "Arial Black", system-ui, sans-serif;
+  --ce-body: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --ce-w: 270px; --ce-h: 363px; --ce-r: 14px;
+
+  position: fixed; inset: 0; z-index: 1000; overflow: auto;
+  background:
+    radial-gradient(90% 46% at 50% 36%, rgba(25,184,163,.24), transparent 66%),
+    linear-gradient(180deg, #101A1B, #0A1011);
+  color: var(--ce-paper); font-family: var(--ce-body); color-scheme: dark;
+}
+.ce--embedded { position: absolute; z-index: 1; border-radius: inherit; }
+.ce *, .ce *::before, .ce *::after { box-sizing: border-box; }
+
+.ce__col { position: relative; max-width: 430px; min-height: 100%; margin: 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 58px; padding: calc(64px + env(safe-area-inset-top, 0px)) 24px calc(32px + env(safe-area-inset-bottom, 0px)); }
+.ce__tag { position: absolute; left: 24px; top: calc(20px + env(safe-area-inset-top, 0px)); font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--ce-muted); }
+
+/* карта + слои поверх неё */
+.ce__stage { position: relative; width: var(--ce-w); height: var(--ce-h); flex: none; }
+.ce__card { position: absolute; inset: 0; pointer-events: none; }
+.ce__fit { transform-origin: 0 0; }
+.ce__fit > * { margin: 0 !important; box-shadow: 0 18px 30px rgba(0,0,0,.4); }
+
+/* вуаль: обесцвечивает карту (конечное состояние: накрыта полностью) */
+.ce__veil {
+  position: absolute; inset: 0; border-radius: var(--ce-r); pointer-events: none;
+  -webkit-backdrop-filter: grayscale(1) brightness(.74) contrast(.92); backdrop-filter: grayscale(1) brightness(.74) contrast(.92);
+  background: rgba(10,16,17,.22);
+}
+/* бирюзовая линия сканирования */
+.ce__scan { position: absolute; left: -12px; right: -12px; top: 100%; height: 2px; background: var(--ce-accent); box-shadow: 0 0 18px 2px rgba(25,184,163,.7); opacity: 0; pointer-events: none; border-radius: 2px; }
+.ce__scan::before { content: ""; position: absolute; left: 12px; right: 12px; bottom: 2px; height: 70px; background: linear-gradient(0deg, rgba(25,184,163,.28), transparent); }
+
+/* штрихкод скрывается (класс ставит JS на элемент штрихкода) */
+.ce-barcode-off { filter: blur(7px); opacity: .2; pointer-events: none; transition: filter .6s ease, opacity .6s ease; }
+
+/* значок: песочные часы в бирюзовом круге на нижней кромке карты */
+.ce__badge { position: absolute; left: 50%; bottom: -48px; width: 68px; height: 68px; margin-left: -34px; border-radius: 50%; background: var(--ce-accent); display: grid; place-items: center; box-shadow: 0 10px 24px rgba(0,0,0,.45), 0 0 0 5px #0E1819; }
+.ce__badge::after { content: ""; position: absolute; inset: 0; border-radius: 50%; border: 2px solid var(--ce-accent); opacity: 0; pointer-events: none; }
+.ce__ring { position: absolute; inset: -9px; width: 86px; height: 86px; transform: rotate(-90deg); pointer-events: none; }
+.ce__ring circle { fill: none; stroke: var(--ce-accent); stroke-width: 2; stroke-linecap: round; stroke-dasharray: 264; stroke-dashoffset: 0; opacity: .55; }
+.ce__glass { width: 30px; height: 30px; overflow: visible; }
+.ce__glass .frame { fill: none; stroke: var(--ce-accent-ink); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ce__glass .sand { fill: var(--ce-accent-ink); }
+.ce__glass .sand-top { transform-box: fill-box; transform-origin: 50% 100%; transform: scaleY(0); }  /* конец: верх пуст */
+.ce__glass .sand-bot { transform-box: fill-box; transform-origin: 50% 100%; transform: scaleY(1); }  /* конец: низ полон */
+.ce__glass .drip { stroke: var(--ce-accent-ink); stroke-width: 1.4; stroke-linecap: round; opacity: 0; }
+
+/* текст */
+.ce__text { text-align: center; max-width: 340px; }
+.ce__text h1 { margin: 0; font: 700 24px/1.15 var(--ce-display); letter-spacing: -.02em; text-wrap: balance; }
+.ce__sub { margin: 12px 0 0; font-size: 15px; line-height: 1.45; color: var(--ce-paper); opacity: .86; }
+.ce__hint { margin: 14px 0 0; font-size: 13px; line-height: 1.45; color: var(--ce-muted); }
+
+/* ===== АНИМАЦИЯ (только при .is-play), всего около 3 секунд ===== */
+.ce.is-play .ce__card   { animation: ce-in .8s cubic-bezier(.2,.8,.2,1) both; }
+.ce.is-play .ce__veil   { animation: ce-sweep 1.1s cubic-bezier(.65,0,.35,1) .9s both; }
+.ce.is-play .ce__scan   { animation: ce-scan 1.1s cubic-bezier(.65,0,.35,1) .9s both; }
+.ce.is-play .ce__badge  { animation: ce-pop .7s cubic-bezier(.3,1.5,.5,1) 1.9s both; }
+.ce.is-play .ce__ring circle { animation: ce-draw .9s ease-out 2s both; }
+.ce.is-play .ce__badge::after { animation: ce-ripple 2.6s ease-out 2.9s infinite; }
+.ce.is-play .sand-top   { animation: ce-drain-top 1.5s linear 2.3s both; }
+.ce.is-play .sand-bot   { animation: ce-fill-bot 1.5s linear 2.3s both; }
+.ce.is-play .drip       { animation: ce-drip 1.5s linear 2.3s both; }
+.ce.is-play .ce__text h1  { animation: ce-up .7s ease-out 2.5s both; }
+.ce.is-play .ce__sub      { animation: ce-up .7s ease-out 2.65s both; }
+.ce.is-play .ce__hint     { animation: ce-up .7s ease-out 2.8s both; }
+
+@keyframes ce-in { from { opacity: 0; transform: translateY(22px) scale(.96); } to { opacity: 1; transform: none; } }
+@keyframes ce-sweep { from { clip-path: inset(0 0 100% 0 round var(--ce-r)); } to { clip-path: inset(0 0 0 0 round var(--ce-r)); } }
+@keyframes ce-scan { 0% { top: 0; opacity: 0; } 8% { opacity: 1; } 92% { opacity: 1; } 100% { top: 100%; opacity: 0; } }
+@keyframes ce-pop { from { transform: scale(0); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@keyframes ce-draw { from { stroke-dashoffset: 264; } to { stroke-dashoffset: 0; } }
+@keyframes ce-ripple { 0% { transform: scale(1); opacity: .6; } 100% { transform: scale(1.7); opacity: 0; } }
+@keyframes ce-drain-top { from { transform: scaleY(1); } to { transform: scaleY(0); } }
+@keyframes ce-fill-bot { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes ce-drip { 0% { opacity: 0; } 8% { opacity: 1; } 92% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes ce-up { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .ce.is-play * , .ce.is-play *::after { animation: none !important; }
+  .ce-barcode-off { transition: none; }
+}

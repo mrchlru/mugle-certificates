@@ -1,5 +1,6 @@
 """Карточка сотрудника с QR-кодом."""
 
+from dataclasses import replace
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Request
@@ -20,6 +21,7 @@ from bonus.models import Certificate, Role, User
 from bonus.partners import partner_cities
 from bonus.present import load_card, load_cards
 from bonus.services import find_certificate
+from bonus.values import today_msk
 from bonus.weekdays import WEEKDAY_CHOICES
 
 router = APIRouter()
@@ -71,14 +73,54 @@ def public_certificate(token: str, request: Request, db: Session = Depends(get_d
         return render(request, "missing.html", status_code=404)
     base = public_base(request)
     card = load_card(db, certificate, base, None)
+    is_expired = _certificate_expired(certificate)
+    if is_expired:
+        # Штрихкод и номер не отдаём на страницу — иначе скрытие обходится через DevTools.
+        card = replace(
+            card,
+            barcode_value="",
+            barcode_svg="",
+            public_number="MR-•••••",
+            short_code="",
+            unwrap_pending=False,
+        )
+    wallet = (
+        _empty_wallet_ui()
+        if is_expired
+        else _wallet_ui(db, certificate, base)
+    )
     return render(
         request,
         "public_card.html",
         card=card,
         card_token=certificate.token,
-        **_wallet_ui(db, certificate, base),
+        card_expired=is_expired,
+        expires_on_iso=(
+            certificate.expires_on.isoformat() if certificate.expires_on else ""
+        ),
+        **wallet,
         **_card_page_extras(),
     )
+
+
+def _certificate_expired(certificate: Certificate) -> bool:
+    """Срок карты истёк по московской дате сервера."""
+    return (
+        certificate.expires_on is not None
+        and certificate.expires_on < today_msk()
+    )
+
+
+def _empty_wallet_ui() -> dict:
+    """Скрывает кнопки кошелька на экране истёкшей карты."""
+    return {
+        "google_wallet_enabled": False,
+        "google_wallet_href": "",
+        "apple_wallet_enabled": False,
+        "apple_wallet_href": "",
+        "walletpasses_enabled": False,
+        "walletpasses_href": "",
+    }
 
 
 @router.post("/c/{token}/gift-opened")
@@ -105,6 +147,8 @@ def google_wallet_save(token: str, request: Request, db: Session = Depends(get_d
     certificate = find_certificate(db, token)
     if certificate is None:
         return render(request, "missing.html", status_code=404)
+    if _certificate_expired(certificate):
+        return RedirectResponse(f"/c/{certificate.token}", status_code=302)
     if not certificate_shows_wallet_buttons(db, certificate) or not wallet_enabled():
         return render(request, "missing.html", status_code=404)
     base = public_base(request)
@@ -128,6 +172,8 @@ def apple_wallet_pkpass(token: str, request: Request, db: Session = Depends(get_
     certificate = find_certificate(db, token)
     if certificate is None:
         return render(request, "missing.html", status_code=404)
+    if _certificate_expired(certificate):
+        return RedirectResponse(f"/c/{certificate.token}", status_code=302)
     if not certificate_shows_wallet_buttons(db, certificate) or not apple_wallet_enabled():
         return render(request, "missing.html", status_code=404)
     base = public_base(request)
