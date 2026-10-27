@@ -250,6 +250,7 @@
     if (!comboParts || !comboNames) return;
     var names = [];
     var html = "";
+    var primaryId = ids.length ? String(ids[0]) : "";
     ids.forEach(function (id, index) {
       var seg = SEGMENTS[String(id)];
       if (!seg) return;
@@ -258,8 +259,15 @@
       html += '<label class="field">' + seg.name + ", " + seg.unit;
       html += '<input name="nominal_' + seg.id + '" class="combo-nominal" data-seg="' + seg.id + '" inputmode="decimal" required placeholder="0">';
       html += "</label>";
-      // Комбо: дни использования не нужны. Для ланча — только дни начисления
-      // (они же определяют, когда часть появляется; тратить можно в любой день).
+      // Основная (первая) часть — дни использования всей комбо-карты.
+      // Ежедневная (ланч) — только дни начисления; трата смотрит на основную.
+      if (String(id) === primaryId) {
+        html += weekdayPickerHtml(
+          "use_days_" + seg.id,
+          seg.useDays,
+          "Дни использования · " + seg.name
+        );
+      }
       if (seg.accrual === "daily") {
         html += weekdayPickerHtml(
           "accrual_days_" + seg.id,

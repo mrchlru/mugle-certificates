@@ -1544,13 +1544,17 @@ def _issue_part_drafts(
             resolve_segment(db, template.segment2_id),
         ]
         drafts: list[PartDraft] = []
+        primary = segments[0]
+        # Дни использования комбо = дни основной (первой) части, напр. карты сотрудника.
+        primary_use_days = normalize_days(
+            form.getlist(f"use_days_{primary.id}"),
+            default=primary.use_days or ALL_DAYS,
+        )
         for index, segment in enumerate(segments, start=1):
             raw = form.get(f"nominal_{segment.id}") or form.get(f"nominal_part_{index}")
             value = optional_money(str(raw or ""))
             if value is None or value <= 0:
                 continue
-            # Комбо: дни использования не ограничивают трату — всегда все дни.
-            # Для ежедневной части дни начисления задают, когда пополнять ланч.
             accrual_days = normalize_days(
                 form.getlist(f"accrual_days_{segment.id}"),
                 default=segment.accrual_days or WEEKDAYS,
@@ -1559,7 +1563,7 @@ def _issue_part_drafts(
                 PartDraft(
                     segment_id=segment.id,
                     nominal=value,
-                    use_days=ALL_DAYS,
+                    use_days=primary_use_days,
                     accrual_days=accrual_days,
                     sort_order=index,
                 )

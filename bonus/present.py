@@ -660,12 +660,16 @@ def _card_view(
         )
         for part in cert_parts
     )
-    # Комбо: на карточке сумма всех частей (дни использования не режут баланс).
+    # Баланс на карточке — сумма частей. Трата комбо — по дням основной (первой) части.
     display_balance = (
-        available_balance(cert_parts, enforce_weekdays=len(cert_parts) <= 1)
+        sum(max(0, part.balance) for part in cert_parts)
         if cert_parts
         else certificate.balance
     )
+    spend_ok = True
+    if cert_parts:
+        primary = min(cert_parts, key=lambda part: (part.sort_order, part.id))
+        spend_ok = allows_weekday(primary.use_days, today)
     segment_label = " + ".join(
         part.segment_name for part in cert_parts if part.segment_name
     ) or _segment_name(db, certificate.segment_id)
@@ -687,7 +691,7 @@ def _card_view(
         birth_date=certificate.birth_date,
         ledger_sheet=certificate.ledger_sheet or "",
         status=certificate.status,
-        can_spend=_can_spend(certificate, display_balance),
+        can_spend=_can_spend(certificate, display_balance) and spend_ok,
         color=certificate.color or "#00A8A8",
         discount_percent=certificate.discount_percent or 0,
         single_use=bool(certificate.single_use),

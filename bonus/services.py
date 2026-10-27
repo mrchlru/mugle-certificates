@@ -311,13 +311,6 @@ def debit_certificate(
     for part in spend_order(targets):
         if remaining <= 0:
             break
-        # Комбо (несколько частей): дни использования не ограничивают трату —
-        # ланч начисляется по accrual_days, тратить можно в любой день.
-        if enforce_weekdays and part_id is None and len(parts) <= 1:
-            from bonus.weekdays import allows_weekday
-
-            if not allows_weekday(part.use_days, today_msk().isoweekday()):
-                continue
         take = min(part.balance, remaining)
         if take <= 0:
             continue
@@ -1086,16 +1079,15 @@ def _ensure_can_debit(
     if certificate.expires_on is not None and certificate.expires_on < today_msk():
         raise BonusError("Срок сертификата истёк")
     if parts is not None:
-        # Несколько частей = комбо: трата без фильтра по дням использования.
-        check_days = enforce_weekdays and len(parts) <= 1
-        spendable = available_balance(parts, enforce_weekdays=check_days)
-        if check_days and spendable <= 0 and certificate.balance > 0:
-            labels = [
-                f"{part.segment_name}: {days_label(part.use_days)}" for part in parts
-            ]
-            raise BonusError(
-                "Карта сегодня не действует. Дни использования: " + "; ".join(labels)
-            )
+        if enforce_weekdays and parts:
+            primary = min(parts, key=lambda part: (part.sort_order, part.id))
+            if not allows_weekday(primary.use_days, today_msk().isoweekday()):
+                raise BonusError(
+                    "Карта сегодня не действует. Дни использования: "
+                    f"{days_label(primary.use_days)}"
+                )
+        # После проверки дней основной части суммируем остатки всех частей.
+        spendable = available_balance(parts, enforce_weekdays=False)
     else:
         if enforce_weekdays and not allows_weekday(
             certificate.use_days, today_msk().isoweekday()
