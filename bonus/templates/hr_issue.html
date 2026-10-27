@@ -155,6 +155,7 @@
     {% endfor %}
   };
   var WEEKDAY_LABELS = [["1","Пн"],["2","Вт"],["3","Ср"],["4","Чт"],["5","Пт"],["6","Сб"],["7","Вс"]];
+  // В комбо дни использования не показываем: только дни начисления у ежедневной части.
   var select = document.getElementById("segment-select");
   var expires = document.getElementById("expires-on");
   var templates = document.getElementById("template-select");
@@ -234,12 +235,12 @@
     if (wrap) wrap.hidden = accrual !== "daily";
   }
 
-  function weekdayPickerHtml(fieldName, mask) {
+  function weekdayPickerHtml(fieldName, mask, legend) {
     var selected = String(mask || "");
-    var html = '<fieldset class="weekday-field"><legend></legend><div class="weekday-grid">';
+    var html = '<fieldset class="weekday-field"><legend>' + (legend || "") + '</legend><div class="weekday-grid">';
     WEEKDAY_LABELS.forEach(function (pair) {
       var on = selected.indexOf(pair[0]) !== -1;
-      html += '<label class="weekday-option"><input type="checkbox" name="' + fieldName + '" value="' + pair[0] + '"' + (on ? " checked" : "") + "><span>" + pair[1] + "</span></label>";
+      html += '<label class="weekday-chip" title="' + pair[1] + '"><input type="checkbox" name="' + fieldName + '" value="' + pair[0] + '"' + (on ? " checked" : "") + "><span>" + pair[1] + "</span></label>";
     });
     html += "</div></fieldset>";
     return html;
@@ -257,11 +258,14 @@
       html += '<label class="field">' + seg.name + ", " + seg.unit;
       html += '<input name="nominal_' + seg.id + '" class="combo-nominal" data-seg="' + seg.id + '" inputmode="decimal" required placeholder="0">';
       html += "</label>";
-      html += "<p class=\"eyebrow\">Дни использования · " + seg.name + "</p>";
-      html += weekdayPickerHtml("use_days_" + seg.id, seg.useDays);
+      // Комбо: дни использования не нужны. Для ланча — только дни начисления
+      // (они же определяют, когда часть появляется; тратить можно в любой день).
       if (seg.accrual === "daily") {
-        html += "<p class=\"eyebrow\">Дни начисления · " + seg.name + "</p>";
-        html += weekdayPickerHtml("accrual_days_" + seg.id, seg.accrualDays);
+        html += weekdayPickerHtml(
+          "accrual_days_" + seg.id,
+          seg.accrualDays,
+          "Дни начисления · " + seg.name
+        );
       }
       html += "</div>";
     });

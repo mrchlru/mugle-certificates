@@ -660,8 +660,9 @@ def _card_view(
         )
         for part in cert_parts
     )
+    # Комбо: на карточке сумма всех частей (дни использования не режут баланс).
     display_balance = (
-        available_balance(cert_parts, enforce_weekdays=True)
+        available_balance(cert_parts, enforce_weekdays=len(cert_parts) <= 1)
         if cert_parts
         else certificate.balance
     )

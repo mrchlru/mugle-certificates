@@ -2224,22 +2224,28 @@ body.partners-dialog-open {
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  color: var(--black);
 }
 
 .weekday-grid {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 
 .weekday-chip {
   position: relative;
+  display: block;
+  margin: 0;
   cursor: pointer;
+  user-select: none;
 }
 
 .weekday-chip input {
   position: absolute;
   opacity: 0;
+  width: 0;
+  height: 0;
   pointer-events: none;
 }
 
@@ -2247,21 +2253,27 @@ body.partners-dialog-open {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 40px;
-  min-height: 36px;
-  padding: 0 10px;
-  border: 1px solid var(--line);
-  background: #fff;
+  box-sizing: border-box;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border: 1.5px solid var(--black);
+  background: #f3f3f3;
+  color: var(--black);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+  line-height: 1;
 }
 
 .weekday-chip input:checked + span {
-  border-color: var(--black);
-  background: var(--soft);
+  background: #e8e8e8;
   box-shadow: inset 0 0 0 1px var(--black);
+}
+
+.weekday-chip:hover span {
+  background: #ececec;
 }
 
 .weekday-accrual {

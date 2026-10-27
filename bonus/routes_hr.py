@@ -1549,10 +1549,8 @@ def _issue_part_drafts(
             value = optional_money(str(raw or ""))
             if value is None or value <= 0:
                 continue
-            use_days = normalize_days(
-                form.getlist(f"use_days_{segment.id}"),
-                default=segment.use_days or ALL_DAYS,
-            )
+            # Комбо: дни использования не ограничивают трату — всегда все дни.
+            # Для ежедневной части дни начисления задают, когда пополнять ланч.
             accrual_days = normalize_days(
                 form.getlist(f"accrual_days_{segment.id}"),
                 default=segment.accrual_days or WEEKDAYS,
@@ -1561,7 +1559,7 @@ def _issue_part_drafts(
                 PartDraft(
                     segment_id=segment.id,
                     nominal=value,
-                    use_days=use_days,
+                    use_days=ALL_DAYS,
                     accrual_days=accrual_days,
                     sort_order=index,
                 )
