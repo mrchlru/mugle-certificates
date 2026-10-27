@@ -31,7 +31,7 @@ _DAILY_BURN_PREFIX = "Сгорание остатка: ежедневно"
 
 
 def run_scheduled_accruals() -> int:
-    """Окно 04:00 — начисления; окно 17:00 — сгорание дневного остатка."""
+    """Окно 04:00 — начисления; с 23:59 — сгорание дневного остатка ланча."""
     db = open_session()
     try:
         now = datetime.now(MSK)
@@ -80,7 +80,7 @@ def apply_daily_accruals(db: Session, now: datetime | None = None) -> int:
 
 
 def apply_daily_burns(db: Session, now: datetime | None = None) -> int:
-    """В 17:00 МСК сжигает неиспользованный остаток ежедневных частей."""
+    """В 23:59 МСК сжигает неиспользованный остаток ежедневных частей (ланч)."""
     moment = now or datetime.now(MSK)
     marker = _daily_burn_marker(moment)
     done = 0
@@ -182,7 +182,7 @@ def apply_monthly_accruals(db: Session, now: datetime | None = None) -> int:
 
 
 async def accrual_worker() -> None:
-    """Фоновый цикл: догон, затем сон до ближайших 04:00 или 17:00 МСК."""
+    """Фоновый цикл: догон, затем сон до ближайших 04:00 или 23:59 МСК."""
     while True:
         try:
             await asyncio.to_thread(run_scheduled_accruals)
@@ -217,16 +217,16 @@ def _accrual_window_open(now: datetime) -> bool:
 
 
 def _daily_burn_window_open(now: datetime) -> bool:
-    """После 17:00 МСК можно (идемпотентно) сжечь дневной остаток."""
-    return (now.hour, now.minute, now.second) >= (17, 0, 0)
+    """С 23:59 МСК — сгорание дневного остатка ланча за текущие сутки."""
+    return (now.hour, now.minute, now.second) >= (23, 59, 0)
 
 
 def _seconds_until_next_job() -> float:
-    """Сон до ближайших 04:00 или 17:00 Europe/Moscow."""
+    """Сон до ближайших 04:00 или 23:59 Europe/Moscow."""
     now = datetime.now(MSK)
     targets = [
         now.replace(hour=4, minute=0, second=0, microsecond=0),
-        now.replace(hour=17, minute=0, second=0, microsecond=0),
+        now.replace(hour=23, minute=59, second=0, microsecond=0),
     ]
     upcoming: list[datetime] = []
     for target in targets:

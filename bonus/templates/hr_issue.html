@@ -84,7 +84,7 @@
           {% include "_weekday_picker.html" %}
         {% endwith %}
         <div id="accrual-days-wrap" hidden>
-          {% with field_name='accrual_days', selected_days='12345', legend='Дни начисления (04:00 → 17:00 МСК)', weekday_choices=weekday_choices %}
+          {% with field_name='accrual_days', selected_days='12345', legend='Дни начисления (04:00 → 23:59 МСК)', weekday_choices=weekday_choices %}
             {% include "_weekday_picker.html" %}
           {% endwith %}
         </div>

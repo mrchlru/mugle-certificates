@@ -493,7 +493,7 @@ def reset_monthly_balance(db: Session, certificate: Certificate, comment: str) -
 
 
 def burn_part_remainder(db: Session, part: CertificatePart, comment: str) -> None:
-    """Обнуляет остаток части (ежедневное сгорание в 17:00)."""
+    """Обнуляет остаток части (ежедневное сгорание ланча в 23:59 МСК)."""
     certificate = db.get(Certificate, part.certificate_id)
     if certificate is None:
         raise BonusError("Сертификат не найден")
@@ -521,7 +521,7 @@ def burn_part_remainder(db: Session, part: CertificatePart, comment: str) -> Non
 
 
 def burn_daily_remainder(db: Session, certificate: Certificate, comment: str) -> None:
-    """Обнуляет ежедневную часть карты в 17:00 МСК."""
+    """Обнуляет ежедневную часть карты в 23:59 МСК."""
     parts = [
         part
         for part in list_parts(db, certificate.id)
