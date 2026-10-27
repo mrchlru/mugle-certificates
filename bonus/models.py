@@ -41,6 +41,7 @@ class AuditAction(str, enum.Enum):
     staff_active = "staff_active"
     certificate_issue = "certificate_issue"
     certificate_credit = "certificate_credit"
+    certificate_debit = "certificate_debit"
     certificate_block = "certificate_block"
     certificate_unblock = "certificate_unblock"
     certificate_expiry = "certificate_expiry"

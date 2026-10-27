@@ -145,6 +145,20 @@ def form_money(raw: str) -> int:
     return value
 
 
+def form_signed_money(raw: str) -> int:
+    """Сумма в копейках со знаком: минус в начале — списание (отрицательное)."""
+    text = (raw or "").strip().replace("−", "-").replace("–", "-").replace("—", "-")
+    if text.startswith("+"):
+        text = text[1:].strip()
+    negative = text.startswith("-")
+    if negative:
+        text = text[1:].strip()
+    if text == "":
+        raise BonusError("Укажите сумму")
+    value = form_money(text)
+    return -value if negative else value
+
+
 def optional_money(raw: str) -> int | None:
     """Пустое поле суммы остаётся пустым, а не нулём."""
     try:

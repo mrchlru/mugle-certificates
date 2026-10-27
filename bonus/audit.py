@@ -32,6 +32,7 @@ _ACTION_LABELS: dict[str, str] = {
     AuditAction.staff_active.value: "Включение / отключение",
     AuditAction.certificate_issue.value: "Выпуск карты",
     AuditAction.certificate_credit.value: "Начисление бонусов",
+    AuditAction.certificate_debit.value: "Списание бонусов",
     AuditAction.certificate_block.value: "Блокировка карты",
     AuditAction.certificate_unblock.value: "Разблокировка карты",
     AuditAction.certificate_expiry.value: "Срок действия карты",
@@ -97,6 +98,15 @@ def list_audit(db: Session, *, limit: int = 300) -> list[AuditView]:
 def credit_audit_detail(amount: int, comment: str) -> str:
     """Короткое описание начисления для журнала."""
     parts = [format_money(amount)]
+    cleaned = comment.strip()
+    if cleaned:
+        parts.append(cleaned)
+    return " · ".join(parts)
+
+
+def debit_audit_detail(amount: int, comment: str) -> str:
+    """Короткое описание списания для журнала."""
+    parts = [f"−{format_money(amount)}"]
     cleaned = comment.strip()
     if cleaned:
         parts.append(cleaned)

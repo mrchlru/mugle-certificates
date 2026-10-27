@@ -137,18 +137,26 @@ def debit_certificate(
     actor: User,
     amount: int,
     comment: str,
+    *,
+    enforce_weekdays: bool = True,
+    burn_single_use: bool = True,
 ) -> Transaction:
-    """Списывает бонусы. У одноразового после списания сгорает весь остаток."""
+    """Списывает бонусы. У одноразового после списания сгорает весь остаток.
+
+    Из админки: enforce_weekdays=False и burn_single_use=False — правка баланса
+    без проверки дней использования и без автосгорания остатка.
+    """
     if apply_expiry_writeoff(db, certificate):
         db.commit()
         db.refresh(certificate)
         _sync_usage(db, certificate, expired=True)
-    _ensure_can_debit(certificate, amount)
+    _ensure_can_debit(certificate, amount, enforce_weekdays=enforce_weekdays)
     changed = _change_balance(db, certificate.id, -amount, require_active=True)
     if not changed:
         db.rollback()
         raise BonusError("Недостаточно бонусов или сертификат уже недоступен")
     db.refresh(certificate)
+    text = comment.strip() or "Списание бонусов"
     tx = _add_transaction(
         db,
         certificate_id=certificate.id,
@@ -156,19 +164,21 @@ def debit_certificate(
         tx_type=TxType.debit,
         amount=amount,
         balance_after=certificate.balance,
-        comment=comment.strip()[:300],
+        comment=text[:300],
         restaurant=actor.restaurant.strip()[:200],
     )
     place = actor.restaurant.strip()[:200]
-    _burn_single_use_remainder(
-        db,
-        certificate,
-        actor_id=actor.id,
-        after_debit_id=tx.id,
-        restaurant=place,
-    )
+    if burn_single_use:
+        _burn_single_use_remainder(
+            db,
+            certificate,
+            actor_id=actor.id,
+            after_debit_id=tx.id,
+            restaurant=place,
+        )
     db.commit()
     db.refresh(tx)
+    db.refresh(certificate)
     _sync_usage(db, certificate)
     return tx
 
@@ -765,7 +775,12 @@ def _opening_amounts(nominal: int | None, balance: int | None) -> tuple[int, int
     return nominal, balance
 
 
-def _ensure_can_debit(certificate: Certificate, amount: int) -> None:
+def _ensure_can_debit(
+    certificate: Certificate,
+    amount: int,
+    *,
+    enforce_weekdays: bool = True,
+) -> None:
     from bonus.weekdays import allows_weekday, days_label
 
     if amount <= 0:
@@ -774,11 +789,12 @@ def _ensure_can_debit(certificate: Certificate, amount: int) -> None:
         raise BonusError("Сертификат заблокирован")
     if certificate.expires_on is not None and certificate.expires_on < today_msk():
         raise BonusError("Срок сертификата истёк")
-    today = today_msk()
-    if not allows_weekday(certificate.use_days, today.isoweekday()):
-        raise BonusError(
-            f"Карта сегодня не действует. Дни использования: {days_label(certificate.use_days)}"
-        )
+    if enforce_weekdays:
+        today = today_msk()
+        if not allows_weekday(certificate.use_days, today.isoweekday()):
+            raise BonusError(
+                f"Карта сегодня не действует. Дни использования: {days_label(certificate.use_days)}"
+            )
     if certificate.balance < amount:
         raise BonusError("На сертификате меньше бонусов, чем вы списываете")
 

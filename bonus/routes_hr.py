@@ -27,9 +27,17 @@ from bonus.catalog import (
     update_template,
 )
 from bonus.app_settings import set_wallet_buttons_enabled, wallet_buttons_enabled
-from bonus.audit import credit_audit_detail, list_audit, write_audit
+from bonus.audit import credit_audit_detail, debit_audit_detail, list_audit, write_audit
 from bonus.db import get_db
-from bonus.http import form_money, guard_csrf, optional_money, public_base, render, require
+from bonus.http import (
+    form_money,
+    form_signed_money,
+    guard_csrf,
+    optional_money,
+    public_base,
+    render,
+    require,
+)
 from dataclasses import replace
 
 from sqlalchemy import select
@@ -70,6 +78,7 @@ from bonus.services import (
     IssueDraft,
     create_staff,
     credit_certificate,
+    debit_certificate,
     delete_certificate,
     issue_certificate,
     enqueue_certificates_for_sheets,
@@ -801,27 +810,48 @@ def credit_submit(
     comment: str = Form(""),
     csrf_token: str = Form(""),
 ):
-    """Добавляет бонусы к остатку сертификата."""
+    """Начисляет или списывает бонусы: минус в сумме — списание."""
     certificate = _certificate_or_redirect(db, request, certificate_id)
     if certificate is None:
         return RedirectResponse("/hr", status_code=303)
     try:
         guard_csrf(request, csrf_token)
-        added = form_money(amount)
-        credit_certificate(db, certificate, user, added, comment)
-        write_audit(
-            db,
-            actor=user,
-            action=AuditAction.certificate_credit,
-            summary=f"Начисление на {certificate.public_number}",
-            target_type="certificate",
-            target_id=certificate.id,
-            detail=credit_audit_detail(added, comment),
-        )
+        signed = form_signed_money(amount)
+        if signed > 0:
+            credit_certificate(db, certificate, user, signed, comment)
+            write_audit(
+                db,
+                actor=user,
+                action=AuditAction.certificate_credit,
+                summary=f"Начисление на {certificate.public_number}",
+                target_type="certificate",
+                target_id=certificate.id,
+                detail=credit_audit_detail(signed, comment),
+            )
+            flash(request, f"Начислено {format_money(signed)}")
+        else:
+            spent = -signed
+            debit_certificate(
+                db,
+                certificate,
+                user,
+                spent,
+                comment,
+                enforce_weekdays=False,
+                burn_single_use=False,
+            )
+            write_audit(
+                db,
+                actor=user,
+                action=AuditAction.certificate_debit,
+                summary=f"Списание с {certificate.public_number}",
+                target_type="certificate",
+                target_id=certificate.id,
+                detail=debit_audit_detail(spent, comment),
+            )
+            flash(request, f"Списано {format_money(spent)}")
     except BonusError as exc:
         flash(request, exc.message, "bad")
-    else:
-        flash(request, f"Начислено {format_money(added)}")
     return RedirectResponse(f"/hr/c/{certificate_id}", status_code=303)
 
 

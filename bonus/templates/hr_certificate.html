@@ -50,14 +50,15 @@
     </form>
     <form method="post" action="/hr/c/{{ card.id }}/credit" class="stack">
       <input type="hidden" name="csrf_token" value="{{ csrf }}">
-      <p class="eyebrow">Начислить бонусы</p>
+      <p class="eyebrow">Изменить баланс</p>
       <label class="field">Сумма, ₽
-        <input name="amount" inputmode="decimal" required placeholder="1000">
+        <input name="amount" inputmode="decimal" required placeholder="1000 или -500">
       </label>
+      <p class="muted design-hint">Плюс начисляет, минус списывает (−500 → списать 500 ₽). Попадёт в историю и Google Таблицу.</p>
       <label class="field">Комментарий
-        <input name="comment" maxlength="300" placeholder="Премия, доначисление">
+        <input name="comment" maxlength="300" placeholder="Премия, корректировка, списание">
       </label>
-      <button class="btn" type="submit">Начислить</button>
+      <button class="btn" type="submit">Применить</button>
     </form>
     <div class="row-actions">
       <form method="post" action="/hr/c/{{ card.id }}/block">
