@@ -272,19 +272,24 @@ async def issue_submit(
     try:
         guard_csrf(request, csrf_token)
         form = await request.form()
-        use_days = normalize_days(form.getlist("use_days"), default=ALL_DAYS)
-        accrual_days = normalize_days(form.getlist("accrual_days"), default=WEEKDAYS)
-        nominal_value = optional_money(nominal)
-        if nominal_value is None:
-            raise BonusError("Укажите номинал")
         try:
             sheet = parse_ledger_sheet(ledger_sheet)
         except ValueError as exc:
             raise BonusError(str(exc)) from exc
-        segment = resolve_segment(db, segment_id)
         template = resolve_template(db, template_id)
+        part_drafts, segment, segment_name = _issue_part_drafts(
+            db, form, segment_id=segment_id, template=template, nominal=nominal
+        )
+        if not part_drafts:
+            raise BonusError("Укажите номинал")
         expires = _expires(expires_on)
-        if segment.requires_expiry and expires is None:
+        needs_expiry = False
+        for item in part_drafts:
+            seg = db.get(Segment, item.segment_id)
+            if seg is not None and seg.requires_expiry:
+                needs_expiry = True
+                break
+        if needs_expiry and expires is None:
             raise BonusError("Укажите срок действия для этого сегмента")
         born = _expires(birth_date)
         if ledger_needs_birth_date(sheet) and born is None:
@@ -300,15 +305,19 @@ async def issue_submit(
             discount = segment.discount_percent
         if discount == 0 and template is not None and template.discount_percent:
             discount = template.discount_percent
-        one_shot = segment.single_use or ledger_is_single_use(sheet)
+        one_shot = (
+            len(part_drafts) == 1
+            and (segment.single_use or ledger_is_single_use(sheet))
+        )
         show_wallets = user.role == Role.admin and form.get("show_wallet_buttons") == "1"
+        total_nominal = sum(item.nominal for item in part_drafts)
         issued = issue_certificate(
             db,
             IssueDraft(
                 full_name=full_name,
                 login="",
                 password="",
-                nominal=nominal_value,
+                nominal=total_nominal,
                 balance=None,
                 note=note,
                 expires_on=expires,
@@ -320,13 +329,14 @@ async def issue_submit(
                 phone=phone,
                 discount_percent=discount,
                 single_use=one_shot,
-                use_days=use_days,
-                accrual_days=accrual_days,
-                segment_name=segment.name,
+                use_days=part_drafts[0].use_days,
+                accrual_days=part_drafts[0].accrual_days,
+                segment_name=segment_name,
                 ledger_sheet=sheet.value,
                 company=company,
                 birth_date=born,
                 show_wallet_buttons=show_wallets,
+                parts=tuple(part_drafts),
             ),
             user,
         )
@@ -691,6 +701,7 @@ def template_create(
     discount_percent: str = Form(""),
     color: str = Form("#00A8A8"),
     segment_id: int = Form(0),
+    segment2_id: int = Form(0),
     image: UploadFile = File(...),
     logo: UploadFile | None = File(None),
     csrf_token: str = Form(""),
@@ -718,6 +729,7 @@ def template_create(
             discount_percent=_discount(discount_percent),
             color=color,
             segment_id=segment_id or None,
+            segment2_id=segment2_id or None,
         )
     except BonusError as exc:
         flash(request, exc.message, "bad")
@@ -736,11 +748,12 @@ async def template_update(
     discount_percent: str = Form(""),
     color: str = Form("#00A8A8"),
     segment_id: int = Form(0),
+    segment2_id: int = Form(0),
     image: UploadFile | None = File(None),
     logo: UploadFile | None = File(None),
     csrf_token: str = Form(""),
 ):
-    """Меняет название, цвет, сегмент и при желании баннер или логотип."""
+    """Меняет название, цвет, сегмент(ы) и при желании баннер или логотип."""
     template = db.get(CardTemplate, template_id)
     try:
         guard_csrf(request, csrf_token)
@@ -767,6 +780,7 @@ async def template_update(
             discount_percent=_discount(discount_percent),
             color=color,
             segment_id=segment_id or None,
+            segment2_id=segment2_id or None,
             filename=filename,
             payload=payload,
             content_type=content_type,
@@ -903,6 +917,7 @@ def credit_submit(
     user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
     amount: str = Form(""),
     comment: str = Form(""),
+    part_id: int = Form(0),
     csrf_token: str = Form(""),
 ):
     """Начисляет или списывает бонусы: минус в сумме — списание."""
@@ -912,8 +927,11 @@ def credit_submit(
     try:
         guard_csrf(request, csrf_token)
         signed = form_signed_money(amount)
+        target_part = part_id if part_id > 0 else None
         if signed > 0:
-            credit_certificate(db, certificate, user, signed, comment)
+            credit_certificate(
+                db, certificate, user, signed, comment, part_id=target_part
+            )
             write_audit(
                 db,
                 actor=user,
@@ -934,6 +952,7 @@ def credit_submit(
                 comment,
                 enforce_weekdays=False,
                 burn_single_use=False,
+                part_id=target_part,
             )
             write_audit(
                 db,
@@ -1499,6 +1518,80 @@ def _staff_redirect(query: str = "", edit_id: int = 0) -> str:
     if not params:
         return "/hr/staff"
     return f"/hr/staff?{urlencode(params)}"
+
+
+def _issue_part_drafts(
+    db: Session,
+    form,
+    *,
+    segment_id: int,
+    template: CardTemplate | None,
+    nominal: str,
+) -> tuple[list, Segment, str]:
+    """Собирает PartDraft для одиночного или комбинированного выпуска."""
+    from bonus.parts import PartDraft
+
+    is_combo = (
+        template is not None
+        and template.segment_id
+        and template.segment2_id
+        and template.segment_id != template.segment2_id
+    )
+    if is_combo:
+        assert template is not None
+        segments = [
+            resolve_segment(db, template.segment_id),
+            resolve_segment(db, template.segment2_id),
+        ]
+        drafts: list[PartDraft] = []
+        for index, segment in enumerate(segments, start=1):
+            raw = form.get(f"nominal_{segment.id}") or form.get(f"nominal_part_{index}")
+            value = optional_money(str(raw or ""))
+            if value is None or value <= 0:
+                continue
+            use_days = normalize_days(
+                form.getlist(f"use_days_{segment.id}"),
+                default=segment.use_days or ALL_DAYS,
+            )
+            accrual_days = normalize_days(
+                form.getlist(f"accrual_days_{segment.id}"),
+                default=segment.accrual_days or WEEKDAYS,
+            )
+            drafts.append(
+                PartDraft(
+                    segment_id=segment.id,
+                    nominal=value,
+                    use_days=use_days,
+                    accrual_days=accrual_days,
+                    sort_order=index,
+                )
+            )
+        if len(drafts) < 2:
+            raise BonusError("Укажите номинал для обоих сегментов шаблона")
+        names = " + ".join(item.name for item in segments)
+        return drafts, segments[0], names
+
+    segment = resolve_segment(db, segment_id)
+    use_days = normalize_days(form.getlist("use_days"), default=segment.use_days or ALL_DAYS)
+    accrual_days = normalize_days(
+        form.getlist("accrual_days"), default=segment.accrual_days or WEEKDAYS
+    )
+    nominal_value = optional_money(nominal)
+    if nominal_value is None:
+        raise BonusError("Укажите номинал")
+    return (
+        [
+            PartDraft(
+                segment_id=segment.id,
+                nominal=nominal_value,
+                use_days=use_days,
+                accrual_days=accrual_days,
+                sort_order=1,
+            )
+        ],
+        segment,
+        segment.name,
+    )
 
 
 def _certificate_or_redirect(db: Session, request: Request, certificate_id: int):

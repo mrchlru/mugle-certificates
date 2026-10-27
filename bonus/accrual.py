@@ -1,4 +1,4 @@
-"""Автоначисление и дневное сгорание ежедневных бонусов."""
+"""Автоначисление и дневное сгорание по частям карт."""
 
 from __future__ import annotations
 
@@ -10,8 +10,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from bonus.db import open_session
-from bonus.models import AccrualPeriod, Certificate, CertificateStatus, Segment, Transaction, TxType
-from bonus.services import BonusError, burn_daily_remainder, reset_monthly_balance
+from bonus.models import (
+    AccrualPeriod,
+    Certificate,
+    CertificatePart,
+    CertificateStatus,
+    Transaction,
+    TxType,
+)
+from bonus.services import BonusError, burn_part_remainder, reset_part_balance
 from bonus.values import MSK, as_utc, today_msk
 from bonus.weekdays import WEEKDAYS, allows_weekday
 
@@ -41,154 +48,136 @@ def run_scheduled_accruals() -> int:
 
 
 def apply_daily_accruals(db: Session, now: datetime | None = None) -> int:
-    """В 04:00 МСК выставляет номинал картам с ежедневным начислением в выбранные дни."""
+    """В 04:00 МСК выставляет номинал ежедневным частям в выбранные дни."""
     moment = now or datetime.now(MSK)
     marker = _daily_marker(moment)
-    certificates = _daily_certificates(db)
     done = 0
-    for certificate in certificates:
-        if not _certificate_accepts_daily(certificate, moment):
+    for part, certificate in _parts_with_period(db, AccrualPeriod.daily):
+        if not _part_accepts_daily(part, certificate, moment):
             continue
-        if _has_marker(db, certificate.id, TxType.credit, marker):
+        if _has_marker(db, certificate.id, part.id, TxType.credit, marker):
             continue
         try:
-            reset_monthly_balance(db, certificate, marker)
+            reset_part_balance(db, part, marker)
         except BonusError as exc:
             logger.warning(
-                "Ежедневное начисление %s пропущено: %s",
+                "Ежедневное начисление %s/%s пропущено: %s",
                 certificate.public_number,
+                part.segment_name,
                 exc.message,
             )
             continue
         done += 1
         logger.info(
-            "Ежедневное начисление %s → номинал %s коп.",
+            "Ежедневное начисление %s · %s → номинал %s коп.",
             certificate.public_number,
-            certificate.nominal,
+            part.segment_name,
+            part.nominal,
         )
     if done:
-        print(f"Teams Bonus: ежедневное начисление — {done} карт ({marker})", flush=True)
+        print(f"Teams Bonus: ежедневное начисление — {done} частей ({marker})", flush=True)
     return done
 
 
 def apply_daily_burns(db: Session, now: datetime | None = None) -> int:
-    """В 17:00 МСК сжигает неиспользованный остаток ежедневных карт."""
+    """В 17:00 МСК сжигает неиспользованный остаток ежедневных частей."""
     moment = now or datetime.now(MSK)
     marker = _daily_burn_marker(moment)
-    certificates = _daily_certificates(db)
     done = 0
-    for certificate in certificates:
+    for part, certificate in _parts_with_period(db, AccrualPeriod.daily):
         if certificate.expires_on is not None and certificate.expires_on < today_msk():
             continue
-        if _has_marker(db, certificate.id, TxType.burn, marker):
+        if _has_marker(db, certificate.id, part.id, TxType.burn, marker):
             continue
         try:
-            burn_daily_remainder(db, certificate, marker)
+            burn_part_remainder(db, part, marker)
         except BonusError as exc:
             logger.warning(
-                "Ежедневное сгорание %s пропущено: %s",
+                "Ежедневное сгорание %s/%s пропущено: %s",
                 certificate.public_number,
+                part.segment_name,
                 exc.message,
             )
             continue
         done += 1
-        logger.info("Ежедневное сгорание %s", certificate.public_number)
+        logger.info(
+            "Ежедневное сгорание %s · %s",
+            certificate.public_number,
+            part.segment_name,
+        )
     if done:
-        print(f"Teams Bonus: ежедневное сгорание — {done} карт ({marker})", flush=True)
+        print(f"Teams Bonus: ежедневное сгорание — {done} частей ({marker})", flush=True)
     return done
 
 
 def apply_weekly_accruals(db: Session, now: datetime | None = None) -> int:
-    """Сбрасывает остаток и ставит номинал картам с «еженедельно», раз в ISO-неделю.
-
-    Как у ежемесячных: не накопительные, баланс обновляется к номиналу в 04:00 МСК
-    (после начала новой недели, обычно с понедельника). В неделю выпуска повторного
-    начисления нет — лимит уже выдан при выпуске.
-    """
+    """Сброс к номиналу еженедельных частей (понедельник 04:00 МСК)."""
     moment = now or datetime.now(MSK)
     year, week = _iso_year_week(moment)
     marker = _weekly_marker(year, week)
-    certificates = db.scalars(
-        select(Certificate)
-        .join(Segment, Certificate.segment_id == Segment.id)
-        .where(
-            Segment.accrual_period == AccrualPeriod.weekly,
-            Segment.is_active.is_(True),
-            Certificate.status == CertificateStatus.active,
-            Certificate.nominal > 0,
-            Certificate.single_use.is_(False),
-        )
-        .order_by(Certificate.id)
-    ).all()
     done = 0
-    for certificate in certificates:
-        if not _certificate_accepts_weekly(certificate, moment):
+    for part, certificate in _parts_with_period(db, AccrualPeriod.weekly):
+        if not _part_accepts_weekly(certificate, moment):
             continue
-        if _has_marker(db, certificate.id, TxType.credit, marker):
+        if _has_marker(db, certificate.id, part.id, TxType.credit, marker):
             continue
         try:
-            reset_monthly_balance(db, certificate, marker)
+            reset_part_balance(db, part, marker)
         except BonusError as exc:
             logger.warning(
-                "Еженедельное начисление %s пропущено: %s",
+                "Еженедельное начисление %s/%s пропущено: %s",
                 certificate.public_number,
+                part.segment_name,
                 exc.message,
             )
             continue
         done += 1
         logger.info(
-            "Еженедельный сброс %s → номинал %s коп.",
+            "Еженедельный сброс %s · %s → номинал %s коп.",
             certificate.public_number,
-            certificate.nominal,
+            part.segment_name,
+            part.nominal,
         )
     if done:
-        print(f"Teams Bonus: еженедельное начисление — {done} карт ({marker})", flush=True)
+        print(
+            f"Teams Bonus: еженедельное начисление — {done} частей ({marker})",
+            flush=True,
+        )
     return done
 
 
 def apply_monthly_accruals(db: Session, now: datetime | None = None) -> int:
-    """Сбрасывает остаток и ставит номинал картам с «ежемесячно», раз в календарный месяц.
-
-    Карта, выпущенная внутри месяца (например 20.10), живёт до 1-го следующего месяца —
-    тогда лимит обновляется. В месяц выпуска повторного начисления нет.
-    """
+    """Сброс к номиналу ежемесячных частей (1-е число 04:00 МСК)."""
     moment = now or datetime.now(MSK)
     marker = _monthly_marker(moment.year, moment.month)
-    certificates = db.scalars(
-        select(Certificate)
-        .join(Segment, Certificate.segment_id == Segment.id)
-        .where(
-            Segment.accrual_period == AccrualPeriod.monthly,
-            Segment.is_active.is_(True),
-            Certificate.status == CertificateStatus.active,
-            Certificate.nominal > 0,
-            Certificate.single_use.is_(False),
-        )
-        .order_by(Certificate.id)
-    ).all()
     done = 0
-    for certificate in certificates:
-        if not _certificate_accepts_monthly(certificate, moment):
+    for part, certificate in _parts_with_period(db, AccrualPeriod.monthly):
+        if not _part_accepts_monthly(certificate, moment):
             continue
-        if _has_marker(db, certificate.id, TxType.credit, marker):
+        if _has_marker(db, certificate.id, part.id, TxType.credit, marker):
             continue
         try:
-            reset_monthly_balance(db, certificate, marker)
+            reset_part_balance(db, part, marker)
         except BonusError as exc:
             logger.warning(
-                "Ежемесячное начисление %s пропущено: %s",
+                "Ежемесячное начисление %s/%s пропущено: %s",
                 certificate.public_number,
+                part.segment_name,
                 exc.message,
             )
             continue
         done += 1
         logger.info(
-            "Ежемесячный сброс %s → номинал %s коп.",
+            "Ежемесячный сброс %s · %s → номинал %s коп.",
             certificate.public_number,
-            certificate.nominal,
+            part.segment_name,
+            part.nominal,
         )
     if done:
-        print(f"Teams Bonus: ежемесячное начисление — {done} карт ({marker})", flush=True)
+        print(
+            f"Teams Bonus: ежемесячное начисление — {done} частей ({marker})",
+            flush=True,
+        )
     return done
 
 
@@ -204,21 +193,22 @@ async def accrual_worker() -> None:
         await asyncio.sleep(_seconds_until_next_job())
 
 
-def _daily_certificates(db: Session) -> list[Certificate]:
-    return list(
-        db.scalars(
-            select(Certificate)
-            .join(Segment, Certificate.segment_id == Segment.id)
-            .where(
-                Segment.accrual_period == AccrualPeriod.daily,
-                Segment.is_active.is_(True),
-                Certificate.status == CertificateStatus.active,
-                Certificate.nominal > 0,
-                Certificate.single_use.is_(False),
-            )
-            .order_by(Certificate.id)
-        ).all()
-    )
+def _parts_with_period(
+    db: Session, period: AccrualPeriod
+) -> list[tuple[CertificatePart, Certificate]]:
+    """Активные части с заданным периодом начисления и положительным номиналом."""
+    rows = db.execute(
+        select(CertificatePart, Certificate)
+        .join(Certificate, CertificatePart.certificate_id == Certificate.id)
+        .where(
+            CertificatePart.accrual_period == period,
+            CertificatePart.nominal > 0,
+            Certificate.status == CertificateStatus.active,
+            Certificate.single_use.is_(False),
+        )
+        .order_by(CertificatePart.id)
+    ).all()
+    return [(part, certificate) for part, certificate in rows]
 
 
 def _accrual_window_open(now: datetime) -> bool:
@@ -272,11 +262,13 @@ def _iso_year_week(moment: datetime) -> tuple[int, int]:
     return int(iso.year), int(iso.week)
 
 
-def _certificate_accepts_daily(certificate: Certificate, moment: datetime) -> bool:
-    """День в маске начисления, не день выпуска, не просрочена."""
+def _part_accepts_daily(
+    part: CertificatePart, certificate: Certificate, moment: datetime
+) -> bool:
+    """День в маске начисления части, не день выпуска, не просрочена."""
     if certificate.expires_on is not None and certificate.expires_on < today_msk():
         return False
-    if not allows_weekday(certificate.accrual_days, moment.isoweekday(), default=WEEKDAYS):
+    if not allows_weekday(part.accrual_days, moment.isoweekday(), default=WEEKDAYS):
         return False
     created = as_utc(certificate.created_at).astimezone(MSK).date()
     if created >= moment.astimezone(MSK).date():
@@ -284,20 +276,18 @@ def _certificate_accepts_daily(certificate: Certificate, moment: datetime) -> bo
     return True
 
 
-def _certificate_accepts_weekly(certificate: Certificate, moment: datetime) -> bool:
-    """Не просрочена; в неделю выпуска автосброс не делается — лимит уже выдан при выпуске."""
+def _part_accepts_weekly(certificate: Certificate, moment: datetime) -> bool:
+    """Не просрочена; в неделю выпуска автосброс не делается."""
     if certificate.expires_on is not None and certificate.expires_on < today_msk():
         return False
     created = as_utc(certificate.created_at).astimezone(MSK)
-    created_yw = _iso_year_week(created)
-    now_yw = _iso_year_week(moment)
-    if created_yw >= now_yw:
+    if _iso_year_week(created) >= _iso_year_week(moment):
         return False
     return True
 
 
-def _certificate_accepts_monthly(certificate: Certificate, moment: datetime) -> bool:
-    """Не просрочена; в месяц выпуска автосброс не делается — лимит уже выдан при выпуске."""
+def _part_accepts_monthly(certificate: Certificate, moment: datetime) -> bool:
+    """Не просрочена; в месяц выпуска автосброс не делается."""
     if certificate.expires_on is not None and certificate.expires_on < today_msk():
         return False
     created = as_utc(certificate.created_at).astimezone(MSK)
@@ -306,12 +296,30 @@ def _certificate_accepts_monthly(certificate: Certificate, moment: datetime) -> 
     return True
 
 
-def _has_marker(db: Session, certificate_id: int, tx_type: TxType, marker: str) -> bool:
+def _has_marker(
+    db: Session,
+    certificate_id: int,
+    part_id: int,
+    tx_type: TxType,
+    marker: str,
+) -> bool:
     found = db.scalar(
         select(Transaction.id).where(
             Transaction.certificate_id == certificate_id,
+            Transaction.part_id == part_id,
             Transaction.tx_type == tx_type,
             Transaction.comment == marker,
         )
     )
-    return found is not None
+    if found is not None:
+        return True
+    # Совместимость со старыми маркерами без part_id (до миграции частей).
+    legacy = db.scalar(
+        select(Transaction.id).where(
+            Transaction.certificate_id == certificate_id,
+            Transaction.part_id.is_(None),
+            Transaction.tx_type == tx_type,
+            Transaction.comment == marker,
+        )
+    )
+    return legacy is not None

@@ -7,7 +7,28 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from bonus.models import Certificate, CertificateStatus, Role, Segment, Transaction, TxType, User
+from bonus.models import (
+    AccrualPeriod,
+    Certificate,
+    CertificatePart,
+    CertificateStatus,
+    Role,
+    Segment,
+    Transaction,
+    TxType,
+    User,
+)
+from bonus.parts import (
+    PartDraft,
+    available_balance,
+    change_part_balance,
+    create_parts_for_certificate,
+    ensure_legacy_part,
+    list_parts,
+    spend_order,
+    sync_certificate_totals,
+    unwrap_kind_from_segments,
+)
 from bonus.security import generate_password, hash_password
 from bonus.values import MSK, as_utc, format_date, today_msk
 
@@ -58,6 +79,7 @@ class IssueDraft:
     birth_date: date | None = None
     show_wallet_buttons: bool = False
     template_name: str = ""
+    parts: tuple[PartDraft, ...] = ()
 
 
 def issue_certificate(
@@ -72,53 +94,101 @@ def issue_certificate(
     sync_external=False — без Google Sheets/Wallet (пакетный импорт синхронизирует сам).
     """
     holder, password = _holder_for_issue(db, draft)
-    nominal, balance = _opening_amounts(draft.nominal, draft.balance)
+    part_drafts = _part_drafts_from_issue(draft)
+    if part_drafts:
+        total_nominal = sum(item.nominal for item in part_drafts)
+        total_balance = sum(
+            item.nominal if item.balance is None else item.balance
+            for item in part_drafts
+        )
+        primary = part_drafts[0]
+        unwrap = unwrap_kind_from_segments(
+            db, [item.segment_id for item in part_drafts]
+        )
+        segment_id = primary.segment_id
+        use_days = (primary.use_days or "1234567")[:16]
+        accrual_days = (primary.accrual_days or "12345")[:16]
+        single_use = draft.single_use and len(part_drafts) == 1
+    else:
+        total_nominal, total_balance = _opening_amounts(draft.nominal, draft.balance)
+        unwrap = unwrap_kind_from_segments(db, [draft.segment_id])
+        segment_id = draft.segment_id
+        use_days = (draft.use_days or "1234567")[:16]
+        accrual_days = (draft.accrual_days or "12345")[:16]
+        single_use = draft.single_use
     certificate = Certificate(
         public_number=_temporary_number(),
         token=_new_token(db),
         short_code=_new_short_code(db),
         holder_id=holder.id,
-        segment_id=draft.segment_id,
+        segment_id=segment_id,
         template_id=draft.template_id,
         color=draft.color or "#00A8A8",
         discount_percent=normalize_discount(draft.discount_percent),
-        single_use=draft.single_use,
-        use_days=(draft.use_days or "1234567")[:16],
-        accrual_days=(draft.accrual_days or "12345")[:16],
-        nominal=nominal,
-        balance=balance,
+        single_use=single_use,
+        use_days=use_days,
+        accrual_days=accrual_days,
+        nominal=total_nominal,
+        balance=total_balance,
         note=draft.note.strip()[:500],
         ledger_sheet=(draft.ledger_sheet or "employee").strip()[:32],
         company=(draft.company or "").strip()[:200],
         birth_date=draft.birth_date,
         status=CertificateStatus.active,
         expires_on=draft.expires_on,
-        unwrap_pending=bool(_unwrap_kind_for_segment(db, draft.segment_id)),
+        unwrap_pending=bool(unwrap),
         show_wallet_buttons=bool(draft.show_wallet_buttons),
         issued_by_id=None if actor is None else actor.id,
     )
     db.add(certificate)
     db.flush()
     certificate.public_number = f"MR-{certificate.id:05d}"
-    _add_transaction(
-        db,
-        certificate_id=certificate.id,
-        actor_id=None if actor is None else actor.id,
-        tx_type=TxType.issue,
-        amount=nominal,
-        balance_after=nominal,
-        comment="Выпуск сертификата",
-    )
-    if balance < nominal:
+    if part_drafts:
+        parts = create_parts_for_certificate(db, certificate, part_drafts)
+        db.refresh(certificate)
+        for part in parts:
+            _add_transaction(
+                db,
+                certificate_id=certificate.id,
+                actor_id=None if actor is None else actor.id,
+                tx_type=TxType.issue,
+                amount=part.nominal,
+                balance_after=certificate.balance,
+                comment=f"Выпуск сертификата · {part.segment_name}".strip(" ·"),
+                part_id=part.id,
+            )
+            opening = part.balance
+            if opening < part.nominal:
+                _add_transaction(
+                    db,
+                    certificate_id=certificate.id,
+                    actor_id=None if actor is None else actor.id,
+                    tx_type=TxType.migrate,
+                    amount=part.nominal - opening,
+                    balance_after=certificate.balance,
+                    comment="Остаток перенесён из прежней системы",
+                    part_id=part.id,
+                )
+    else:
         _add_transaction(
             db,
             certificate_id=certificate.id,
             actor_id=None if actor is None else actor.id,
-            tx_type=TxType.migrate,
-            amount=nominal - balance,
-            balance_after=balance,
-            comment="Остаток перенесён из прежней системы",
+            tx_type=TxType.issue,
+            amount=total_nominal,
+            balance_after=total_nominal,
+            comment="Выпуск сертификата",
         )
+        if total_balance < total_nominal:
+            _add_transaction(
+                db,
+                certificate_id=certificate.id,
+                actor_id=None if actor is None else actor.id,
+                tx_type=TxType.migrate,
+                amount=total_nominal - total_balance,
+                balance_after=total_balance,
+                comment="Остаток перенесён из прежней системы",
+            )
     db.commit()
     db.refresh(certificate)
     db.refresh(holder)
@@ -131,6 +201,36 @@ def issue_certificate(
     return IssuedCertificate(user=holder, certificate=certificate, password=password)
 
 
+def _part_drafts_from_issue(draft: IssueDraft) -> list[PartDraft]:
+    """Собирает части выпуска: явный список или один сегмент как раньше."""
+    if draft.parts:
+        return [
+            PartDraft(
+                segment_id=item.segment_id,
+                nominal=item.nominal,
+                use_days=item.use_days,
+                accrual_days=item.accrual_days,
+                balance=item.balance,
+                sort_order=item.sort_order or index,
+            )
+            for index, item in enumerate(draft.parts, start=1)
+            if item.nominal > 0 or (item.balance is not None and item.balance > 0)
+        ]
+    if draft.segment_id is None:
+        return []
+    nominal, balance = _opening_amounts(draft.nominal, draft.balance)
+    return [
+        PartDraft(
+            segment_id=draft.segment_id,
+            nominal=nominal,
+            use_days=draft.use_days or "1234567",
+            accrual_days=draft.accrual_days or "12345",
+            balance=balance,
+            sort_order=1,
+        )
+    ]
+
+
 def debit_certificate(
     db: Session,
     certificate: Certificate,
@@ -140,47 +240,120 @@ def debit_certificate(
     *,
     enforce_weekdays: bool = True,
     burn_single_use: bool = True,
+    part_id: int | None = None,
 ) -> Transaction:
-    """Списывает бонусы. У одноразового после списания сгорает весь остаток.
+    """Списывает бонусы по частям (сначала ежедневная). У разового — сгорание остатка.
 
     Из админки: enforce_weekdays=False и burn_single_use=False — правка баланса
     без проверки дней использования и без автосгорания остатка.
+    part_id — списать только с указанной части (ручная корректировка).
     """
     if apply_expiry_writeoff(db, certificate):
         db.commit()
         db.refresh(certificate)
         _sync_usage(db, certificate, expired=True)
-    _ensure_can_debit(certificate, amount, enforce_weekdays=enforce_weekdays)
-    changed = _change_balance(db, certificate.id, -amount, require_active=True)
-    if not changed:
+    parts = list_parts(db, certificate.id)
+    if not parts:
+        ensure_legacy_part(db, certificate)
+        parts = list_parts(db, certificate.id)
+    _ensure_can_debit(
+        certificate,
+        amount,
+        parts=parts or None,
+        enforce_weekdays=enforce_weekdays,
+    )
+    if certificate.status != CertificateStatus.active:
+        raise BonusError("Сертификат заблокирован")
+    if certificate.expires_on is not None and certificate.expires_on < today_msk():
+        raise BonusError("Срок сертификата истёк")
+
+    text = comment.strip() or "Списание бонусов"
+    place = actor.restaurant.strip()[:200]
+
+    # Карты без частей (legacy / тесты) — прежнее списание с certificate.balance.
+    if not parts:
+        changed = _change_balance(db, certificate.id, -amount, require_active=True)
+        if not changed:
+            db.rollback()
+            raise BonusError("Недостаточно бонусов или сертификат уже недоступен")
+        db.refresh(certificate)
+        last_tx = _add_transaction(
+            db,
+            certificate_id=certificate.id,
+            actor_id=actor.id,
+            tx_type=TxType.debit,
+            amount=amount,
+            balance_after=certificate.balance,
+            comment=text[:300],
+            restaurant=place,
+        )
+        if burn_single_use:
+            _burn_single_use_remainder(
+                db,
+                certificate,
+                actor_id=actor.id,
+                after_debit_id=last_tx.id,
+                restaurant=place,
+            )
+        db.commit()
+        db.refresh(last_tx)
+        db.refresh(certificate)
+        _sync_usage(db, certificate)
+        return last_tx
+
+    remaining = amount
+    last_tx: Transaction | None = None
+    targets = parts
+    if part_id is not None:
+        targets = [part for part in parts if part.id == part_id]
+        if not targets:
+            raise BonusError("Часть карты не найдена")
+    for part in spend_order(targets):
+        if remaining <= 0:
+            break
+        if enforce_weekdays and part_id is None:
+            from bonus.weekdays import allows_weekday
+
+            if not allows_weekday(part.use_days, today_msk().isoweekday()):
+                continue
+        take = min(part.balance, remaining)
+        if take <= 0:
+            continue
+        if not change_part_balance(db, part.id, -take):
+            db.rollback()
+            raise BonusError("Недостаточно бонусов или сертификат уже недоступен")
+        remaining -= take
+        sync_certificate_totals(db, certificate.id)
+        db.refresh(certificate)
+        label = (part.segment_name or "").strip()
+        comment_text = text if len(targets) == 1 else f"{text} · {label}".strip(" ·")
+        last_tx = _add_transaction(
+            db,
+            certificate_id=certificate.id,
+            actor_id=actor.id,
+            tx_type=TxType.debit,
+            amount=take,
+            balance_after=certificate.balance,
+            comment=comment_text[:300],
+            restaurant=place,
+            part_id=part.id,
+        )
+    if remaining > 0 or last_tx is None:
         db.rollback()
         raise BonusError("Недостаточно бонусов или сертификат уже недоступен")
-    db.refresh(certificate)
-    text = comment.strip() or "Списание бонусов"
-    tx = _add_transaction(
-        db,
-        certificate_id=certificate.id,
-        actor_id=actor.id,
-        tx_type=TxType.debit,
-        amount=amount,
-        balance_after=certificate.balance,
-        comment=text[:300],
-        restaurant=actor.restaurant.strip()[:200],
-    )
-    place = actor.restaurant.strip()[:200]
     if burn_single_use:
         _burn_single_use_remainder(
             db,
             certificate,
             actor_id=actor.id,
-            after_debit_id=tx.id,
+            after_debit_id=last_tx.id,
             restaurant=place,
         )
     db.commit()
-    db.refresh(tx)
+    db.refresh(last_tx)
     db.refresh(certificate)
     _sync_usage(db, certificate)
-    return tx
+    return last_tx
 
 
 def undo_debit(db: Session, tx_id: int, actor: User, reason: str) -> Transaction:
@@ -193,10 +366,16 @@ def undo_debit(db: Session, tx_id: int, actor: User, reason: str) -> Transaction
     if certificate is None:
         raise BonusError("Сертификат не найден")
     _restore_single_use_burn(db, certificate, tx, actor.id)
-    changed = _change_balance(db, certificate.id, tx.amount, require_active=False)
-    if not changed:
-        db.rollback()
-        raise BonusError("Не удалось вернуть бонусы")
+    if tx.part_id is not None:
+        if not change_part_balance(db, tx.part_id, tx.amount):
+            db.rollback()
+            raise BonusError("Не удалось вернуть бонусы")
+        sync_certificate_totals(db, certificate.id)
+    else:
+        changed = _change_balance(db, certificate.id, tx.amount, require_active=False)
+        if not changed:
+            db.rollback()
+            raise BonusError("Не удалось вернуть бонусы")
     db.refresh(certificate)
     reversal = _add_transaction(
         db,
@@ -208,6 +387,7 @@ def undo_debit(db: Session, tx_id: int, actor: User, reason: str) -> Transaction
         comment=(reason or "Отмена списания").strip()[:300],
         reversal_of_id=tx.id,
         restaurant=tx.restaurant,
+        part_id=tx.part_id,
     )
     try:
         db.commit()
@@ -220,21 +400,66 @@ def undo_debit(db: Session, tx_id: int, actor: User, reason: str) -> Transaction
     return reversal
 
 
-def reset_monthly_balance(db: Session, certificate: Certificate, comment: str) -> None:
-    """Сжигает неиспользованный остаток и выставляет баланс равным номиналу.
+def reset_part_balance(db: Session, part: CertificatePart, comment: str) -> None:
+    """Сжигает остаток части и выставляет её баланс равным номиналу."""
+    certificate = db.get(Certificate, part.certificate_id)
+    if certificate is None:
+        raise BonusError("Сертификат не найден")
+    text = comment.strip()[:300] or "Автоначисление"
+    leftover = part.balance
+    if leftover > 0:
+        if not change_part_balance(db, part.id, -leftover):
+            db.rollback()
+            raise BonusError("Не удалось списать остаток перед автоначислением")
+        sync_certificate_totals(db, certificate.id)
+        db.refresh(certificate)
+        _add_transaction(
+            db,
+            certificate_id=certificate.id,
+            actor_id=None,
+            tx_type=TxType.burn,
+            amount=leftover,
+            balance_after=certificate.balance,
+            comment="Сгорание остатка перед автоначислением",
+            part_id=part.id,
+        )
+    db.refresh(part)
+    target = max(0, part.nominal)
+    if part.balance != target:
+        delta = target - part.balance
+        if not change_part_balance(db, part.id, delta):
+            db.rollback()
+            raise BonusError("Не удалось выставить лимит автоначисления")
+        sync_certificate_totals(db, certificate.id)
+        db.refresh(certificate)
+    _add_transaction(
+        db,
+        certificate_id=certificate.id,
+        actor_id=None,
+        tx_type=TxType.credit,
+        amount=target,
+        balance_after=certificate.balance,
+        comment=text,
+        part_id=part.id,
+    )
+    db.commit()
+    db.refresh(certificate)
+    _sync_usage(db, certificate)
 
-    Маркер в journal (credit с comment) пишется всегда — иначе 2-го числа
-    снова сгорит остаток, потраченный после 1-го.
-    """
+
+def reset_monthly_balance(db: Session, certificate: Certificate, comment: str) -> None:
+    """Сброс к номиналу: по первой части или по certificate.balance (legacy)."""
+    parts = list_parts(db, certificate.id)
+    if not parts:
+        ensure_legacy_part(db, certificate)
+        parts = list_parts(db, certificate.id)
+    if parts:
+        reset_part_balance(db, parts[0], comment)
+        return
     text = comment.strip()[:300] or "Автоначисление: ежемесячно"
     leftover = certificate.balance
     if leftover > 0:
-        changed = _change_balance(
-            db,
-            certificate.id,
-            -leftover,
-            require_active=False,
-        )
+        changed = _change_balance(db, certificate.id, -leftover, require_active=False)
         if not changed:
             db.rollback()
             raise BonusError("Не удалось списать остаток перед ежемесячным обновлением")
@@ -252,11 +477,7 @@ def reset_monthly_balance(db: Session, certificate: Certificate, comment: str) -
     if certificate.balance != target:
         delta = target - certificate.balance
         changed = _change_balance(
-            db,
-            certificate.id,
-            delta,
-            require_active=False,
-            grow_nominal=False,
+            db, certificate.id, delta, require_active=False, grow_nominal=False
         )
         if not changed:
             db.rollback()
@@ -276,20 +497,18 @@ def reset_monthly_balance(db: Session, certificate: Certificate, comment: str) -
     _sync_usage(db, certificate)
 
 
-def burn_daily_remainder(db: Session, certificate: Certificate, comment: str) -> None:
-    """Обнуляет остаток ежедневной карты в 17:00 МСК — без накопления на завтра."""
+def burn_part_remainder(db: Session, part: CertificatePart, comment: str) -> None:
+    """Обнуляет остаток части (ежедневное сгорание в 17:00)."""
+    certificate = db.get(Certificate, part.certificate_id)
+    if certificate is None:
+        raise BonusError("Сертификат не найден")
     text = comment.strip()[:300] or "Сгорание остатка: ежедневно"
-    leftover = max(0, certificate.balance)
+    leftover = max(0, part.balance)
     if leftover > 0:
-        changed = _change_balance(
-            db,
-            certificate.id,
-            -leftover,
-            require_active=False,
-        )
-        if not changed:
+        if not change_part_balance(db, part.id, -leftover):
             db.rollback()
             raise BonusError("Не удалось сжечь дневной остаток")
+        sync_certificate_totals(db, certificate.id)
         db.refresh(certificate)
     _add_transaction(
         db,
@@ -299,10 +518,31 @@ def burn_daily_remainder(db: Session, certificate: Certificate, comment: str) ->
         amount=leftover,
         balance_after=certificate.balance,
         comment=text,
+        part_id=part.id,
     )
     db.commit()
     db.refresh(certificate)
     _sync_usage(db, certificate)
+
+
+def burn_daily_remainder(db: Session, certificate: Certificate, comment: str) -> None:
+    """Обнуляет ежедневную часть карты в 17:00 МСК."""
+    parts = [
+        part
+        for part in list_parts(db, certificate.id)
+        if part.accrual_period == AccrualPeriod.daily
+    ]
+    if not parts:
+        ensure_legacy_part(db, certificate)
+        parts = [
+            part
+            for part in list_parts(db, certificate.id)
+            if part.accrual_period == AccrualPeriod.daily
+        ]
+    if not parts:
+        return
+    for part in parts:
+        burn_part_remainder(db, part, comment)
 
 
 def delete_certificate(db: Session, certificate: Certificate, actor: User) -> str:
@@ -315,12 +555,24 @@ def delete_certificate(db: Session, certificate: Certificate, actor: User) -> st
     certificate_id = certificate.id
     from sqlalchemy import delete as sa_delete
 
+    from bonus.models import LinkDelivery, SheetsSyncJob
+
     db.execute(
         update(Transaction)
         .where(Transaction.certificate_id == certificate_id)
-        .values(reversal_of_id=None)
+        .values(reversal_of_id=None, part_id=None)
     )
     db.execute(sa_delete(Transaction).where(Transaction.certificate_id == certificate_id))
+    db.execute(
+        sa_delete(CertificatePart).where(CertificatePart.certificate_id == certificate_id)
+    )
+    db.execute(
+        sa_delete(SheetsSyncJob).where(SheetsSyncJob.certificate_id == certificate_id)
+    )
+    db.execute(
+        sa_delete(LinkDelivery).where(LinkDelivery.certificate_id == certificate_id)
+    )
+    certificate.parts.clear()
     db.delete(certificate)
     holder = db.get(User, holder_id)
     if holder is not None and holder.role == Role.employee:
@@ -347,8 +599,9 @@ def credit_certificate(
     comment: str,
     *,
     grow_nominal: bool = True,
+    part_id: int | None = None,
 ) -> Transaction:
-    """Добавляет бонусы к остатку.
+    """Добавляет бонусы к остатку (к выбранной части или к первой).
 
     Для ручного начисления HR номинал растёт вместе с суммой.
     Автоначисление по сегменту оставляет номинал как первоначальную сумму.
@@ -356,16 +609,36 @@ def credit_certificate(
     if amount <= 0:
         raise BonusError("Сумма начисления должна быть больше нуля")
     text = comment.strip() or "Начисление бонусов"
-    changed = _change_balance(
-        db,
-        certificate.id,
-        amount,
-        require_active=False,
-        grow_nominal=grow_nominal,
-    )
-    if not changed:
-        db.rollback()
-        raise BonusError("Не удалось начислить бонусы")
+    parts = list_parts(db, certificate.id)
+    if not parts:
+        ensure_legacy_part(db, certificate)
+        parts = list_parts(db, certificate.id)
+    target: CertificatePart | None = None
+    if part_id is not None:
+        target = next((part for part in parts if part.id == part_id), None)
+        if target is None:
+            raise BonusError("Часть карты не найдена")
+    elif parts:
+        target = parts[0]
+    if target is not None:
+        if not change_part_balance(db, target.id, amount):
+            db.rollback()
+            raise BonusError("Не удалось начислить бонусы")
+        if grow_nominal:
+            target.nominal = max(0, target.nominal) + amount
+            db.flush()
+        sync_certificate_totals(db, certificate.id)
+    else:
+        changed = _change_balance(
+            db,
+            certificate.id,
+            amount,
+            require_active=False,
+            grow_nominal=grow_nominal,
+        )
+        if not changed:
+            db.rollback()
+            raise BonusError("Не удалось начислить бонусы")
     db.refresh(certificate)
     tx = _add_transaction(
         db,
@@ -375,6 +648,7 @@ def credit_certificate(
         amount=amount,
         balance_after=certificate.balance,
         comment=text[:300],
+        part_id=None if target is None else target.id,
     )
     db.commit()
     db.refresh(tx)
@@ -494,23 +768,42 @@ def extend_certificates_days(
 
 
 def apply_expiry_writeoff(db: Session, certificate: Certificate) -> bool:
-    """Если срок прошёл — списывает весь остаток в журнал."""
+    """Если срок прошёл — списывает весь остаток в журнал (по частям)."""
     if certificate.expires_on is None or certificate.expires_on >= today_msk():
         return False
-    if certificate.balance <= 0:
+    parts = list_parts(db, certificate.id)
+    total = sum(max(0, part.balance) for part in parts) if parts else certificate.balance
+    if total <= 0:
         return False
-    amount = certificate.balance
     until = format_date(certificate.expires_on)
-    certificate.balance = 0
-    _add_transaction(
-        db,
-        certificate_id=certificate.id,
-        actor_id=None,
-        tx_type=TxType.expire,
-        amount=amount,
-        balance_after=0,
-        comment=f"Списано: истёк срок (годен до {until})",
-    )
+    if parts:
+        for part in parts:
+            leftover = max(0, part.balance)
+            if leftover <= 0:
+                continue
+            part.balance = 0
+            _add_transaction(
+                db,
+                certificate_id=certificate.id,
+                actor_id=None,
+                tx_type=TxType.expire,
+                amount=leftover,
+                balance_after=0,
+                comment=f"Списано: истёк срок (годен до {until}) · {part.segment_name}",
+                part_id=part.id,
+            )
+        sync_certificate_totals(db, certificate.id)
+    else:
+        certificate.balance = 0
+        _add_transaction(
+            db,
+            certificate_id=certificate.id,
+            actor_id=None,
+            tx_type=TxType.expire,
+            amount=total,
+            balance_after=0,
+            comment=f"Списано: истёк срок (годен до {until})",
+        )
     db.flush()
     return True
 
@@ -779,6 +1072,7 @@ def _ensure_can_debit(
     certificate: Certificate,
     amount: int,
     *,
+    parts: list[CertificatePart] | None = None,
     enforce_weekdays: bool = True,
 ) -> None:
     from bonus.weekdays import allows_weekday, days_label
@@ -789,13 +1083,25 @@ def _ensure_can_debit(
         raise BonusError("Сертификат заблокирован")
     if certificate.expires_on is not None and certificate.expires_on < today_msk():
         raise BonusError("Срок сертификата истёк")
-    if enforce_weekdays:
-        today = today_msk()
-        if not allows_weekday(certificate.use_days, today.isoweekday()):
+    if parts is not None:
+        spendable = available_balance(parts, enforce_weekdays=enforce_weekdays)
+        if enforce_weekdays and spendable <= 0 and certificate.balance > 0:
+            labels = [
+                f"{part.segment_name}: {days_label(part.use_days)}" for part in parts
+            ]
             raise BonusError(
-                f"Карта сегодня не действует. Дни использования: {days_label(certificate.use_days)}"
+                "Карта сегодня не действует. Дни использования: " + "; ".join(labels)
             )
-    if certificate.balance < amount:
+    else:
+        if enforce_weekdays and not allows_weekday(
+            certificate.use_days, today_msk().isoweekday()
+        ):
+            raise BonusError(
+                "Карта сегодня не действует. Дни использования: "
+                f"{days_label(certificate.use_days)}"
+            )
+        spendable = certificate.balance
+    if spendable < amount:
         raise BonusError("На сертификате меньше бонусов, чем вы списываете")
 
 
@@ -852,9 +1158,11 @@ def _add_transaction(
     restaurant: str = "",
     order_ref: str = "",
     cheque_detail: str = "",
+    part_id: int | None = None,
 ) -> Transaction:
     tx = Transaction(
         certificate_id=certificate_id,
+        part_id=part_id,
         actor_id=actor_id,
         tx_type=tx_type,
         amount=amount,
@@ -889,7 +1197,11 @@ def _burn_single_use_remainder(
     if not certificate.single_use or certificate.balance <= 0:
         return None
     amount = certificate.balance
+    for part in list_parts(db, certificate.id):
+        if part.balance > 0:
+            part.balance = 0
     certificate.balance = 0
+    sync_certificate_totals(db, certificate.id)
     return _add_transaction(
         db,
         certificate_id=certificate.id,

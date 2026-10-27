@@ -71,27 +71,34 @@
       <label class="field">Телефон
         <input name="phone" maxlength="40" inputmode="tel" placeholder="Необязательно">
       </label>
-      <label class="field">Сегмент
-        <select name="segment_id" id="segment-select" required>
-          <option value="" data-requires-expiry="0" data-discount="0" data-name="" data-accrual="none" data-use-days="1234567" data-accrual-days="12345">Выберите сегмент</option>
-          {% for segment in segments %}
-          <option value="{{ segment.id }}" data-name="{{ segment.name }}" data-requires-expiry="{{ '1' if segment.requires_expiry else '0' }}" data-single-use="{{ '1' if segment.single_use else '0' }}" data-discount="{{ segment.discount_percent or 0 }}" data-accrual="{{ segment.accrual_period.value }}" data-use-days="{{ segment.use_days or '1234567' }}" data-accrual-days="{{ segment.accrual_days or '12345' }}">{{ segment.name }}{% if segment.single_use %} · разовый{% endif %}{% if segment.discount_percent %} · {{ segment.discount_percent }}%{% endif %}</option>
-          {% endfor %}
-        </select>
-      </label>
-      {% with field_name='use_days', selected_days='1234567', legend='Дни использования', weekday_choices=weekday_choices %}
-        {% include "_weekday_picker.html" %}
-      {% endwith %}
-      <div id="accrual-days-wrap" hidden>
-        {% with field_name='accrual_days', selected_days='12345', legend='Дни начисления (04:00 → 17:00 МСК)', weekday_choices=weekday_choices %}
+      <div id="single-segment-block">
+        <label class="field">Сегмент
+          <select name="segment_id" id="segment-select" required>
+            <option value="" data-requires-expiry="0" data-discount="0" data-name="" data-accrual="none" data-use-days="1234567" data-accrual-days="12345">Выберите сегмент</option>
+            {% for segment in segments %}
+            <option value="{{ segment.id }}" data-name="{{ segment.name }}" data-requires-expiry="{{ '1' if segment.requires_expiry else '0' }}" data-single-use="{{ '1' if segment.single_use else '0' }}" data-discount="{{ segment.discount_percent or 0 }}" data-accrual="{{ segment.accrual_period.value }}" data-use-days="{{ segment.use_days or '1234567' }}" data-accrual-days="{{ segment.accrual_days or '12345' }}">{{ segment.name }}{% if segment.single_use %} · разовый{% endif %}{% if segment.discount_percent %} · {{ segment.discount_percent }}%{% endif %}</option>
+            {% endfor %}
+          </select>
+        </label>
+        {% with field_name='use_days', selected_days='1234567', legend='Дни использования', weekday_choices=weekday_choices %}
           {% include "_weekday_picker.html" %}
         {% endwith %}
+        <div id="accrual-days-wrap" hidden>
+          {% with field_name='accrual_days', selected_days='12345', legend='Дни начисления (04:00 → 17:00 МСК)', weekday_choices=weekday_choices %}
+            {% include "_weekday_picker.html" %}
+          {% endwith %}
+        </div>
+        <label class="field">Номинал, ₽
+          <input name="nominal" id="field-nominal" inputmode="decimal" required placeholder="10000">
+        </label>
+      </div>
+      <div id="combo-segment-block" hidden>
+        <p class="eyebrow">Сегменты шаблона</p>
+        <p class="muted" id="combo-segment-names"></p>
+        <div id="combo-parts"></div>
       </div>
       <label class="field" id="expires-field">Срок действия
         <input type="date" name="expires_on" id="expires-on">
-      </label>
-      <label class="field">Номинал, ₽
-        <input name="nominal" id="field-nominal" inputmode="decimal" required placeholder="10000">
       </label>
       <fieldset class="color-field">
         <legend>Цвет карточки</legend>
@@ -101,9 +108,9 @@
       </fieldset>
       <label class="field">Шаблон баннера
         <select name="template_id" id="template-select">
-          <option value="0" data-discount="0" data-image="" data-logo="" data-color="" data-segment="">Без картинки</option>
+          <option value="0" data-discount="0" data-image="" data-logo="" data-color="" data-segment="" data-segment2="">Без картинки</option>
           {% for item in templates %}
-          <option value="{{ item.id }}" data-discount="{{ item.discount_percent or 0 }}" data-image="{{ media_url(item.image_path) }}" data-logo="{% if item.logo_path %}{{ media_url(item.logo_path) }}{% endif %}" data-color="{{ item.color or '' }}" data-segment="{{ item.segment_id or '' }}">{{ item.name }}{% if item.discount_percent %} · {{ item.discount_percent }}%{% endif %}</option>
+          <option value="{{ item.id }}" data-discount="{{ item.discount_percent or 0 }}" data-image="{{ media_url(item.image_path) }}" data-logo="{% if item.logo_path %}{{ media_url(item.logo_path) }}{% endif %}" data-color="{{ item.color or '' }}" data-segment="{{ item.segment_id or '' }}" data-segment2="{{ item.segment2_id or '' }}">{{ item.name }}{% if item.segment2_id %} · комбо{% endif %}{% if item.discount_percent %} · {{ item.discount_percent }}%{% endif %}</option>
           {% endfor %}
         </select>
       </label>
@@ -133,12 +140,31 @@
 <script src="/static/color-picker.js?v={{ asset_v }}"></script>
 <script>
 (function () {
+  var SEGMENTS = {
+    {% for segment in segments %}
+    "{{ segment.id }}": {
+      id: {{ segment.id }},
+      name: {{ segment.name|tojson }},
+      requiresExpiry: {{ 'true' if segment.requires_expiry else 'false' }},
+      discount: {{ segment.discount_percent or 0 }},
+      accrual: {{ segment.accrual_period.value|tojson }},
+      useDays: {{ (segment.use_days or '1234567')|tojson }},
+      accrualDays: {{ (segment.accrual_days or '12345')|tojson }},
+      unit: {{ ('₽ в день' if segment.accrual_period.value == 'daily' else ('₽ в месяц' if segment.accrual_period.value == 'monthly' else '₽'))|tojson }}
+    }{% if not loop.last %},{% endif %}
+    {% endfor %}
+  };
+  var WEEKDAY_LABELS = [["1","Пн"],["2","Вт"],["3","Ср"],["4","Чт"],["5","Пт"],["6","Сб"],["7","Вс"]];
   var select = document.getElementById("segment-select");
   var expires = document.getElementById("expires-on");
   var templates = document.getElementById("template-select");
   var discount = document.getElementById("discount-percent");
   var nameInput = document.getElementById("field-name");
   var nominalInput = document.getElementById("field-nominal");
+  var singleBlock = document.getElementById("single-segment-block");
+  var comboBlock = document.getElementById("combo-segment-block");
+  var comboParts = document.getElementById("combo-parts");
+  var comboNames = document.getElementById("combo-segment-names");
   var card = document.getElementById("card-preview");
   var amountEl = document.getElementById("preview-amount");
   var discountEl = document.getElementById("preview-discount");
@@ -151,6 +177,7 @@
   var birthField = document.getElementById("birth-field");
   var birthInput = document.getElementById("birth-date");
   var defaultLogo = "/static/logo.svg";
+  var comboMode = false;
   var colorApi = null;
   if (window.TeamsBonusColorPicker) {
     var pickers = window.TeamsBonusColorPicker.initAll({
@@ -174,9 +201,18 @@
   }
 
   function syncExpiry() {
-    if (!select || !expires) return;
-    var option = select.options[select.selectedIndex];
-    var needed = option && option.getAttribute("data-requires-expiry") === "1";
+    if (!expires) return;
+    var needed = false;
+    if (comboMode) {
+      Object.keys(SEGMENTS).forEach(function () {});
+      (comboParts ? comboParts.querySelectorAll("[data-requires-expiry='1']") : []).forEach(function () {
+        needed = true;
+      });
+      var nodes = comboParts ? comboParts.querySelectorAll("[data-part-expiry='1']") : [];
+      for (var i = 0; i < nodes.length; i++) needed = true;
+    } else if (select && select.selectedIndex > 0) {
+      needed = select.options[select.selectedIndex].getAttribute("data-requires-expiry") === "1";
+    }
     expires.required = needed;
   }
 
@@ -198,6 +234,55 @@
     if (wrap) wrap.hidden = accrual !== "daily";
   }
 
+  function weekdayPickerHtml(fieldName, mask) {
+    var selected = String(mask || "");
+    var html = '<fieldset class="weekday-field"><legend></legend><div class="weekday-grid">';
+    WEEKDAY_LABELS.forEach(function (pair) {
+      var on = selected.indexOf(pair[0]) !== -1;
+      html += '<label class="weekday-option"><input type="checkbox" name="' + fieldName + '" value="' + pair[0] + '"' + (on ? " checked" : "") + "><span>" + pair[1] + "</span></label>";
+    });
+    html += "</div></fieldset>";
+    return html;
+  }
+
+  function buildComboParts(ids) {
+    if (!comboParts || !comboNames) return;
+    var names = [];
+    var html = "";
+    ids.forEach(function (id, index) {
+      var seg = SEGMENTS[String(id)];
+      if (!seg) return;
+      names.push(seg.name);
+      html += '<div class="stack combo-part" data-part-expiry="' + (seg.requiresExpiry ? "1" : "0") + '">';
+      html += '<label class="field">' + seg.name + ", " + seg.unit;
+      html += '<input name="nominal_' + seg.id + '" class="combo-nominal" data-seg="' + seg.id + '" inputmode="decimal" required placeholder="0">';
+      html += "</label>";
+      html += "<p class=\"eyebrow\">Дни использования · " + seg.name + "</p>";
+      html += weekdayPickerHtml("use_days_" + seg.id, seg.useDays);
+      if (seg.accrual === "daily") {
+        html += "<p class=\"eyebrow\">Дни начисления · " + seg.name + "</p>";
+        html += weekdayPickerHtml("accrual_days_" + seg.id, seg.accrualDays);
+      }
+      html += "</div>";
+    });
+    comboNames.textContent = names.join(" + ");
+    comboParts.innerHTML = html;
+    comboParts.querySelectorAll(".combo-nominal").forEach(function (input) {
+      input.addEventListener("input", syncPreview);
+    });
+  }
+
+  function setComboMode(on, segmentIds) {
+    comboMode = !!on;
+    if (singleBlock) singleBlock.hidden = comboMode;
+    if (comboBlock) comboBlock.hidden = !comboMode;
+    if (select) select.required = !comboMode;
+    if (nominalInput) nominalInput.required = !comboMode;
+    if (comboMode) buildComboParts(segmentIds || []);
+    syncExpiry();
+    syncPreview();
+  }
+
   function formatMoney(raw) {
     var text = String(raw || "").replace(/\s/g, "").replace(",", ".");
     var value = Number(text);
@@ -213,17 +298,30 @@
     return parts[2] + "." + parts[1] + "." + parts[0];
   }
 
+  function previewAmount() {
+    if (!comboMode) return formatMoney(nominalInput ? nominalInput.value : "");
+    var total = 0;
+    (comboParts ? comboParts.querySelectorAll(".combo-nominal") : []).forEach(function (input) {
+      var text = String(input.value || "").replace(/\s/g, "").replace(",", ".");
+      var value = Number(text);
+      if (isFinite(value) && value > 0) total += Math.floor(value);
+    });
+    return String(total).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  }
+
   function syncPreview() {
     if (!card) return;
     var color = document.querySelector('[data-color-picker="issue"] input[data-color-radio]:checked');
     card.style.setProperty("--card", color ? color.value : "#00A8A8");
     var name = (nameInput && nameInput.value.trim()) || "Имя сотрудника";
     var segment = "";
-    if (select && select.selectedIndex > 0) {
+    if (comboMode && comboNames) {
+      segment = (comboNames.textContent || "").trim().toLowerCase();
+    } else if (select && select.selectedIndex > 0) {
       segment = (select.options[select.selectedIndex].getAttribute("data-name") || "").trim().toLowerCase();
     }
     holderEl.textContent = segment ? name + ", " + segment : name;
-    amountEl.textContent = formatMoney(nominalInput ? nominalInput.value : "");
+    amountEl.textContent = previewAmount();
     var pct = discount && discount.value.trim() ? Number(discount.value.trim()) : 0;
     if (pct > 0) {
       discountEl.hidden = false;
@@ -284,15 +382,29 @@
     applyDiscountFrom(option);
     var color = option.getAttribute("data-color") || "";
     if (color) applyTemplateColor(color);
+    var seg1 = option.getAttribute("data-segment") || "";
+    var seg2 = option.getAttribute("data-segment2") || "";
+    if (seg1 && seg2) {
+      setComboMode(true, [seg1, seg2]);
+      if (select) select.value = seg1;
+    } else {
+      setComboMode(false);
+      if (seg1 && select) {
+        select.value = seg1;
+        syncExpiry();
+        syncWeekdays();
+      }
+    }
   }
 
   function findTemplateForSegment(segmentId) {
     if (!templates || !segmentId) return null;
     for (var i = 0; i < templates.options.length; i++) {
       var opt = templates.options[i];
-      if (String(opt.getAttribute("data-segment") || "") === String(segmentId)) {
-        return opt;
-      }
+      var s1 = String(opt.getAttribute("data-segment") || "");
+      var s2 = String(opt.getAttribute("data-segment2") || "");
+      if (s2) continue;
+      if (s1 === String(segmentId)) return opt;
     }
     return null;
   }
@@ -307,6 +419,7 @@
   });
   if (select) {
     select.addEventListener("change", function () {
+      if (comboMode) return;
       syncExpiry();
       syncWeekdays();
       applyDiscountFrom(select.options[select.selectedIndex]);

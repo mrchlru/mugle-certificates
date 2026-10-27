@@ -38,6 +38,21 @@ class TxView:
 
 
 @dataclass(frozen=True)
+class PartView:
+    """Одна часть комбинированной карты для админки."""
+
+    id: int
+    segment_id: int
+    segment_name: str
+    accrual_period: str
+    nominal: int
+    balance: int
+    use_days: str
+    accrual_days: str
+    available_now: bool
+
+
+@dataclass(frozen=True)
 class CardView:
     """Карточка, которую видит сотрудник или HR."""
 
@@ -77,6 +92,8 @@ class CardView:
     unwrap_kind: str
     first_name: str
     history: tuple[TxView, ...]
+    parts: tuple[PartView, ...] = ()
+    is_combo: bool = False
 
 
 @dataclass(frozen=True)
@@ -610,6 +627,9 @@ def _card_view(
     base_url: str,
     history: tuple[TxView, ...],
 ) -> CardView:
+    from bonus.parts import available_balance, list_parts
+    from bonus.weekdays import allows_weekday
+
     template_path = ""
     logo_url = "/static/logo.svg"
     logo_custom = False
@@ -622,12 +642,38 @@ def _card_view(
             template_path = media_url(template.image_path)
         logo_url = template_logo_url(template)
         logo_custom = template_logo_is_custom(template)
+    cert_parts = list_parts(db, certificate.id)
+    today = today_msk().isoweekday()
+    part_views = tuple(
+        PartView(
+            id=part.id,
+            segment_id=part.segment_id,
+            segment_name=part.segment_name,
+            accrual_period=part.accrual_period.value
+            if hasattr(part.accrual_period, "value")
+            else str(part.accrual_period),
+            nominal=part.nominal,
+            balance=part.balance,
+            use_days=part.use_days,
+            accrual_days=part.accrual_days,
+            available_now=part.balance > 0 and allows_weekday(part.use_days, today),
+        )
+        for part in cert_parts
+    )
+    display_balance = (
+        available_balance(cert_parts, enforce_weekdays=True)
+        if cert_parts
+        else certificate.balance
+    )
+    segment_label = " + ".join(
+        part.segment_name for part in cert_parts if part.segment_name
+    ) or _segment_name(db, certificate.segment_id)
     return CardView(
         id=certificate.id,
         public_number=certificate.public_number,
         short_code=certificate.short_code,
         token=certificate.token,
-        balance=certificate.balance,
+        balance=display_balance,
         nominal=certificate.nominal,
         note=certificate.note,
         expires_on=certificate.expires_on,
@@ -640,11 +686,11 @@ def _card_view(
         birth_date=certificate.birth_date,
         ledger_sheet=certificate.ledger_sheet or "",
         status=certificate.status,
-        can_spend=_can_spend(certificate),
+        can_spend=_can_spend(certificate, display_balance),
         color=certificate.color or "#00A8A8",
         discount_percent=certificate.discount_percent or 0,
         single_use=bool(certificate.single_use),
-        segment_name=_segment_name(db, certificate.segment_id),
+        segment_name=segment_label,
         template_url=template_path,
         logo_url=logo_url,
         logo_custom=logo_custom,
@@ -659,22 +705,21 @@ def _card_view(
         unwrap_kind=_unwrap_kind_for_certificate(db, certificate),
         first_name=_first_name("" if holder is None else holder.full_name),
         history=history,
+        parts=part_views,
+        is_combo=len(part_views) > 1,
     )
 
 
 def _unwrap_kind_for_certificate(db: Session, certificate: Certificate) -> str:
-    """Вид распаковки сегмента карты: '' | 'birthday' | 'gift'."""
+    """Вид распаковки: первое непустое среди частей / сегмента карты."""
+    from bonus.parts import list_parts, unwrap_kind_from_segments
+
+    part_ids = [part.segment_id for part in list_parts(db, certificate.id)]
+    if part_ids:
+        return unwrap_kind_from_segments(db, part_ids)
     if certificate.segment_id is None:
         return ""
-    segment = db.get(Segment, certificate.segment_id)
-    if segment is None:
-        return ""
-    kind = (getattr(segment, "unwrap_kind", None) or "").strip().lower()
-    if kind in {"birthday", "gift"}:
-        return kind
-    if getattr(segment, "birthday_unwrap", False):
-        return "birthday"
-    return ""
+    return unwrap_kind_from_segments(db, [certificate.segment_id])
 
 
 def preview_birthday_card(db: Session, segment: Segment) -> CardView:
@@ -784,8 +829,10 @@ def _segment_name(db: Session, segment_id: int | None) -> str:
     return segment.name if segment is not None else ""
 
 
-def _can_spend(certificate: Certificate) -> bool:
-    if certificate.status != CertificateStatus.active or certificate.balance <= 0:
+def _can_spend(certificate: Certificate, available: int | None = None) -> bool:
+    """Можно ли тратить: активна, не просрочена, есть доступный сейчас остаток."""
+    balance = certificate.balance if available is None else available
+    if certificate.status != CertificateStatus.active or balance <= 0:
         return False
     if certificate.expires_on is not None and certificate.expires_on < today_msk():
         return False

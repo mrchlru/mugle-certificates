@@ -132,7 +132,7 @@ class Segment(Base):
 
 
 class CardTemplate(Base):
-    """Баннер, логотип, цвет и сегмент для выпуска карточки."""
+    """Баннер, логотип, цвет и сегмент(ы) для выпуска карточки."""
 
     __tablename__ = "card_templates"
 
@@ -142,6 +142,10 @@ class CardTemplate(Base):
     logo_path: Mapped[str] = mapped_column(String(200), default="")
     color: Mapped[str] = mapped_column(String(7), default="#00A8A8")
     segment_id: Mapped[int | None] = mapped_column(ForeignKey("segments.id"), nullable=True, index=True)
+    # Второй сегмент для комбинированной карты (ланч + ежемесячные и т.п.).
+    segment2_id: Mapped[int | None] = mapped_column(
+        ForeignKey("segments.id"), nullable=True, index=True
+    )
     discount_percent: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: _utcnow())
@@ -195,6 +199,47 @@ class Certificate(Base):
     holder: Mapped[User] = relationship(back_populates="certificates", foreign_keys=[holder_id])
     segment: Mapped[Segment | None] = relationship()
     template: Mapped[CardTemplate | None] = relationship()
+    parts: Mapped[list["CertificatePart"]] = relationship(
+        back_populates="certificate",
+        cascade="all, delete-orphan",
+        order_by="CertificatePart.sort_order",
+    )
+
+
+class CertificatePart(Base):
+    """Часть комбинированной (или обычной) карты: свой сегмент, номинал и остаток.
+
+    Правила начисления/дней копируются из сегмента при выпуске и дальше живут
+    независимо от правок каталога сегментов.
+    """
+
+    __tablename__ = "certificate_parts"
+    __table_args__ = (
+        UniqueConstraint("certificate_id", "segment_id", name="uq_cert_part_segment"),
+        CheckConstraint("balance >= 0", name="ck_part_balance_nonnegative"),
+        CheckConstraint("nominal >= 0", name="ck_part_nominal_nonnegative"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    certificate_id: Mapped[int] = mapped_column(ForeignKey("certificates.id"), index=True)
+    segment_id: Mapped[int] = mapped_column(ForeignKey("segments.id"), index=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=1)
+    segment_name: Mapped[str] = mapped_column(String(120), default="")
+    accrual_period: Mapped[AccrualPeriod] = mapped_column(
+        Enum(AccrualPeriod, native_enum=False, length=16),
+        default=AccrualPeriod.none,
+    )
+    use_days: Mapped[str] = mapped_column(String(16), default="1234567")
+    accrual_days: Mapped[str] = mapped_column(String(16), default="12345")
+    nominal: Mapped[int] = mapped_column(Integer, default=0)
+    balance: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: _utcnow(),
+    )
+
+    certificate: Mapped[Certificate] = relationship(back_populates="parts")
+    segment: Mapped[Segment | None] = relationship()
 
 
 class AppSettings(Base):
@@ -235,6 +280,9 @@ class Transaction(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     certificate_id: Mapped[int] = mapped_column(ForeignKey("certificates.id"), index=True)
+    part_id: Mapped[int | None] = mapped_column(
+        ForeignKey("certificate_parts.id"), nullable=True, index=True
+    )
     actor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     tx_type: Mapped[TxType] = mapped_column(Enum(TxType, native_enum=False, length=16), index=True)
     amount: Mapped[int] = mapped_column(Integer, default=0)

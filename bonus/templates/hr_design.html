@@ -144,10 +144,22 @@
         <label class="field">Сегмент
           <select name="segment_id">
             <option value="0">Без привязки</option>
-            {% for segment in segments if segment.is_active %}
+            {% for segment in segments if segment.is_active and not segment.single_use %}
             <option value="{{ segment.id }}">{{ segment.name }}</option>
             {% endfor %}
+            {% for segment in segments if segment.is_active and segment.single_use %}
+            <option value="{{ segment.id }}">{{ segment.name }} · разовый</option>
+            {% endfor %}
           </select>
+          <label class="field">Второй сегмент
+            <select name="segment2_id">
+              <option value="0">Нет</option>
+              {% for segment in segments if segment.is_active and not segment.single_use %}
+              <option value="{{ segment.id }}">{{ segment.name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <p class="muted design-hint">Два сегмента = комбинированная карта (например Ланч + Бонусы). Разовые сегменты во второй слот нельзя.</p>
         </label>
         <label class="field">Баннер
           <span class="file-pick">
@@ -200,9 +212,17 @@
                 <select name="segment_id">
                   <option value="0">Без привязки</option>
                   {% for segment in segments if segment.is_active %}
-                  <option value="{{ segment.id }}" {% if item.segment_id == segment.id %}selected{% endif %}>{{ segment.name }}</option>
+                  <option value="{{ segment.id }}" {% if item.segment_id == segment.id %}selected{% endif %}>{{ segment.name }}{% if segment.single_use %} · разовый{% endif %}</option>
                   {% endfor %}
                 </select>
+                <label class="field">Второй сегмент
+                  <select name="segment2_id">
+                    <option value="0">Нет</option>
+                    {% for segment in segments if segment.is_active and not segment.single_use %}
+                    <option value="{{ segment.id }}" {% if item.segment2_id == segment.id %}selected{% endif %}>{{ segment.name }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
               </label>
               <label class="field">Заменить баннер
                 <span class="file-pick">
@@ -229,6 +249,11 @@
                 {% if item.segment_id %}
                 {% for segment in segments if segment.id == item.segment_id %}
                 <span class="muted design-meta">{{ segment.name }}</span>
+                {% endfor %}
+                {% endif %}
+                {% if item.segment2_id %}
+                {% for segment in segments if segment.id == item.segment2_id %}
+                <span class="muted design-meta">+ {{ segment.name }}</span>
                 {% endfor %}
                 {% endif %}
                 <button class="btn ghost compact" type="submit">Сохранить</button>

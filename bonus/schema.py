@@ -84,6 +84,27 @@ def ensure_schema(engine: Engine) -> None:
             )
         if "segment_id" not in columns:
             statements.append("ALTER TABLE card_templates ADD COLUMN segment_id INTEGER")
+        if "segment2_id" not in columns:
+            statements.append("ALTER TABLE card_templates ADD COLUMN segment2_id INTEGER")
+    if "certificate_parts" not in tables:
+        statements.append(
+            """
+            CREATE TABLE certificate_parts (
+                id INTEGER PRIMARY KEY,
+                certificate_id INTEGER NOT NULL,
+                segment_id INTEGER NOT NULL,
+                sort_order INTEGER DEFAULT 1,
+                segment_name VARCHAR(120) DEFAULT '',
+                accrual_period VARCHAR(16) DEFAULT 'none',
+                use_days VARCHAR(16) DEFAULT '1234567',
+                accrual_days VARCHAR(16) DEFAULT '12345',
+                nominal INTEGER DEFAULT 0,
+                balance INTEGER DEFAULT 0,
+                created_at TIMESTAMP,
+                CONSTRAINT uq_cert_part_segment UNIQUE (certificate_id, segment_id)
+            )
+            """
+        )
     if "transactions" in tables:
         columns = {column["name"] for column in inspector.get_columns("transactions")}
         if "restaurant" not in columns:
@@ -92,6 +113,8 @@ def ensure_schema(engine: Engine) -> None:
             statements.append("ALTER TABLE transactions ADD COLUMN order_ref VARCHAR(80) DEFAULT ''")
         if "cheque_detail" not in columns:
             statements.append("ALTER TABLE transactions ADD COLUMN cheque_detail TEXT DEFAULT ''")
+        if "part_id" not in columns:
+            statements.append("ALTER TABLE transactions ADD COLUMN part_id INTEGER")
     if "users" in tables:
         columns = {column["name"] for column in inspector.get_columns("users")}
         if "department" not in columns:
@@ -138,7 +161,75 @@ def ensure_schema(engine: Engine) -> None:
                 connection.execute(text(statement))
     _migrate_unwrap_kind(engine)
     _backfill_unwrap_pending(engine)
+    _backfill_certificate_parts(engine)
     _ensure_app_settings_row(engine)
+
+
+def _backfill_certificate_parts(engine: Engine) -> dict[str, int]:
+    """Создаёт одну часть на каждую существующую карту без частей.
+
+    Возвращает сверку: карт, созданных частей, расхождений суммы.
+    """
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    if "certificates" not in tables or "certificate_parts" not in tables:
+        return {"cards": 0, "created": 0, "mismatch": 0}
+    with engine.begin() as connection:
+        created = connection.execute(
+            text(
+                """
+                INSERT INTO certificate_parts (
+                    certificate_id, segment_id, sort_order, segment_name,
+                    accrual_period, use_days, accrual_days, nominal, balance, created_at
+                )
+                SELECT
+                    c.id,
+                    c.segment_id,
+                    1,
+                    COALESCE(s.name, ''),
+                    COALESCE(s.accrual_period, 'none'),
+                    COALESCE(NULLIF(c.use_days, ''), '1234567'),
+                    COALESCE(NULLIF(c.accrual_days, ''), '12345'),
+                    COALESCE(c.nominal, 0),
+                    COALESCE(c.balance, 0),
+                    CURRENT_TIMESTAMP
+                FROM certificates c
+                LEFT JOIN segments s ON s.id = c.segment_id
+                WHERE c.segment_id IS NOT NULL
+                  AND NOT EXISTS (
+                    SELECT 1 FROM certificate_parts p
+                    WHERE p.certificate_id = c.id
+                  )
+                """
+            )
+        ).rowcount
+        mismatch = connection.execute(
+            text(
+                """
+                SELECT COUNT(*) FROM (
+                    SELECT c.id
+                    FROM certificates c
+                    JOIN certificate_parts p ON p.certificate_id = c.id
+                    GROUP BY c.id, c.balance
+                    HAVING COALESCE(SUM(p.balance), 0) != COALESCE(c.balance, 0)
+                ) bad
+                """
+            )
+        ).scalar() or 0
+        cards = connection.execute(
+            text("SELECT COUNT(*) FROM certificates WHERE segment_id IS NOT NULL")
+        ).scalar() or 0
+    result = {
+        "cards": int(cards),
+        "created": int(created or 0),
+        "mismatch": int(mismatch),
+    }
+    print(
+        f"Teams Bonus: certificate_parts — карт {result['cards']}, "
+        f"создано частей {result['created']}, расхождений {result['mismatch']}",
+        flush=True,
+    )
+    return result
 
 
 def _ensure_app_settings_row(engine: Engine) -> None:

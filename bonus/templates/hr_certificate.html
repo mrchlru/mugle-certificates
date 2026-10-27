@@ -12,6 +12,18 @@
       {% if card.phone %}{% if card.department or card.job_title %} · {% endif %}{{ card.phone }}{% endif %}
     </p>
     {% endif %}
+    {% if card.parts and card.parts|length %}
+    <div class="stack cert-parts">
+      <p class="eyebrow">Части баланса</p>
+      {% for part in card.parts %}
+      <p>
+        <strong>{{ part.segment_name }}</strong>
+        — {{ part.balance|money }} из {{ part.nominal|money }}
+        {% if not part.available_now %}<span class="muted">(сегодня недоступна)</span>{% endif %}
+      </p>
+      {% endfor %}
+    </div>
+    {% endif %}
     <div class="flash secret" id="share-box"
          data-sync-url="/hr/c/{{ card.id }}/sync-status"
          data-syncing="{{ '1' if syncing|default(false) else '0' }}">
@@ -77,6 +89,15 @@
     <form method="post" action="/hr/c/{{ card.id }}/credit" class="stack">
       <input type="hidden" name="csrf_token" value="{{ csrf }}">
       <p class="eyebrow">Изменить баланс</p>
+      {% if card.is_combo and card.parts %}
+      <label class="field">Часть карты
+        <select name="part_id">
+          {% for part in card.parts %}
+          <option value="{{ part.id }}">{{ part.segment_name }} ({{ part.balance|money }})</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% endif %}
       <label class="field">Сумма, ₽
         <input name="amount" inputmode="decimal" required placeholder="1000 или -500">
       </label>
