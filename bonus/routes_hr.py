@@ -906,9 +906,11 @@ def certificate_page(
     card = load_card(db, certificate, public_base(request), user)
     share_url = f"{public_base(request)}/c/{certificate.token}"
     sync_status = certificate_sync_status(db, certificate.id)
-    syncing = sync_status == "pending" or (
-        created == 1 and sync_status == "none"
-    )
+    # Лоадер/ошибка синка — только сразу после выпуска (?created=1).
+    # На обычном открытии карты (продление, правка) показываем одну ссылку.
+    just_created = created == 1
+    syncing = just_created and sync_status in {"pending", "none"}
+    sync_failed = just_created and sync_status == "failed"
     return render(
         request,
         "hr_certificate.html",
@@ -917,7 +919,7 @@ def certificate_page(
         share_url=share_url,
         sync_status=sync_status,
         syncing=syncing,
-        sync_failed=sync_status == "failed",
+        sync_failed=sync_failed,
         sync_sheets=sheets_enabled(),
         sync_wallet=wallet_enabled(),
     )

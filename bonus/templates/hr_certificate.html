@@ -27,10 +27,13 @@
     <div class="flash secret" id="share-box"
          data-sync-url="/hr/c/{{ card.id }}/sync-status"
          data-syncing="{{ '1' if syncing|default(false) else '0' }}">
-      <div id="share-ready" {% if syncing|default(false) or sync_failed|default(false) %}hidden{% endif %}>
+      <div id="share-ready" {% if syncing|default(false) %}hidden{% endif %}>
         <p class="eyebrow">Ссылка сотруднику</p>
         <p class="share">{{ share_url }}</p>
         <button class="text-link" type="button" data-copy="{{ share_url }}">Скопировать</button>
+        {% if sync_failed|default(false) %}
+        <p class="muted share-sync-hint">Карта уже в системе. Запись в Google догонит из очереди или через «Настройки».</p>
+        {% endif %}
       </div>
       <div id="share-syncing" class="share-sync" {% if not syncing|default(false) %}hidden{% endif %}>
         <p class="eyebrow">Создаём карту</p>
@@ -47,12 +50,6 @@
           {% endif %}
         </p>
         <p class="muted share-sync-hint">Ссылка появится здесь, как только запись завершится.</p>
-      </div>
-      <div id="share-failed" class="share-sync is-bad" {% if not sync_failed|default(false) %}hidden{% endif %}>
-        <p class="eyebrow">Не удалось записать во внешние системы</p>
-        <p class="muted">Карта в системе уже есть. Ссылку можно скопировать; Google Таблица догонит из очереди или через «Настройки».</p>
-        <p class="share">{{ share_url }}</p>
-        <button class="text-link" type="button" data-copy="{{ share_url }}">Скопировать</button>
       </div>
     </div>
     <form method="post" action="/hr/c/{{ card.id }}/name" class="stack">
@@ -140,19 +137,23 @@
   var url = box.getAttribute("data-sync-url");
   var ready = document.getElementById("share-ready");
   var syncing = document.getElementById("share-syncing");
-  var failed = document.getElementById("share-failed");
   var tries = 0;
   var maxTries = 90;
 
-  function showReady() {
+  function showReady(withHint) {
     if (syncing) syncing.hidden = true;
-    if (failed) failed.hidden = true;
-    if (ready) ready.hidden = false;
-  }
-  function showFailed() {
-    if (syncing) syncing.hidden = true;
-    if (ready) ready.hidden = true;
-    if (failed) failed.hidden = false;
+    if (ready) {
+      ready.hidden = false;
+      if (withHint) {
+        var hint = ready.querySelector(".share-sync-hint");
+        if (!hint) {
+          hint = document.createElement("p");
+          hint.className = "muted share-sync-hint";
+          hint.textContent = "Карта уже в системе. Запись в Google догонит из очереди или через «Настройки».";
+          ready.appendChild(hint);
+        }
+      }
+    }
   }
 
   function poll() {
@@ -161,31 +162,31 @@
       .then(function (res) { return res.json(); })
       .then(function (data) {
         if (!data || !data.ok) {
-          if (tries >= maxTries) showFailed();
+          if (tries >= maxTries) showReady(true);
           else window.setTimeout(poll, 1200);
           return;
         }
         if (data.failed) {
-          showFailed();
+          showReady(true);
           return;
         }
         if (data.ready) {
-          showReady();
+          showReady(false);
           return;
         }
         // Нет задачи в очереди — карта уже в системе, ссылку можно отдать.
         if (data.status === "none" && tries >= 6) {
-          showReady();
+          showReady(false);
           return;
         }
         if (tries >= maxTries) {
-          showFailed();
+          showReady(true);
           return;
         }
         window.setTimeout(poll, 1000);
       })
       .catch(function () {
-        if (tries >= maxTries) showFailed();
+        if (tries >= maxTries) showReady(true);
         else window.setTimeout(poll, 1500);
       });
   }

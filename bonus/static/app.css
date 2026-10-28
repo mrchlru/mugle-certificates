@@ -2772,6 +2772,10 @@ body.partners-dialog-open {
   gap: 8px;
 }
 
+.share-sync[hidden] {
+  display: none !important;
+}
+
 .share-sync-bar {
   height: 8px;
   border-radius: 999px;
