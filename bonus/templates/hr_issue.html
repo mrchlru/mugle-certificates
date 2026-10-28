@@ -150,7 +150,7 @@
       accrual: {{ segment.accrual_period.value|tojson }},
       useDays: {{ (segment.use_days or '1234567')|tojson }},
       accrualDays: {{ (segment.accrual_days or '12345')|tojson }},
-      unit: {{ ('₽ в день' if segment.accrual_period.value == 'daily' else ('₽ в месяц' if segment.accrual_period.value == 'monthly' else '₽'))|tojson }}
+      unit: {{ ('₽ в день' if segment.accrual_period.value == 'daily' else ('₽ в неделю' if segment.accrual_period.value == 'weekly' else ('₽ в месяц' if segment.accrual_period.value == 'monthly' else '₽')))|tojson }}
     }{% if not loop.last %},{% endif %}
     {% endfor %}
   };
@@ -228,11 +228,22 @@
     var wrap = document.getElementById("accrual-days-wrap");
     var option = select && select.options[select.selectedIndex];
     var useDays = option ? option.getAttribute("data-use-days") || "1234567" : "1234567";
-    var accrualDays = option ? option.getAttribute("data-accrual-days") || "12345" : "12345";
     var accrual = option ? option.getAttribute("data-accrual") || "none" : "none";
+    var accrualDays = option
+      ? option.getAttribute("data-accrual-days") || (accrual === "weekly" ? "5" : "12345")
+      : "12345";
     setWeekdayChecks("use_days", useDays);
     setWeekdayChecks("accrual_days", accrualDays);
-    if (wrap) wrap.hidden = accrual !== "daily";
+    if (wrap) {
+      wrap.hidden = accrual !== "daily" && accrual !== "weekly";
+      wrap.setAttribute("data-single-day", accrual === "weekly" ? "1" : "0");
+      var legend = wrap.querySelector("legend");
+      if (legend) {
+        legend.textContent = accrual === "weekly"
+          ? "День сгорания (23:59 МСК). Начисление — каждый пн 04:00"
+          : "Дни начисления (04:00 → 23:59 МСК)";
+      }
+    }
   }
 
   function weekdayPickerHtml(fieldName, mask, legend) {
@@ -268,11 +279,13 @@
           "Дни использования · " + seg.name
         );
       }
-      if (seg.accrual === "daily") {
+      if (seg.accrual === "daily" || seg.accrual === "weekly") {
         html += weekdayPickerHtml(
           "accrual_days_" + seg.id,
-          seg.accrualDays,
-          "Дни начисления · " + seg.name
+          seg.accrualDays || (seg.accrual === "weekly" ? "5" : "12345"),
+          seg.accrual === "weekly"
+            ? "День сгорания · " + seg.name + " (пн — начисление)"
+            : "Дни начисления · " + seg.name
         );
       }
       html += "</div>";

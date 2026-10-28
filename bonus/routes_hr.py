@@ -45,7 +45,15 @@ from sqlalchemy import select
 
 from bonus.importer import ImportRowResult, parse_table
 from bonus.storage import s3_enabled
-from bonus.models import AuditAction, CardTemplate, Certificate, Role, Segment, User
+from bonus.models import (
+    AccrualPeriod,
+    AuditAction,
+    CardTemplate,
+    Certificate,
+    Role,
+    Segment,
+    User,
+)
 from bonus.ledger import (
     LEDGER_CHOICES,
     ledger_is_single_use,
@@ -96,7 +104,13 @@ from bonus.services import (
     update_staff,
 )
 from bonus.values import MoneyError, format_money, parse_date
-from bonus.weekdays import ALL_DAYS, WEEKDAY_CHOICES, WEEKDAYS, normalize_days
+from bonus.weekdays import (
+    ALL_DAYS,
+    WEEKDAY_CHOICES,
+    WEEKDAYS,
+    normalize_days,
+    normalize_single_weekday,
+)
 
 router = APIRouter()
 
@@ -1369,6 +1383,126 @@ def _export_filters_from_request(request: Request):
     )
 
 
+@router.get("/hr/employee-cards")
+def employee_cards_import_page(
+    request: Request,
+    user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
+):
+    """Загрузка карт сотрудников из Excel (месяц / комбо)."""
+    return render(request, "hr_employee_import.html", section="employee_import")
+
+
+@router.post("/hr/employee-cards/preview")
+async def employee_cards_preview(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
+    table: UploadFile = File(...),
+    csrf_token: str = Form(""),
+):
+    """Шаг 1: предпросмотр без записи в БД."""
+    from bonus.employee_import import preview_employee_workbook
+
+    try:
+        guard_csrf(request, csrf_token)
+        payload = await table.read()
+        preview = preview_employee_workbook(
+            db,
+            filename=table.filename or "upload.xlsx",
+            payload=payload,
+        )
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+        return RedirectResponse("/hr/employee-cards", status_code=303)
+    return render(
+        request,
+        "hr_employee_import.html",
+        section="employee_import",
+        preview=preview,
+    )
+
+
+@router.post("/hr/employee-cards/commit")
+def employee_cards_commit(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
+    batch_id: str = Form(""),
+    create_duplicates: str = Form("0"),
+    csrf_token: str = Form(""),
+):
+    """Шаг 2: выпуск карт по предпросмотру."""
+    from bonus.employee_import import (
+        build_employee_import_report,
+        commit_employee_import,
+        save_employee_import_report,
+    )
+
+    try:
+        guard_csrf(request, csrf_token)
+        results, issued_ids = commit_employee_import(
+            db,
+            batch_id=batch_id.strip(),
+            actor=user,
+            base_url=public_base(request),
+            create_duplicates=create_duplicates == "1",
+        )
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+        return RedirectResponse("/hr/employee-cards", status_code=303)
+    queued = enqueue_certificates_for_sheets(db, issued_ids) if issued_ids else 0
+    created = sum(1 for row in results if row.status == "создана")
+    skipped = sum(1 for row in results if row.status == "пропущена")
+    failed = sum(1 for row in results if row.status == "ошибка")
+    report_id = save_employee_import_report(
+        batch_id.strip() or "report",
+        build_employee_import_report(results),
+    )
+    write_audit(
+        db,
+        actor=user,
+        action=AuditAction.import_rows,
+        summary=(
+            f"Карты сотрудников batch={batch_id}: создано {created}, "
+            f"пропущено {skipped}, ошибок {failed}; Sheets +{queued}"
+        ),
+        target_type="employee_import",
+        detail=batch_id.strip(),
+    )
+    return render(
+        request,
+        "hr_employee_import.html",
+        section="employee_import",
+        result_rows=results,
+        result_created=created,
+        result_skipped=skipped,
+        result_failed=failed,
+        result_queued=queued,
+        report_id=report_id,
+    )
+
+
+@router.get("/hr/employee-cards/report/{report_id}.xlsx")
+def employee_cards_report(
+    report_id: str,
+    user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
+):
+    """Скачивание отчёта последней загрузки."""
+    from bonus.employee_import import load_employee_import_report
+
+    try:
+        payload = load_employee_import_report(report_id)
+    except BonusError as exc:
+        return Response(exc.message, status_code=404)
+    return Response(
+        content=payload,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": 'attachment; filename="employee_cards_report.xlsx"'
+        },
+    )
+
+
 @router.get("/hr/import")
 def import_form(request: Request, user: User = Depends(require(Role.admin, Role.hr, Role.hrd))):
     """Старый раздел импорта — перенесён в Настройки."""
@@ -1613,9 +1747,8 @@ def _issue_part_drafts(
             value = optional_money(str(raw or ""))
             if value is None or value <= 0:
                 continue
-            accrual_days = normalize_days(
-                form.getlist(f"accrual_days_{segment.id}"),
-                default=segment.accrual_days or WEEKDAYS,
+            accrual_days = _issue_accrual_days(
+                segment, form.getlist(f"accrual_days_{segment.id}")
             )
             drafts.append(
                 PartDraft(
@@ -1633,9 +1766,7 @@ def _issue_part_drafts(
 
     segment = resolve_segment(db, segment_id)
     use_days = normalize_days(form.getlist("use_days"), default=segment.use_days or ALL_DAYS)
-    accrual_days = normalize_days(
-        form.getlist("accrual_days"), default=segment.accrual_days or WEEKDAYS
-    )
+    accrual_days = _issue_accrual_days(segment, form.getlist("accrual_days"))
     nominal_value = optional_money(nominal)
     if nominal_value is None:
         raise BonusError("Укажите номинал")
@@ -1652,6 +1783,15 @@ def _issue_part_drafts(
         segment,
         segment.name,
     )
+
+
+def _issue_accrual_days(segment: Segment, raw: object) -> str:
+    """Дни начисления (daily) или день сгорания (weekly) при выпуске."""
+    if segment.accrual_period == AccrualPeriod.weekly:
+        return normalize_single_weekday(
+            raw, default=segment.accrual_days or "5"
+        )
+    return normalize_days(raw, default=segment.accrual_days or WEEKDAYS)
 
 
 def _certificate_or_redirect(db: Session, request: Request, certificate_id: int):

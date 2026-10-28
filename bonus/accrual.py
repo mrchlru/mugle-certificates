@@ -28,10 +28,11 @@ _MONTHLY_PREFIX = "Автоначисление: ежемесячно"
 _WEEKLY_PREFIX = "Автоначисление: еженедельно"
 _DAILY_PREFIX = "Автоначисление: ежедневно"
 _DAILY_BURN_PREFIX = "Сгорание остатка: ежедневно"
+_WEEKLY_BURN_PREFIX = "Сгорание остатка: еженедельно"
 
 
 def run_scheduled_accruals() -> int:
-    """Окно 04:00 — начисления; с 23:59 — сгорание дневного остатка ланча."""
+    """Окно 04:00 — начисления; с 23:59 — сгорание daily/weekly остатка."""
     db = open_session()
     try:
         now = datetime.now(MSK)
@@ -42,6 +43,10 @@ def run_scheduled_accruals() -> int:
             total += apply_monthly_accruals(db, now)
         if _daily_burn_window_open(now):
             total += apply_daily_burns(db, now)
+            total += apply_weekly_burns(db, now)
+        elif _weekly_burn_catchup_open(now):
+            # После дня сгорания догоняем пропущенный 23:59 до пн.
+            total += apply_weekly_burns(db, now)
         return total
     finally:
         db.close()
@@ -146,6 +151,50 @@ def apply_weekly_accruals(db: Session, now: datetime | None = None) -> int:
     return done
 
 
+def apply_weekly_burns(db: Session, now: datetime | None = None) -> int:
+    """Сжигает остаток еженедельных частей в выбранный день (23:59 МСК).
+
+    День сгорания хранится в part.accrual_days (один ISO-день). Начисление — пн.
+    """
+    from bonus.weekdays import normalize_single_weekday
+
+    moment = now or datetime.now(MSK)
+    year, week = _iso_year_week(moment)
+    marker = _weekly_burn_marker(year, week)
+    done = 0
+    for part, certificate in _parts_with_period(db, AccrualPeriod.weekly):
+        if certificate.expires_on is not None and certificate.expires_on < today_msk():
+            continue
+        burn_day = int(normalize_single_weekday(part.accrual_days, default="5"))
+        if not _weekly_burn_due(moment, burn_day):
+            continue
+        if _has_marker(db, certificate.id, part.id, TxType.burn, marker):
+            continue
+        try:
+            burn_part_remainder(db, part, marker)
+        except BonusError as exc:
+            logger.warning(
+                "Еженедельное сгорание %s/%s пропущено: %s",
+                certificate.public_number,
+                part.segment_name,
+                exc.message,
+            )
+            continue
+        done += 1
+        logger.info(
+            "Еженедельное сгорание %s · %s (день %s)",
+            certificate.public_number,
+            part.segment_name,
+            burn_day,
+        )
+    if done:
+        print(
+            f"Teams Bonus: еженедельное сгорание — {done} частей ({marker})",
+            flush=True,
+        )
+    return done
+
+
 def apply_monthly_accruals(db: Session, now: datetime | None = None) -> int:
     """Сброс к номиналу ежемесячных частей (1-е число 04:00 МСК)."""
     moment = now or datetime.now(MSK)
@@ -221,6 +270,21 @@ def _daily_burn_window_open(now: datetime) -> bool:
     return (now.hour, now.minute, now.second) >= (23, 59, 0)
 
 
+def _weekly_burn_catchup_open(now: datetime) -> bool:
+    """Вне 23:59: догон еженедельного сгорания во вт–вс после дня списания."""
+    return now.isoweekday() >= 2
+
+
+def _weekly_burn_due(moment: datetime, burn_day: int) -> bool:
+    """Пора ли сжигать weekly: в день сгорания с 23:59 или позже на неделе."""
+    today = moment.isoweekday()
+    if today < burn_day:
+        return False
+    if today == burn_day:
+        return _daily_burn_window_open(moment)
+    return True
+
+
 def _seconds_until_next_job() -> float:
     """Сон до ближайших 04:00 или 23:59 Europe/Moscow."""
     now = datetime.now(MSK)
@@ -253,6 +317,10 @@ def _daily_marker(moment: datetime) -> str:
 def _daily_burn_marker(moment: datetime) -> str:
     day = moment.astimezone(MSK).date()
     return f"{_DAILY_BURN_PREFIX} {day.isoformat()}"
+
+
+def _weekly_burn_marker(year: int, week: int) -> str:
+    return f"{_WEEKLY_BURN_PREFIX} {year:04d}-W{week:02d}"
 
 
 def _iso_year_week(moment: datetime) -> tuple[int, int]:

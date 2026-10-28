@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Карты сотрудников{% endblock %}
+{% block content %}
+<section class="stack narrow-block">
+  <p class="eyebrow">Массовая загрузка</p>
+  <h1>Карты сотрудников</h1>
+  <p class="lede muted">Три шаблона Excel: только месяц, месяц + ланч, месяц + недельные бонусы. Лист «Карты».</p>
+
+  {% if result_rows is defined and result_rows is not none %}
+  <div class="flash secret">
+    <p>Создано: <strong>{{ result_created }}</strong> · пропущено: {{ result_skipped }} · ошибок: {{ result_failed }}{% if result_queued %} · в очередь Sheets: {{ result_queued }}{% endif %}</p>
+    {% if report_id %}
+    <p><a class="text-link" href="/hr/employee-cards/report/{{ report_id }}.xlsx">Скачать отчёт Excel</a> — его же можно использовать для рассылки.</p>
+    {% endif %}
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Строка</th><th>ФИО</th><th>Карта</th><th>Статус</th><th>Причина</th></tr>
+      </thead>
+      <tbody>
+        {% for row in result_rows %}
+        <tr>
+          <td>{{ row.row_number }}</td>
+          <td>{{ row.full_name }}</td>
+          <td>{% if row.link %}<a class="text-link" href="{{ row.link }}">{{ row.public_number }}</a>{% else %}{{ row.public_number }}{% endif %}</td>
+          <td>{{ row.status }}</td>
+          <td class="muted">{{ row.reason }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p><a class="btn soft" href="/hr/employee-cards">Загрузить ещё файл</a></p>
+
+  {% elif preview is defined and preview is not none %}
+  <div class="flash secret">
+    <p>Тип файла: <strong>{{ preview.kind_title }}</strong> · файл «{{ preview.filename }}»</p>
+    <p>Строк: {{ preview.total_rows }} · к созданию: {{ preview.ok_rows }} · ошибок: {{ preview.error_rows }} · возможных дублей: {{ preview.duplicate_rows }}</p>
+  </div>
+  {% if preview.error_rows or preview.duplicate_rows %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Строка</th><th>ФИО</th><th>Проблема</th></tr>
+      </thead>
+      <tbody>
+        {% for row in preview.rows if row.error or row.is_duplicate %}
+        <tr>
+          <td>{{ row.row_number }}</td>
+          <td>{{ row.full_name }}</td>
+          <td class="muted">
+            {% if row.error %}{{ row.error }}{% endif %}
+            {% if row.is_duplicate %}{% if row.error %} · {% endif %}возможный дубль{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  <form method="post" action="/hr/employee-cards/commit" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <input type="hidden" name="batch_id" value="{{ preview.batch_id }}">
+    <label class="switch">
+      <input type="checkbox" name="create_duplicates" value="1">
+      <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+      <span class="switch-copy">Создать всё равно (включая возможные дубли)</span>
+    </label>
+    <div class="row-actions">
+      <button class="btn" type="submit" {% if preview.ok_rows == 0 and preview.duplicate_rows == 0 %}disabled{% endif %}>Создать карты</button>
+      <a class="btn soft" href="/hr/employee-cards">Отмена</a>
+    </div>
+  </form>
+
+  {% else %}
+  <form method="post" action="/hr/employee-cards/preview" enctype="multipart/form-data" class="stack design-create">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <label class="field">Файл .xlsx (до 2 МБ, до 1000 строк)
+      <input type="file" name="table" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
+    </label>
+    <p class="muted design-hint">Нужны сегменты и шаблоны в Оформлении: «Карта сотрудника», для комбо — «Ланч» / «Недельные бонусы» и шаблоны «Комбо карта» / «Комбо карта: месяц + неделя».</p>
+    <button class="btn" type="submit">Показать предпросмотр</button>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}

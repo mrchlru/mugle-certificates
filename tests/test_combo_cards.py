@@ -5,7 +5,11 @@ from datetime import datetime
 import pytest
 
 import bonus.db as database
-from bonus.accrual import apply_daily_accruals, apply_daily_burns, apply_monthly_accruals
+from bonus.accrual import (
+    apply_daily_burns,
+    apply_weekly_accruals,
+    apply_weekly_burns,
+)
 from bonus.catalog import create_segment, ensure_default_segments, list_segments, save_template
 from bonus.models import AccrualPeriod, Base, CertificatePart, Role, Transaction, TxType, User
 from bonus.parts import PartDraft, list_parts
@@ -126,6 +130,67 @@ def test_daily_burn_leaves_monthly() -> None:
     apply_daily_burns(db, moment)
     db.refresh(issued.certificate)
     assert issued.certificate.balance == 500_00
+
+
+def test_weekly_accrual_monday_burn_friday() -> None:
+    """Пн 04:00 — начисление; выбранный день (пт) 23:59 — сгорание до следующего пн."""
+    db = _db()
+    hr = _person(db, "hr", Role.hr)
+    segment = create_segment(
+        db,
+        "Еженедельный тест",
+        AccrualPeriod.weekly,
+        accrual_days="5",
+    )
+    issued = issue_certificate(
+        db,
+        IssueDraft(
+            full_name="Неделя Тест",
+            login="",
+            password="",
+            nominal=2000_00,
+            balance=None,
+            note="",
+            expires_on=None,
+            segment_id=segment.id,
+            parts=(
+                PartDraft(
+                    segment_id=segment.id,
+                    nominal=2000_00,
+                    accrual_days="5",
+                    sort_order=1,
+                ),
+            ),
+        ),
+        hr,
+        sync_external=False,
+    )
+    issued.certificate.created_at = datetime(2026, 10, 12, 10, 0, tzinfo=MSK)
+    db.commit()
+
+    monday = datetime(2026, 10, 19, 4, 0, tzinfo=MSK)
+    assert apply_weekly_accruals(db, monday) >= 1
+    db.refresh(issued.certificate)
+    assert issued.certificate.balance == 2000_00
+
+    thursday = datetime(2026, 10, 22, 23, 59, tzinfo=MSK)
+    assert apply_weekly_burns(db, thursday) == 0
+    db.refresh(issued.certificate)
+    assert issued.certificate.balance == 2000_00
+
+    friday = datetime(2026, 10, 23, 23, 59, tzinfo=MSK)
+    assert apply_weekly_burns(db, friday) >= 1
+    db.refresh(issued.certificate)
+    assert issued.certificate.balance == 0
+
+    saturday = datetime(2026, 10, 24, 12, 0, tzinfo=MSK)
+    assert apply_weekly_burns(db, saturday) == 0
+    assert issued.certificate.balance == 0
+
+    next_monday = datetime(2026, 10, 26, 4, 0, tzinfo=MSK)
+    assert apply_weekly_accruals(db, next_monday) >= 1
+    db.refresh(issued.certificate)
+    assert issued.certificate.balance == 2000_00
 
 
 def test_template_rejects_same_or_single_use_combo() -> None:

@@ -1,3 +1,3 @@
 """Teams Bonus — корпоративные сертификаты (замена Statix Bonus)."""
 
-__version__ = "1.2.68-bulk-extend-queue"
+__version__ = "1.2.70-employee-import"

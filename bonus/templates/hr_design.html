@@ -49,7 +49,7 @@
           {% include "_weekday_picker.html" %}
         {% endwith %}
         <div class="weekday-accrual" data-accrual-days-wrap hidden>
-          {% with field_name='accrual_days', selected_days='12345', legend='Дни начисления (04:00 → 23:59 МСК)', weekday_choices=weekday_choices %}
+          {% with field_name='accrual_days', selected_days='5', legend='День сгорания (23:59 МСК). Начисление — каждый пн 04:00', weekday_choices=weekday_choices %}
             {% include "_weekday_picker.html" %}
           {% endwith %}
         </div>
@@ -92,8 +92,8 @@
             {% with field_name='use_days', selected_days=item.use_days or '1234567', legend='Дни использования', weekday_choices=weekday_choices %}
               {% include "_weekday_picker.html" %}
             {% endwith %}
-            <div class="weekday-accrual" data-accrual-days-wrap {% if item.accrual_period.value != 'daily' %}hidden{% endif %}>
-              {% with field_name='accrual_days', selected_days=item.accrual_days or '12345', legend='Дни начисления (04:00 → 23:59 МСК)', weekday_choices=weekday_choices %}
+            <div class="weekday-accrual" data-accrual-days-wrap {% if item.accrual_period.value not in ['daily', 'weekly'] %}hidden{% endif %}>
+              {% with field_name='accrual_days', selected_days=item.accrual_days or ('5' if item.accrual_period.value == 'weekly' else '12345'), legend=('День сгорания (23:59 МСК). Начисление — каждый пн 04:00' if item.accrual_period.value == 'weekly' else 'Дни начисления (04:00 → 23:59 МСК)'), weekday_choices=weekday_choices %}
                 {% include "_weekday_picker.html" %}
               {% endwith %}
             </div>
@@ -312,8 +312,28 @@
     if (!form) return;
     var wrap = form.querySelector("[data-accrual-days-wrap]");
     if (!wrap) return;
-    wrap.hidden = select.value !== "daily";
+    var weekly = select.value === "weekly";
+    var daily = select.value === "daily";
+    wrap.hidden = !daily && !weekly;
+    wrap.setAttribute("data-single-day", weekly ? "1" : "0");
+    var legend = wrap.querySelector("legend");
+    if (legend) {
+      legend.textContent = weekly
+        ? "День сгорания (23:59 МСК). Начисление — каждый пн 04:00"
+        : "Дни начисления (04:00 → 23:59 МСК)";
+    }
   }
+  function bindSingleDayChips(wrap) {
+    wrap.addEventListener("change", function (event) {
+      if (wrap.getAttribute("data-single-day") !== "1") return;
+      var input = event.target;
+      if (!input || input.type !== "checkbox" || !input.checked) return;
+      wrap.querySelectorAll('input[type="checkbox"]').forEach(function (box) {
+        if (box !== input) box.checked = false;
+      });
+    });
+  }
+  document.querySelectorAll("[data-accrual-days-wrap]").forEach(bindSingleDayChips);
   document.querySelectorAll("[data-accrual-select]").forEach(function (select) {
     select.addEventListener("change", function () { syncAccrualDays(select); });
     syncAccrualDays(select);

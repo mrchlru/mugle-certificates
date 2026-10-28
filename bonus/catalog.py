@@ -25,7 +25,7 @@ from bonus.storage import (
     s3_enabled,
     store_template_bytes,
 )
-from bonus.weekdays import ALL_DAYS, WEEKDAYS, normalize_days
+from bonus.weekdays import ALL_DAYS, WEEKDAYS, normalize_days, normalize_single_weekday
 
 # Натуральный макет баннера 1672×763 — храним половину, та же пропорция.
 _BANNER_SIZE = (836, 382)
@@ -81,7 +81,10 @@ CARD_COLORS: tuple[tuple[str, str], ...] = (
 ACCRUAL_CHOICES: tuple[tuple[str, str], ...] = (
     (AccrualPeriod.none.value, "Без начисления"),
     (AccrualPeriod.daily.value, "Ежедневно: начисление 04:00, сгорание 23:59 МСК"),
-    (AccrualPeriod.weekly.value, "Еженедельно: сброс к номиналу в пн 04:00 МСК"),
+    (
+        AccrualPeriod.weekly.value,
+        "Еженедельно: начисление пн 04:00, сгорание в выбранный день 23:59 МСК",
+    ),
     (AccrualPeriod.monthly.value, "Ежемесячно: сброс к номиналу 1-го в 04:00 МСК"),
     (AccrualPeriod.yearly.value, "Раз в год"),
 )
@@ -227,7 +230,7 @@ def create_segment(
         unwrap_kind=parse_unwrap_kind(unwrap_kind),
         discount_percent=normalize_discount(discount_percent),
         use_days=normalize_days(use_days, default=ALL_DAYS),
-        accrual_days=normalize_days(accrual_days, default=WEEKDAYS),
+        accrual_days=_normalize_accrual_days(accrual_period, accrual_days),
         sort_order=1000 + int(db.scalar(select(Segment.id).order_by(Segment.id.desc()).limit(1)) or 0),
         is_active=True,
         is_deleted=False,
@@ -236,6 +239,13 @@ def create_segment(
     db.commit()
     db.refresh(segment)
     return segment
+
+
+def _normalize_accrual_days(period: AccrualPeriod, accrual_days: object) -> str:
+    """Для weekly — один день сгорания; для daily — маска дней начисления."""
+    if period == AccrualPeriod.weekly:
+        return normalize_single_weekday(accrual_days, default="5")
+    return normalize_days(accrual_days, default=WEEKDAYS)
 
 
 def update_segment(
@@ -273,7 +283,7 @@ def update_segment(
     segment.unwrap_kind = parse_unwrap_kind(unwrap_kind)
     segment.discount_percent = normalize_discount(discount_percent)
     segment.use_days = normalize_days(use_days, default=ALL_DAYS)
-    segment.accrual_days = normalize_days(accrual_days, default=WEEKDAYS)
+    segment.accrual_days = _normalize_accrual_days(accrual_period, accrual_days)
     db.commit()
     db.refresh(segment)
     return segment
