@@ -717,11 +717,14 @@ def set_certificate_expiry(
     certificate: Certificate,
     expires_on: date | None,
     actor: User | None = None,
+    *,
+    sync_external: bool = True,
 ) -> int:
     """Задаёт или снимает срок действия сертификата.
 
     Если карта снова действует — возвращает остаток, списанный при прошлой просрочке.
     Возвращает сумму восстановленных копеек (0, если восстанавливать нечего).
+    sync_external=False — без мгновенной записи в Sheets/Wallet (для массового продления).
     """
     certificate.expires_on = expires_on
     db.flush()
@@ -736,11 +739,18 @@ def set_certificate_expiry(
         )
     db.commit()
     db.refresh(certificate)
-    _sync_usage(db, certificate, expired=expired)
+    if sync_external:
+        _sync_usage(db, certificate, expired=expired)
     return restored
 
 
-def extend_certificate_days(db: Session, certificate: Certificate, days: int) -> date:
+def extend_certificate_days(
+    db: Session,
+    certificate: Certificate,
+    days: int,
+    *,
+    sync_external: bool = True,
+) -> date:
     """Продлевает срок на N дней от текущего (или от сегодня, если срок прошёл/пуст)."""
     if days < 1 or days > 3600:
         raise BonusError("Срок продления — от 1 до 3600 дней")
@@ -749,7 +759,12 @@ def extend_certificate_days(db: Session, certificate: Certificate, days: int) ->
     if base is None or base < today:
         base = today
     new_expires = base + timedelta(days=days)
-    set_certificate_expiry(db, certificate, new_expires)
+    set_certificate_expiry(
+        db,
+        certificate,
+        new_expires,
+        sync_external=sync_external,
+    )
     return new_expires
 
 
@@ -758,21 +773,27 @@ def extend_certificates_days(
     certificate_ids: list[int],
     days: int,
 ) -> tuple[int, list[str]]:
-    """Продлевает несколько карт. Возвращает (успешно, публичные номера)."""
+    """Продлевает несколько карт без синхронного Sheets (очередь догонит).
+
+    Возвращает (успешно, публичные номера).
+    """
     unique_ids = sorted({int(item) for item in certificate_ids if item})
     if not unique_ids:
         raise BonusError("Выберите хотя бы одну карту")
     if days < 1 or days > 3600:
         raise BonusError("Срок продления — от 1 до 3600 дней")
     done: list[str] = []
+    done_ids: list[int] = []
     for certificate_id in unique_ids:
         certificate = db.get(Certificate, certificate_id)
         if certificate is None:
             continue
-        extend_certificate_days(db, certificate, days)
+        extend_certificate_days(db, certificate, days, sync_external=False)
         done.append(certificate.public_number)
+        done_ids.append(certificate.id)
     if not done:
         raise BonusError("Не удалось продлить выбранные карты")
+    enqueue_certificates_for_sheets(db, done_ids)
     return len(done), done
 
 

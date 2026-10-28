@@ -227,7 +227,10 @@ def dashboard_extend(
             "ok": True,
             "count": count,
             "days": day_count,
-            "message": f"Продлено {count} карт на {_extend_label(day_count)}",
+            "message": (
+                f"Продлено {count} карт на {_extend_label(day_count)}. "
+                "Google Таблица обновится из очереди."
+            ),
         }
     )
 
