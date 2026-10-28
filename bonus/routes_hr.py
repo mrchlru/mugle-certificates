@@ -1022,10 +1022,11 @@ def block_submit(
     certificate = _certificate_or_redirect(db, request, certificate_id)
     if certificate is None:
         return RedirectResponse("/hr", status_code=303)
+    do_block = blocked == "1"
+    restored = 0
     try:
         guard_csrf(request, csrf_token)
-        do_block = blocked == "1"
-        set_blocked(db, certificate, user, do_block)
+        restored = set_blocked(db, certificate, user, do_block)
         write_audit(
             db,
             actor=user,
@@ -1039,7 +1040,15 @@ def block_submit(
     except BonusError as exc:
         flash(request, exc.message, "bad")
     else:
-        flash(request, "Блокировка снята" if blocked != "1" else "Сертификат заблокирован")
+        if do_block:
+            flash(request, "Сертификат заблокирован")
+        elif restored:
+            flash(
+                request,
+                f"Блокировка снята, возвращён баланс {format_money(restored)}",
+            )
+        else:
+            flash(request, "Блокировка снята")
     return RedirectResponse(f"/hr/c/{certificate_id}", status_code=303)
 
 
@@ -1144,7 +1153,7 @@ def expires_submit(
         segment = db.get(Segment, certificate.segment_id) if certificate.segment_id else None
         if segment is not None and segment.requires_expiry and expires is None:
             raise BonusError("Укажите срок действия для этого сегмента")
-        set_certificate_expiry(db, certificate, expires)
+        restored = set_certificate_expiry(db, certificate, expires, actor=user)
         write_audit(
             db,
             actor=user,
@@ -1157,7 +1166,13 @@ def expires_submit(
     except BonusError as exc:
         flash(request, exc.message, "bad")
     else:
-        flash(request, "Срок действия сохранён")
+        if restored:
+            flash(
+                request,
+                f"Срок сохранён, возвращён баланс {format_money(restored)}",
+            )
+        else:
+            flash(request, "Срок действия сохранён")
     return RedirectResponse(f"/hr/c/{certificate_id}", status_code=303)
 
 

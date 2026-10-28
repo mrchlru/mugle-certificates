@@ -635,9 +635,21 @@ def credit_certificate(
     return tx
 
 
-def set_blocked(db: Session, certificate: Certificate, actor: User, blocked: bool) -> None:
-    """Закрывает или снова открывает списания по сертификату."""
+def set_blocked(db: Session, certificate: Certificate, actor: User, blocked: bool) -> int:
+    """Закрывает или снова открывает списания по сертификату.
+
+    При разблокировке usable-карты возвращает остаток, списанный при просрочке.
+    Возвращает сумму восстановленных копеек.
+    """
     certificate.status = CertificateStatus.blocked if blocked else CertificateStatus.active
+    restored = 0
+    if not blocked:
+        restored = restore_balance_on_reactivation(
+            db,
+            certificate,
+            actor,
+            reason="Восстановлено при разблокировке",
+        )
     _add_transaction(
         db,
         certificate_id=certificate.id,
@@ -650,6 +662,7 @@ def set_blocked(db: Session, certificate: Certificate, actor: User, blocked: boo
     db.commit()
     db.refresh(certificate)
     _sync_usage(db, certificate)
+    return restored
 
 
 def rename_holder(db: Session, user: User, full_name: str) -> None:
@@ -699,14 +712,32 @@ def update_certificate_profile(
     db.refresh(certificate)
 
 
-def set_certificate_expiry(db: Session, certificate: Certificate, expires_on: date | None) -> None:
-    """Задаёт или снимает срок действия сертификата."""
+def set_certificate_expiry(
+    db: Session,
+    certificate: Certificate,
+    expires_on: date | None,
+    actor: User | None = None,
+) -> int:
+    """Задаёт или снимает срок действия сертификата.
+
+    Если карта снова действует — возвращает остаток, списанный при прошлой просрочке.
+    Возвращает сумму восстановленных копеек (0, если восстанавливать нечего).
+    """
     certificate.expires_on = expires_on
     db.flush()
     expired = apply_expiry_writeoff(db, certificate)
+    restored = 0
+    if not expired:
+        restored = restore_balance_on_reactivation(
+            db,
+            certificate,
+            actor,
+            reason="Восстановлено при продлении срока",
+        )
     db.commit()
     db.refresh(certificate)
     _sync_usage(db, certificate, expired=expired)
+    return restored
 
 
 def extend_certificate_days(db: Session, certificate: Certificate, days: int) -> date:
@@ -784,6 +815,115 @@ def apply_expiry_writeoff(db: Session, certificate: Certificate) -> bool:
         )
     db.flush()
     return True
+
+
+def restore_balance_on_reactivation(
+    db: Session,
+    certificate: Certificate,
+    actor: User | None = None,
+    *,
+    reason: str = "Восстановлено при возобновлении карты",
+) -> int:
+    """Возвращает остаток, списанный последней просрочкой, если карта снова действует."""
+    if getattr(certificate, "is_deleted", False):
+        return 0
+    if certificate.expires_on is not None and certificate.expires_on < today_msk():
+        return 0
+    parts = list_parts(db, certificate.id)
+    current = (
+        sum(max(0, part.balance) for part in parts)
+        if parts
+        else max(0, certificate.balance)
+    )
+    if current > 0:
+        return 0
+    batch = _last_expiry_writeoff_batch(db, certificate.id)
+    if not batch:
+        return 0
+    by_part: dict[int | None, int] = {}
+    for tx in batch:
+        amount = max(0, int(tx.amount or 0))
+        if amount <= 0:
+            continue
+        by_part[tx.part_id] = by_part.get(tx.part_id, 0) + amount
+    if not by_part:
+        return 0
+    actor_id = None if actor is None else actor.id
+    note = (reason or "Восстановлено при возобновлении карты").strip()[:300]
+    restored = 0
+    parts_by_id = {part.id: part for part in parts}
+    for part_id, amount in by_part.items():
+        target = parts_by_id.get(part_id) if part_id is not None else None
+        if target is None and parts:
+            target = parts[0]
+        if target is not None:
+            target.balance = max(0, target.balance) + amount
+            sync_certificate_totals(db, certificate.id)
+            db.refresh(certificate)
+        else:
+            certificate.balance = max(0, certificate.balance) + amount
+            db.flush()
+        restored += amount
+        _add_transaction(
+            db,
+            certificate_id=certificate.id,
+            actor_id=actor_id,
+            tx_type=TxType.credit,
+            amount=amount,
+            balance_after=certificate.balance,
+            comment=note,
+            part_id=None if target is None else target.id,
+        )
+    db.flush()
+    return restored
+
+
+def _last_expiry_writeoff_batch(db: Session, certificate_id: int) -> list[Transaction]:
+    """Последняя волна списаний по сроку, если после неё ещё не было возврата денег."""
+    last_expire = db.scalar(
+        select(Transaction)
+        .where(
+            Transaction.certificate_id == certificate_id,
+            Transaction.tx_type == TxType.expire,
+        )
+        .order_by(Transaction.id.desc())
+        .limit(1)
+    )
+    if last_expire is None:
+        return []
+    later_topup = db.scalar(
+        select(Transaction.id)
+        .where(
+            Transaction.certificate_id == certificate_id,
+            Transaction.id > last_expire.id,
+            Transaction.tx_type.in_((TxType.credit, TxType.issue)),
+        )
+        .limit(1)
+    )
+    if later_topup is not None:
+        return []
+    prev_other = db.scalar(
+        select(Transaction.id)
+        .where(
+            Transaction.certificate_id == certificate_id,
+            Transaction.id < last_expire.id,
+            Transaction.tx_type != TxType.expire,
+        )
+        .order_by(Transaction.id.desc())
+        .limit(1)
+    )
+    statement = (
+        select(Transaction)
+        .where(
+            Transaction.certificate_id == certificate_id,
+            Transaction.tx_type == TxType.expire,
+            Transaction.id <= last_expire.id,
+        )
+        .order_by(Transaction.id)
+    )
+    if prev_other is not None:
+        statement = statement.where(Transaction.id > prev_other)
+    return list(db.scalars(statement).all())
 
 
 def apply_due_expiries(db: Session) -> int:

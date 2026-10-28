@@ -370,6 +370,30 @@ def test_expired_certificate_writes_off_balance() -> None:
     assert "годен до" in tx.comment
 
 
+def test_renew_expired_card_restores_last_balance() -> None:
+    db = _db()
+    hr = _person(db, "hr", Role.hr)
+    manager = _person(db, "mgr", Role.manager)
+    issued = issue_certificate(db, _draft(500_000), hr, sync_external=False)
+    debit_certificate(
+        db, issued.certificate, manager, 150_000, "трата", enforce_weekdays=False
+    )
+    db.refresh(issued.certificate)
+    assert issued.certificate.balance == 350_000
+    set_certificate_expiry(db, issued.certificate, date(2020, 1, 1), actor=hr)
+    db.refresh(issued.certificate)
+    assert issued.certificate.balance == 0
+
+    restored = set_certificate_expiry(db, issued.certificate, date(2030, 12, 31), actor=hr)
+    db.refresh(issued.certificate)
+    assert restored == 350_000
+    assert issued.certificate.balance == 350_000
+    # Повторное сохранение того же срока не дублирует начисление.
+    assert set_certificate_expiry(db, issued.certificate, date(2031, 1, 1), actor=hr) == 0
+    db.refresh(issued.certificate)
+    assert issued.certificate.balance == 350_000
+
+
 def test_template_replace_deletes_old_file() -> None:
     db = _db()
     first = save_template(
