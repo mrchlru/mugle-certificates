@@ -401,17 +401,7 @@ def settings_page(
     user: User = Depends(require(Role.admin)),
 ):
     """Настройки главного администратора: кошельки и импорт."""
-    from bonus.sheets_queue import queue_stats
-    from bonus.sheets_sync import sheets_credentials_error
-
-    return render(
-        request,
-        "hr_settings.html",
-        section="settings",
-        wallet_buttons_enabled=wallet_buttons_enabled(db),
-        sheets_queue=queue_stats(db),
-        sheets_credentials_error=sheets_credentials_error(),
-    )
+    return _render_settings(request, db)
 
 
 @router.post("/hr/settings/wallet-buttons")
@@ -1354,6 +1344,22 @@ def export_unmark(
     return JSONResponse({"ok": True, "count": count, "message": f"Снято: {count}"})
 
 
+def _render_settings(request: Request, db: Session, **extra):
+    """Общий рендер страницы Настройки (кошельки, импорты, Sheets)."""
+    from bonus.sheets_queue import queue_stats
+    from bonus.sheets_sync import sheets_credentials_error
+
+    return render(
+        request,
+        "hr_settings.html",
+        section="settings",
+        wallet_buttons_enabled=wallet_buttons_enabled(db),
+        sheets_queue=queue_stats(db),
+        sheets_credentials_error=sheets_credentials_error(),
+        **extra,
+    )
+
+
 def _export_filters_from_request(request: Request):
     """Читает мультивыбор фильтров рассылки из query."""
     from bonus.export_mail import parse_export_filters
@@ -1384,23 +1390,22 @@ def _export_filters_from_request(request: Request):
 
 
 @router.get("/hr/employee-cards")
-def employee_cards_import_page(
-    request: Request,
+def employee_cards_import_redirect(
     user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
 ):
-    """Загрузка карт сотрудников из Excel (месяц / комбо)."""
-    return render(request, "hr_employee_import.html", section="employee_import")
+    """Старый URL — импорт сотрудников перенесён в Настройки."""
+    return RedirectResponse("/hr/settings#employee-import", status_code=303)
 
 
-@router.post("/hr/employee-cards/preview")
-async def employee_cards_preview(
+@router.post("/hr/settings/employee-preview")
+async def settings_employee_preview(
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
+    user: User = Depends(require(Role.admin)),
     table: UploadFile = File(...),
     csrf_token: str = Form(""),
 ):
-    """Шаг 1: предпросмотр без записи в БД."""
+    """Шаг 1: предпросмотр карт сотрудников без записи в БД."""
     from bonus.employee_import import preview_employee_workbook
 
     try:
@@ -1413,25 +1418,20 @@ async def employee_cards_preview(
         )
     except BonusError as exc:
         flash(request, exc.message, "bad")
-        return RedirectResponse("/hr/employee-cards", status_code=303)
-    return render(
-        request,
-        "hr_employee_import.html",
-        section="employee_import",
-        preview=preview,
-    )
+        return RedirectResponse("/hr/settings#employee-import", status_code=303)
+    return _render_settings(request, db, preview=preview)
 
 
-@router.post("/hr/employee-cards/commit")
-def employee_cards_commit(
+@router.post("/hr/settings/employee-commit")
+def settings_employee_commit(
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
+    user: User = Depends(require(Role.admin)),
     batch_id: str = Form(""),
     create_duplicates: str = Form("0"),
     csrf_token: str = Form(""),
 ):
-    """Шаг 2: выпуск карт по предпросмотру."""
+    """Шаг 2: выпуск карт сотрудников по предпросмотру."""
     from bonus.employee_import import (
         build_employee_import_report,
         commit_employee_import,
@@ -1449,7 +1449,7 @@ def employee_cards_commit(
         )
     except BonusError as exc:
         flash(request, exc.message, "bad")
-        return RedirectResponse("/hr/employee-cards", status_code=303)
+        return RedirectResponse("/hr/settings#employee-import", status_code=303)
     queued = enqueue_certificates_for_sheets(db, issued_ids) if issued_ids else 0
     created = sum(1 for row in results if row.status == "создана")
     skipped = sum(1 for row in results if row.status == "пропущена")
@@ -1469,10 +1469,9 @@ def employee_cards_commit(
         target_type="employee_import",
         detail=batch_id.strip(),
     )
-    return render(
+    return _render_settings(
         request,
-        "hr_employee_import.html",
-        section="employee_import",
+        db,
         result_rows=results,
         result_created=created,
         result_skipped=skipped,
@@ -1482,12 +1481,12 @@ def employee_cards_commit(
     )
 
 
-@router.get("/hr/employee-cards/report/{report_id}.xlsx")
-def employee_cards_report(
+@router.get("/hr/settings/employee-report/{report_id}.xlsx")
+def settings_employee_report(
     report_id: str,
-    user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
+    user: User = Depends(require(Role.admin)),
 ):
-    """Скачивание отчёта последней загрузки."""
+    """Скачивание отчёта загрузки карт сотрудников."""
     from bonus.employee_import import load_employee_import_report
 
     try:

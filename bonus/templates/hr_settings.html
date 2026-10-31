@@ -46,6 +46,94 @@
     </div>
   </section>
 
+  <section class="design-panel" style="margin-top: 20px;" id="employee-import">
+    <header class="design-panel-head">
+      <h2>Карты сотрудников</h2>
+    </header>
+    <p class="muted design-hint">Excel с листом «Карты». Тип по колонке: «Номинал, ₽ в месяц» / «Ланч, ₽ в день» / «Недельные бонусы, ₽ в неделю». Имя файла любое. В Оформлении нужны сегменты и шаблоны с теми же названиями.</p>
+
+    {% if result_rows is defined and result_rows is not none %}
+    <div class="flash secret">
+      <p>Создано: <strong>{{ result_created }}</strong> · пропущено: {{ result_skipped }} · ошибок: {{ result_failed }}{% if result_queued %} · в очередь Sheets: {{ result_queued }}{% endif %}</p>
+      {% if report_id %}
+      <p><a class="text-link" href="/hr/settings/employee-report/{{ report_id }}.xlsx">Скачать отчёт Excel</a> — его же можно использовать для рассылки.</p>
+      {% endif %}
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Строка</th><th>ФИО</th><th>Карта</th><th>Статус</th><th>Причина</th></tr>
+        </thead>
+        <tbody>
+          {% for row in result_rows %}
+          <tr>
+            <td>{{ row.row_number }}</td>
+            <td>{{ row.full_name }}</td>
+            <td>{% if row.link %}<a class="text-link" href="{{ row.link }}">{{ row.public_number }}</a>{% else %}{{ row.public_number }}{% endif %}</td>
+            <td>{{ row.status }}</td>
+            <td class="muted">{{ row.reason }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p><a class="btn soft" href="/hr/settings#employee-import">Загрузить ещё файл</a></p>
+
+    {% elif preview is defined and preview is not none %}
+    <div class="flash secret">
+      <p>Тип файла: <strong>{{ preview.kind_title }}</strong> · файл «{{ preview.filename }}»</p>
+      <p>Строк: {{ preview.total_rows }} · к созданию: {{ preview.ok_rows }} · ошибок: {{ preview.error_rows }} · возможных дублей: {{ preview.duplicate_rows }}</p>
+    </div>
+    {% if preview.error_rows or preview.duplicate_rows %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Строка</th><th>ФИО</th><th>Проблема</th></tr>
+        </thead>
+        <tbody>
+          {% for row in preview.rows if row.error or row.is_duplicate %}
+          <tr>
+            <td>{{ row.row_number }}</td>
+            <td>{{ row.full_name }}</td>
+            <td class="muted">
+              {% if row.error %}{{ row.error }}{% endif %}
+              {% if row.is_duplicate %}{% if row.error %} · {% endif %}возможный дубль{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+    <form method="post" action="/hr/settings/employee-commit" class="stack design-create">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <input type="hidden" name="batch_id" value="{{ preview.batch_id }}">
+      <label class="switch">
+        <input type="checkbox" name="create_duplicates" value="1">
+        <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+        <span class="switch-copy">Создать всё равно (включая возможные дубли)</span>
+      </label>
+      <div class="row-actions">
+        <button class="btn" type="submit" {% if preview.ok_rows == 0 and preview.duplicate_rows == 0 %}disabled{% endif %}>Создать карты</button>
+        <a class="btn soft" href="/hr/settings#employee-import">Отмена</a>
+      </div>
+    </form>
+
+    {% else %}
+    <form method="post" action="/hr/settings/employee-preview" enctype="multipart/form-data" class="design-create">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <label class="field">Файл .xlsx (до 2 МБ, до 1000 строк)
+        <span class="file-pick">
+          <input type="file" name="table" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
+          <span class="file-pick-btn">Выбрать файл</span>
+          <span class="file-pick-name" data-empty="Файл не выбран">Файл не выбран</span>
+        </span>
+      </label>
+      <button class="btn" type="submit">Показать предпросмотр</button>
+    </form>
+    {% endif %}
+  </section>
+
   <section class="design-panel" style="margin-top: 20px;">
     <header class="design-panel-head">
       <h2>Google Таблица</h2>
@@ -145,9 +233,10 @@
       });
   }
 
+  document.querySelectorAll("form.design-create").forEach(bindFileName);
+
   var importForm = document.getElementById("admin-import-form");
   if (importForm) {
-    bindFileName(importForm);
     var submitBtn = document.getElementById("admin-import-submit");
     var progress = document.getElementById("admin-import-progress");
     var bar = document.getElementById("admin-import-bar");
