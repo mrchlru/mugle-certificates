@@ -903,7 +903,6 @@ def certificate_page(
     created: int = 0,
 ):
     """Карточка, история и действия HR."""
-    from bonus.google_wallet import wallet_enabled
     from bonus.sheets_queue import certificate_sync_status
     from bonus.sheets_sync import sheets_enabled
 
@@ -928,7 +927,6 @@ def certificate_page(
         syncing=syncing,
         sync_failed=sync_failed,
         sync_sheets=sheets_enabled(),
-        sync_wallet=wallet_enabled(),
     )
 
 

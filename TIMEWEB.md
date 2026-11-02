@@ -32,16 +32,7 @@
 | `GOOGLE_SHEETS_SPREADSHEET_ID` | ID Google Таблицы учёта (из URL `/d/ID/edit`) |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | JSON ключ сервисного аккаунта одной строкой. Таблицу нужно расшарить на `client_email` из JSON (редактор). На Timeweb обычно задают именно это |
 | `GOOGLE_SERVICE_ACCOUNT_FILE` | Альтернатива: путь к файлу ключа внутри контейнера. Если файл недоступен, берётся `GOOGLE_SERVICE_ACCOUNT_JSON` |
-| `GOOGLE_WALLET_ENABLED` | `true` — кнопка Add to Google Wallet и синк Loyalty Object. Без Issuer ID / ключа всё равно выключено |
-| `GOOGLE_WALLET_ISSUER_ID` | Числовой Issuer ID из [Pay & Wallet Console](https://pay.google.com/business/console) |
-| `GOOGLE_WALLET_CLASS_SUFFIX` | Fallback class без шаблона: `{issuerId}.{suffix}`. С шаблоном — `{issuerId}.tpl_{id}` (стиль из админки) |
-| `GOOGLE_WALLET_SERVICE_ACCOUNT_JSON` | JSON ключ SA для Wallet API (роль Developer у Issuer). Если пусто — берётся `GOOGLE_SERVICE_ACCOUNT_JSON` |
-| `GOOGLE_WALLET_SERVICE_ACCOUNT_FILE` | Файл ключа Wallet SA; иначе как у Sheets |
-| `GOOGLE_WALLET_PROGRAM_NAME` | Fallback имени программы, если у карты нет шаблона. С шаблоном берётся `CardTemplate.name` |
-| `GOOGLE_WALLET_ISSUER_NAME` | Эмитент (по умолчанию «Mugle Rest») |
-| `GOOGLE_WALLET_CLASS_COLOR` | Fallback цвета без шаблона; иначе цвет карты/шаблона из админки |
-| `GOOGLE_WALLET_LOGO_URL` | Fallback лого, если у шаблона нет `logo_path`. Иначе лого шаблона |
-| `APPLE_WALLET_ENABLED` | `true` — .pkpass для Apple Wallet и кнопка Wallet Passes (Android) |
+| `APPLE_WALLET_ENABLED` | `true` — .pkpass для Apple Wallet и кнопка Wallet Passes (Android). Google Wallet отключён |
 | `APPLE_PASS_TYPE_ID` | Pass Type ID из Apple Developer (например `pass.com.mugle.bonus`) |
 | `APPLE_TEAM_ID` | Team ID Apple Developer |
 | `APPLE_ORGANIZATION_NAME` | organizationName в pass (Mugle Rest) |

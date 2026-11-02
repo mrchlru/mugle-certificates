@@ -39,12 +39,8 @@
         <p class="eyebrow">Создаём карту</p>
         <div class="share-sync-bar" aria-hidden="true"><span></span></div>
         <p class="share-sync-text" id="share-sync-text">
-          {% if sync_sheets|default(false) and sync_wallet|default(false) %}
-          Записываем в Google Таблицу и Google Wallet…
-          {% elif sync_sheets|default(false) %}
+          {% if sync_sheets|default(false) %}
           Записываем в Google Таблицу…
-          {% elif sync_wallet|default(false) %}
-          Записываем в Google Wallet…
           {% else %}
           Сохраняем карту…
           {% endif %}

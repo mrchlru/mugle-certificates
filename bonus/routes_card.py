@@ -15,7 +15,6 @@ from bonus.apple_wallet import (
 )
 from bonus.app_settings import certificate_shows_wallet_buttons
 from bonus.db import get_db
-from bonus.google_wallet import save_url, wallet_enabled
 from bonus.http import public_base, render, require
 from bonus.models import Certificate, CertificateStatus, Role, User
 from bonus.partners import partner_cities
@@ -36,11 +35,9 @@ def _card_page_extras() -> dict:
 
 
 def _wallet_ui(db: Session, certificate: Certificate, base: str) -> dict:
-    """Флаги и ссылки кнопок кошелька с учётом глобальной настройки и тестовой карты."""
+    """Флаги и ссылки Apple Wallet / Wallet Passes (Google Wallet отключён)."""
     if not certificate_shows_wallet_buttons(db, certificate):
         return {
-            "google_wallet_enabled": False,
-            "google_wallet_href": "",
             "apple_wallet_enabled": False,
             "apple_wallet_href": "",
             "walletpasses_enabled": False,
@@ -49,8 +46,6 @@ def _wallet_ui(db: Session, certificate: Certificate, base: str) -> dict:
     apple_on = apple_wallet_enabled()
     pkpass_url = pkpass_download_url(certificate, base) if apple_on else ""
     return {
-        "google_wallet_enabled": wallet_enabled(),
-        "google_wallet_href": f"/c/{certificate.token}/google-wallet",
         "apple_wallet_enabled": apple_on,
         "apple_wallet_href": f"/c/{certificate.token}/apple-wallet.pkpass" if apple_on else "",
         "walletpasses_enabled": apple_on and bool(pkpass_url),
@@ -157,8 +152,6 @@ def _certificate_expired(certificate: Certificate) -> bool:
 def _empty_wallet_ui() -> dict:
     """Скрывает кнопки кошелька на экране истёкшей карты."""
     return {
-        "google_wallet_enabled": False,
-        "google_wallet_href": "",
         "apple_wallet_enabled": False,
         "apple_wallet_href": "",
         "walletpasses_enabled": False,
@@ -182,31 +175,6 @@ def mark_gift_opened(token: str, db: Session = Depends(get_db)):
     if changed:
         db.commit()
     return JSONResponse({"ok": True, "unwrap_pending": False})
-
-
-@router.get("/c/{token}/google-wallet")
-def google_wallet_save(token: str, request: Request, db: Session = Depends(get_db)):
-    """Редирект на Add to Google Wallet (подписанный JWT)."""
-    certificate = find_certificate(db, token)
-    if certificate is None:
-        return render(request, "missing.html", status_code=404)
-    if _certificate_expired(certificate):
-        return RedirectResponse(f"/c/{certificate.token}", status_code=302)
-    if not certificate_shows_wallet_buttons(db, certificate) or not wallet_enabled():
-        return render(request, "missing.html", status_code=404)
-    base = public_base(request)
-    url = save_url(certificate, certificate.holder, base_url=base)
-    if not url:
-        return render(
-            request,
-            "public_card.html",
-            card=load_card(db, certificate, base, None),
-            card_token=certificate.token,
-            status_code=503,
-            **_wallet_ui(db, certificate, base),
-            **_card_page_extras(),
-        )
-    return RedirectResponse(url, status_code=302)
 
 
 @router.get("/c/{token}/apple-wallet.pkpass")

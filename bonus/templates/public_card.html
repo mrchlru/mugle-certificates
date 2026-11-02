@@ -33,15 +33,9 @@
 {% endif %}
 {% include "_card.html" %}
 {% if not card_is_expired %}
-{% if google_wallet_enabled|default(false) and google_wallet_href|default('')
-   or apple_wallet_enabled|default(false) and apple_wallet_href|default('')
+{% if apple_wallet_enabled|default(false) and apple_wallet_href|default('')
    or walletpasses_enabled|default(false) and walletpasses_href|default('') %}
 <p class="wallet-actions">
-  {% if google_wallet_enabled|default(false) and google_wallet_href|default('') %}
-  <a class="google-wallet-btn" href="{{ google_wallet_href }}" rel="noopener">
-    <img src="/static/add-to-google-wallet.svg" alt="Добавить в Google Wallet" width="200" height="50">
-  </a>
-  {% endif %}
   {% if apple_wallet_enabled|default(false) and apple_wallet_href|default('') %}
   <a class="apple-wallet-btn" href="{{ apple_wallet_href }}" rel="noopener">
     Добавить в Apple Wallet
