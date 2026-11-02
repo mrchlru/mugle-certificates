@@ -17,6 +17,14 @@
     <label class="field">Пароль
       <input name="password" type="password" autocomplete="current-password" required>
     </label>
+    {% if support_telegram %}
+    <details class="login-forgot">
+      <summary class="text-link">Забыли пароль?</summary>
+      <p class="muted">Пароль сбрасывает администратор. Напишите в Telegram
+        <a class="text-link" href="{{ support_telegram_url }}" target="_blank" rel="noopener noreferrer">{{ support_telegram }}</a>:
+        укажите ФИО и логин.</p>
+    </details>
+    {% endif %}
     <button class="btn wide" type="submit">Войти</button>
   </form>
 </section>

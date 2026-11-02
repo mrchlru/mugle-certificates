@@ -426,6 +426,37 @@ def settings_wallet_buttons(
     return RedirectResponse("/hr/settings", status_code=303)
 
 
+@router.post("/hr/settings/login-unblock")
+def settings_login_unblock(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin)),
+    ip: str = Form(""),
+    csrf_token: str = Form(""),
+):
+    """Снимает блок входа с IP (офисный адрес мог закрыть всех)."""
+    from bonus.login_guard import unblock_login_ip
+
+    try:
+        guard_csrf(request, csrf_token)
+        cleaned = (ip or "").strip()
+        if not unblock_login_ip(db, cleaned):
+            raise BonusError("Адрес не найден в списке блокировок")
+        write_audit(
+            db,
+            actor=user,
+            action=AuditAction.login_unblock,
+            summary=f"Разблокирован вход с IP {cleaned}",
+            target_type="login_attempt",
+            detail=cleaned,
+        )
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+    else:
+        flash(request, f"Вход с адреса {cleaned} снова разрешён")
+    return RedirectResponse("/hr/settings#login-blocks", status_code=303)
+
+
 @router.post("/hr/settings/import")
 async def settings_import(
     request: Request,
@@ -1344,6 +1375,7 @@ def export_unmark(
 
 def _render_settings(request: Request, db: Session, **extra):
     """Общий рендер страницы Настройки (кошельки, импорты, Sheets)."""
+    from bonus.login_guard import list_blocked_attempts
     from bonus.sheets_queue import queue_stats
     from bonus.sheets_sync import sheets_credentials_error
 
@@ -1354,6 +1386,7 @@ def _render_settings(request: Request, db: Session, **extra):
         wallet_buttons_enabled=wallet_buttons_enabled(db),
         sheets_queue=queue_stats(db),
         sheets_credentials_error=sheets_credentials_error(),
+        blocked_logins=list_blocked_attempts(db),
         **extra,
     )
 

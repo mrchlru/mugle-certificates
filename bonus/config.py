@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     apple_wwdr_file: str = ""
     apple_pass_web_service_url: str = ""
     apple_pass_auth_token: str = ""
+    support_telegram: str = "@nkatine"
+    login_allow_ips: str = ""
+    forwarded_allow_ips: str = "127.0.0.1"
 
     def normalized_database_url(self) -> str:
         """Возвращает URL базы в формате SQLAlchemy."""

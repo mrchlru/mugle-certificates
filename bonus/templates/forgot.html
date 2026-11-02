@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Забыли пароль{% endblock %}
+{% block header %}{% endblock %}
+{% block main_class %}login-wrap{% endblock %}
+{% block content %}
+<section class="login">
+  <h1>Забыли пароль?</h1>
+  {% if support_telegram %}
+  <p class="lede">Пароль сбрасывает администратор. Напишите в Telegram
+    <a class="text-link" href="{{ support_telegram_url }}" target="_blank" rel="noopener noreferrer">{{ support_telegram }}</a>:
+    укажите ФИО и логин.</p>
+  {% else %}
+  <p class="lede">Пароль сбрасывает администратор. Обратитесь к нему лично.</p>
+  {% endif %}
+  <p><a class="btn soft" href="/login">Назад ко входу</a></p>
+</section>
+{% endblock %}

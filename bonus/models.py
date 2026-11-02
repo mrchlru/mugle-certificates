@@ -52,6 +52,7 @@ class AuditAction(str, enum.Enum):
     segment_delete = "segment_delete"
     link_export = "link_export"
     link_delivery_mark = "link_delivery_mark"
+    login_unblock = "login_unblock"
 
 
 class CertificateStatus(str, enum.Enum):
@@ -339,6 +340,19 @@ class AuditLog(Base):
         DateTime(timezone=True),
         default=lambda: _utcnow(),
         index=True,
+    )
+
+
+class LoginAttempt(Base):
+    """Счётчик неудачных входов по IP (блок после лимита попыток)."""
+
+    __tablename__ = "login_attempts"
+
+    ip: Mapped[str] = mapped_column(String(64), primary_key=True)
+    fail_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_fail_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    blocked_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
 

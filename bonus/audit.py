@@ -43,6 +43,7 @@ _ACTION_LABELS: dict[str, str] = {
     AuditAction.segment_delete.value: "Удаление сегмента",
     AuditAction.link_export.value: "Выгрузка ссылок",
     AuditAction.link_delivery_mark.value: "Отметка рассылки",
+    AuditAction.login_unblock.value: "Разблокировка входа",
 }
 
 

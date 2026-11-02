@@ -1,10 +1,9 @@
-"""Пароли, сессия и ограничение попыток входа."""
+"""Пароли, сессия и CSRF. Блок входа по IP — в login_guard (БД)."""
 
 import base64
 import hashlib
 import hmac
 import secrets
-import time
 from urllib.parse import quote
 
 from fastapi import Request
@@ -12,9 +11,6 @@ from sqlalchemy.orm import Session
 
 from bonus.models import Role, User
 
-_ATTEMPTS: dict[str, list[float]] = {}
-_WINDOW_SECONDS = 600
-_MAX_ATTEMPTS = 8
 _DUMMY_HASH = ""
 
 
@@ -52,32 +48,15 @@ def authenticate(db: Session, login: str, password: str) -> User | None:
     return user
 
 
-def login_blocked(ip: str) -> bool:
-    """Останавливает подбор пароля с одного адреса."""
-    now = time.monotonic()
-    hits = [moment for moment in _ATTEMPTS.get(ip, []) if now - moment < _WINDOW_SECONDS]
-    _ATTEMPTS[ip] = hits
-    return len(hits) >= _MAX_ATTEMPTS
-
-
-def login_failed(ip: str) -> None:
-    """Запоминает неудачную попытку входа."""
-    _ATTEMPTS.setdefault(ip, []).append(time.monotonic())
-
-
-def login_succeeded(ip: str) -> None:
-    """Сбрасывает счётчик после верного пароля."""
-    _ATTEMPTS.pop(ip, None)
-
-
 def client_ip(request: Request) -> str:
-    """Берёт адрес клиента. За прокси Timeweb смотрит на X-Forwarded-For."""
-    forwarded = request.headers.get("x-forwarded-for", "")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    """Адрес клиента из сокета. X-Forwarded-For не читаем вручную —
+
+    Uvicorn подставляет реальный IP при --proxy-headers и корректном
+    FORWARDED_ALLOW_IPS.
+    """
     if request.client is None:
         return "local"
-    return request.client.host
+    return (request.client.host or "local").strip() or "local"
 
 
 def ensure_csrf(request: Request) -> str:

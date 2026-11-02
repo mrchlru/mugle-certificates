@@ -23,6 +23,40 @@
     </form>
   </section>
 
+  <section class="design-panel" style="margin-top: 20px;" id="login-blocks">
+    <header class="design-panel-head">
+      <h2>Заблокированные адреса</h2>
+    </header>
+    <p class="muted design-hint">После 5 неудачных входов IP закрывается на 6 часов. Разблокируйте офисный адрес, если закрыло всех.</p>
+    {% if blocked_logins %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>IP</th><th>Неудач</th><th>Заблокирован до</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for row in blocked_logins %}
+          <tr>
+            <td>{{ row.ip }}</td>
+            <td>{{ row.fail_count }}</td>
+            <td>{% if row.blocked_until %}{{ row.blocked_until|when }}{% else %}—{% endif %}</td>
+            <td>
+              <form method="post" action="/hr/settings/login-unblock" class="inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf }}">
+                <input type="hidden" name="ip" value="{{ row.ip }}">
+                <button class="text-link" type="submit">Разблокировать</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="muted">Сейчас нет заблокированных адресов.</p>
+    {% endif %}
+  </section>
+
   <section class="design-panel" style="margin-top: 20px;">
     <header class="design-panel-head">
       <h2>Импорт сертификатов</h2>

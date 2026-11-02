@@ -5,20 +5,21 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from bonus.config import get_settings
 from bonus.db import get_db
 from bonus.http import guard_csrf, load_user, render
 from bonus.http import Redirect as PageRedirect
-from bonus.models import Role, User
-from bonus.security import (
-    authenticate,
-    client_ip,
-    flash,
-    home_for,
-    login_blocked,
-    login_failed,
-    login_succeeded,
-    safe_next,
+from bonus.login_guard import (
+    block_message,
+    failure_message,
+    login_block_status,
+    normalize_support_telegram,
+    register_login_failure,
+    register_login_success,
+    support_telegram_url,
 )
+from bonus.models import Role, User
+from bonus.security import authenticate, client_ip, flash, home_for, safe_next
 from bonus.services import BonusError, change_password
 
 router = APIRouter()
@@ -46,7 +47,18 @@ def login_form(request: Request, db: Session = Depends(get_db), next: str = "/")
     user = load_user(request, db)
     if user is not None:
         raise PageRedirect(home_for(user.role))
-    return render(request, "login.html", next_path=safe_next(next))
+    return render(
+        request,
+        "login.html",
+        next_path=safe_next(next),
+        **_support_context(),
+    )
+
+
+@router.get("/forgot")
+def forgot_password(request: Request):
+    """Подсказка: пароль сбрасывает администратор через Telegram."""
+    return render(request, "forgot.html", **_support_context())
 
 
 @router.post("/login")
@@ -60,21 +72,70 @@ def login_submit(
 ):
     """Проверяет логин и открывает карточку, кассу или кабинет HR."""
     target = safe_next(next)
+    support = _support_context()
     try:
         guard_csrf(request, csrf_token)
-        ip = client_ip(request)
-        if login_blocked(ip):
-            raise BonusError("Слишком много попыток. Подождите десять минут.")
-        holder = db.scalar(select(User).where(User.login == login.strip().casefold()))
-        if holder is not None and holder.role == Role.employee:
-            raise BonusError("Сертификат открывается по ссылке. Её отправляет HR, пароль не нужен.")
-        user = authenticate(db, login, password)
-        if user is None:
-            login_failed(ip)
-            raise BonusError("Неверный логин или пароль")
-        login_succeeded(ip)
     except BonusError as exc:
-        return render(request, "login.html", status_code=400, next_path=target, error=exc.message, login=login)
+        return render(
+            request,
+            "login.html",
+            status_code=400,
+            next_path=target,
+            error=exc.message,
+            login=login,
+            **support,
+        )
+
+    ip = client_ip(request)
+    blocked, until = login_block_status(db, ip)
+    if blocked and until is not None:
+        return render(
+            request,
+            "login.html",
+            status_code=429,
+            next_path=target,
+            error=block_message(until, support["support_telegram"]),
+            login=login,
+            **support,
+        )
+
+    holder = db.scalar(select(User).where(User.login == login.strip().casefold()))
+    if holder is not None and holder.role == Role.employee:
+        return render(
+            request,
+            "login.html",
+            status_code=400,
+            next_path=target,
+            error="Сертификат открывается по ссылке. Её отправляет HR, пароль не нужен.",
+            login=login,
+            **support,
+        )
+
+    user = authenticate(db, login, password)
+    if user is None:
+        row = register_login_failure(db, ip, login=login)
+        blocked_now, until_now = login_block_status(db, ip)
+        if blocked_now and until_now is not None:
+            return render(
+                request,
+                "login.html",
+                status_code=429,
+                next_path=target,
+                error=block_message(until_now, support["support_telegram"]),
+                login=login,
+                **support,
+            )
+        return render(
+            request,
+            "login.html",
+            status_code=400,
+            next_path=target,
+            error=failure_message(row.fail_count),
+            login=login,
+            **support,
+        )
+
+    register_login_success(db, ip)
     request.session["user_id"] = user.id
     destination = target if target not in {"", "/"} else home_for(user.role)
     return RedirectResponse(destination, status_code=303)
@@ -119,3 +180,11 @@ def csrf_ok_or_clear(request: Request, token: str) -> bool:
     from bonus.security import csrf_ok
 
     return csrf_ok(request, token)
+
+
+def _support_context() -> dict[str, str]:
+    handle = normalize_support_telegram(get_settings().support_telegram)
+    return {
+        "support_telegram": handle,
+        "support_telegram_url": support_telegram_url(handle),
+    }
