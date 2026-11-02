@@ -5,6 +5,7 @@ function boot() {
   bindCamera();
   bindPartnersDialog();
   bindTiltCards();
+  bindHistoryMore();
 }
 
 function bindTiltCards() {
@@ -289,6 +290,122 @@ function formatKopecks(kopecks) {
     return String(whole);
   }
   return whole + "," + String(frac).padStart(2, "0");
+}
+
+function bindHistoryMore() {
+  const boxes = document.querySelectorAll(".history-more");
+  if (!boxes.length) {
+    return;
+  }
+  boxes.forEach(function (box) {
+    setupHistoryMore(box);
+  });
+}
+
+function setupHistoryMore(box) {
+  const button = box.querySelector(".history-more-btn");
+  const status = box.querySelector(".history-more-status");
+  const list = box.previousElementSibling;
+  if (!button || !list || list.tagName !== "UL") {
+    return;
+  }
+  let loading = false;
+  let observer = null;
+
+  function stopObserver() {
+    if (observer) {
+      observer.disconnect();
+      observer = null;
+    }
+  }
+
+  function finish() {
+    box.hidden = true;
+    box.setAttribute("data-has-more", "0");
+    stopObserver();
+  }
+
+  function loadMore() {
+    if (loading || box.hidden || box.getAttribute("data-has-more") !== "1") {
+      return;
+    }
+    const url = box.getAttribute("data-history-url") || "";
+    const before = box.getAttribute("data-before") || "";
+    if (!url || !before) {
+      finish();
+      return;
+    }
+    loading = true;
+    button.disabled = true;
+    if (status) {
+      status.textContent = "Загружаем…";
+    }
+    const target = url + "?before=" + encodeURIComponent(before) + "&limit=10";
+    fetch(target, { credentials: "same-origin" })
+      .then(function (response) {
+        if (!response.ok) {
+          throw new Error("bad-status");
+        }
+        const hasMore = response.headers.get("X-Has-More") === "1";
+        const nextBefore = response.headers.get("X-Next-Before") || "";
+        return response.text().then(function (html) {
+          return { html: html, hasMore: hasMore, nextBefore: nextBefore };
+        });
+      })
+      .then(function (payload) {
+        appendHistoryFragment(list, payload.html);
+        if (payload.nextBefore) {
+          box.setAttribute("data-before", payload.nextBefore);
+        }
+        if (!payload.hasMore) {
+          finish();
+        } else {
+          button.disabled = false;
+        }
+        if (status) {
+          status.textContent = "";
+        }
+      })
+      .catch(function () {
+        button.disabled = false;
+        if (status) {
+          status.textContent = "Не удалось загрузить. Нажмите ещё раз.";
+        }
+      })
+      .finally(function () {
+        loading = false;
+      });
+  }
+
+  button.addEventListener("click", function () {
+    loadMore();
+  });
+
+  if (typeof IntersectionObserver === "function") {
+    observer = new IntersectionObserver(
+      function (entries) {
+        entries.forEach(function (entry) {
+          if (entry.isIntersecting) {
+            loadMore();
+          }
+        });
+      },
+      { rootMargin: "200px" }
+    );
+    observer.observe(box);
+  }
+}
+
+function appendHistoryFragment(list, html) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString("<ul>" + html + "</ul>", "text/html");
+  const source = doc.querySelector("ul");
+  if (!source) {
+    return;
+  }
+  Array.prototype.slice.call(source.children).forEach(function (node) {
+    list.appendChild(node);
+  });
 }
 
 boot();

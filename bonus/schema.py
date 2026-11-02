@@ -176,6 +176,21 @@ def ensure_schema(engine: Engine) -> None:
     _backfill_certificate_parts(engine)
     _ensure_app_settings_row(engine)
     _ensure_summary_indexes(engine)
+    _ensure_history_indexes(engine)
+
+
+def _ensure_history_indexes(engine: Engine) -> None:
+    """Индекс для постраничной истории операций по карте."""
+    inspector = inspect(engine)
+    if "transactions" not in inspector.get_table_names():
+        return
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_transactions_certificate_id_id "
+                "ON transactions (certificate_id, id)"
+            )
+        )
 
 
 def _ensure_summary_indexes(engine: Engine) -> None:

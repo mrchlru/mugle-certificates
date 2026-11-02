@@ -15,15 +15,18 @@ from bonus.apple_wallet import (
 )
 from bonus.app_settings import certificate_shows_wallet_buttons
 from bonus.db import get_db
-from bonus.http import public_base, render, require
+from bonus.http import load_user, public_base, render, require, templates
 from bonus.models import Certificate, CertificateStatus, Role, User
 from bonus.partners import partner_cities
-from bonus.present import load_card, load_cards
+from bonus.present import HISTORY_PAGE_SIZE, TxView, load_card, load_cards, load_history_page
+from bonus.security import ensure_csrf
 from bonus.services import find_certificate
 from bonus.values import today_msk
 from bonus.weekdays import WEEKDAY_CHOICES
 
 router = APIRouter()
+
+_STAFF_ROLES = {Role.admin, Role.hr, Role.hrd, Role.manager}
 
 
 def _card_page_extras() -> dict:
@@ -60,6 +63,39 @@ def card(request: Request, db: Session = Depends(get_db), user: User = Depends(r
     return render(request, "card.html", cards=cards, **_card_page_extras())
 
 
+@router.get("/c/{token}/history")
+def public_certificate_history(
+    token: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    before: str = "",
+    limit: int = HISTORY_PAGE_SIZE,
+):
+    """HTML-порция истории для ленивой подгрузки на карточке."""
+    certificate = find_certificate(db, token)
+    if certificate is None or _unavailable_reason(certificate) is not None:
+        return Response(status_code=404)
+    before_id = _parse_before(before)
+    if before_id is None:
+        return Response(status_code=400)
+    page_limit = _clamp_history_limit(limit)
+    actor = _history_actor(request, db)
+    page = load_history_page(
+        db,
+        certificate,
+        actor,
+        limit=page_limit,
+        before_id=before_id,
+    )
+    return _history_fragment_response(
+        request,
+        items=page.items,
+        csrf=ensure_csrf(request) if actor is not None else "",
+        has_more=page.has_more,
+        next_before=page.next_before,
+    )
+
+
 @router.get("/c/{token}")
 def public_certificate(token: str, request: Request, db: Session = Depends(get_db)):
     """Ссылка, которую HR отправляет сотруднику. Пароль не нужен."""
@@ -67,7 +103,8 @@ def public_certificate(token: str, request: Request, db: Session = Depends(get_d
     if certificate is None:
         return render(request, "missing.html", status_code=404)
     base = public_base(request)
-    card = load_card(db, certificate, base, None)
+    viewer = _history_actor(request, db)
+    card = load_card(db, certificate, base, viewer)
     reason = _unavailable_reason(certificate)
     is_unavailable = reason is not None
     if is_unavailable:
@@ -157,6 +194,65 @@ def _empty_wallet_ui() -> dict:
         "walletpasses_enabled": False,
         "walletpasses_href": "",
     }
+
+
+def _history_actor(request: Request, db: Session) -> User | None:
+    """HR/админ/управляющий из сессии — для кнопок отмены в истории."""
+    user = load_user(request, db)
+    if user is None or user.role not in _STAFF_ROLES:
+        return None
+    return user
+
+
+def _parse_before(raw: str) -> int | None:
+    """Курсор before: целое > 0, иначе None (ответ 400)."""
+    text = (raw or "").strip()
+    if not text.isdigit():
+        return None
+    value = int(text)
+    if value <= 0:
+        return None
+    return value
+
+
+def _clamp_history_limit(raw: int) -> int:
+    """Ограничивает limit порции: 1…50, по умолчанию HISTORY_PAGE_SIZE."""
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return HISTORY_PAGE_SIZE
+    if value < 1:
+        return 1
+    if value > 50:
+        return 50
+    return value
+
+
+def _history_fragment_response(
+    request: Request,
+    *,
+    items: tuple[TxView, ...],
+    csrf: str,
+    has_more: bool,
+    next_before: int | None,
+) -> Response:
+    """HTML <li> строк + заголовки X-Has-More / X-Next-Before."""
+    response = templates.TemplateResponse(
+        request,
+        "_history_items.html",
+        {
+            "request": request,
+            "items": items,
+            "show_holder": False,
+            "next_path": "",
+            "csrf": csrf,
+        },
+    )
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Has-More"] = "1" if has_more else "0"
+    if next_before is not None:
+        response.headers["X-Next-Before"] = str(next_before)
+    return response
 
 
 @router.post("/c/{token}/gift-opened")

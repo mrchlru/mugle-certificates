@@ -10,7 +10,7 @@
     {% include "_partners_dialog.html" %}
     {% set next_path = '/card' %}
     {% set show_holder = false %}
-    {% with items=card.history %}
+    {% with items=card.history, history_token=card.token, history_has_more=card.history_has_more, history_next_before=card.history_next_before %}
       {% include "_history.html" %}
     {% endwith %}
   {% endfor %}

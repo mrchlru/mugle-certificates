@@ -51,7 +51,7 @@
 {% include "_card_partners.html" %}
 {% set show_holder = false %}
 {% set next_path = '' %}
-{% with items=card.history %}
+{% with items=card.history, history_token=card.token, history_has_more=card.history_has_more, history_next_before=card.history_next_before %}
   {% include "_history.html" %}
 {% endwith %}
 {% include "_partners_dialog.html" %}

@@ -2,45 +2,19 @@
   <h2>{{ history_title|default("Операции") }}</h2>
   {% if items %}
   <ul>
-    {% for item in items %}
-    <li class="{% if item.undone %}is-undone{% endif %}">
-      <div>
-        <p class="history-title">{{ tx_label(item.tx_type, item.reversal_of_id) }}
-          {% if item.holder_name and show_holder %} · {{ item.holder_name }}{% endif %}
-        </p>
-        <p class="muted">
-          {{ item.created_at|when }}
-          {% if item.actor_name %} · {{ item.actor_name }}{% endif %}
-          {% if item.restaurant %} · {{ item.restaurant }}{% endif %}
-          {% if item.order_ref %} · {{ item.order_ref }}{% endif %}
-          {% if item.comment %} · {{ item.comment }}{% endif %}
-        </p>
-        {% if item.cheque_detail %}
-        <details class="history-cheque">
-          <summary>Чек заказа</summary>
-          <pre class="history-cheque-body">{{ item.cheque_detail }}</pre>
-        </details>
-        {% endif %}
-      </div>
-      <div class="history-side">
-        {% if item.tx_type not in ['block', 'unblock'] %}
-        <p class="history-amount {% if item.tx_type in ['debit', 'migrate', 'expire', 'burn'] %}minus{% else %}plus{% endif %}">
-          {% if item.tx_type in ['debit', 'migrate', 'expire', 'burn'] %}−{% endif %}{{ item.amount|money_plain }}
-        </p>
-        {% endif %}
-        {% if item.can_undo %}
-        <form method="post" action="/tx/{{ item.id }}/undo">
-          <input type="hidden" name="csrf_token" value="{{ csrf }}">
-          <input type="hidden" name="next" value="{{ next_path }}">
-          <button class="text-link" type="submit">Отменить</button>
-        </form>
-        {% elif item.undone %}
-        <p class="muted">отменено</p>
-        {% endif %}
-      </div>
-    </li>
-    {% endfor %}
+    {% include "_history_items.html" %}
   </ul>
+  {% if history_token is defined and history_token and history_has_more %}
+  <div
+    class="history-more"
+    data-history-url="/c/{{ history_token }}/history"
+    data-before="{{ history_next_before }}"
+    data-has-more="1"
+  >
+    <button type="button" class="text-link history-more-btn">Показать ещё</button>
+    <p class="muted history-more-status" aria-live="polite"></p>
+  </div>
+  {% endif %}
   {% else %}
   <p class="muted">Операций пока нет.</p>
   {% endif %}

@@ -24,6 +24,7 @@ from bonus.services import apply_due_expiries, apply_expiry_writeoff
 from bonus.values import MSK, as_utc, format_short_code, today_msk
 
 UNDO_WINDOW = timedelta(minutes=15)
+HISTORY_PAGE_SIZE = 10
 
 
 @dataclass(frozen=True)
@@ -102,8 +103,19 @@ class CardView:
     unwrap_kind: str
     first_name: str
     history: tuple[TxView, ...]
+    history_has_more: bool = False
+    history_next_before: int | None = None
     parts: tuple[PartView, ...] = ()
     is_combo: bool = False
+
+
+@dataclass(frozen=True)
+class HistoryPage:
+    """Порция истории операций по карте."""
+
+    items: tuple[TxView, ...]
+    has_more: bool
+    next_before: int | None
 
 
 @dataclass(frozen=True)
@@ -267,21 +279,48 @@ def load_cards(db: Session, holder_id: int, base_url: str, actor: User) -> list[
 
 
 def load_card(db: Session, certificate: Certificate, base_url: str, actor: User | None) -> CardView:
-    """Одна карточка вместе с историей."""
+    """Одна карточка вместе с первой порцией истории."""
     if apply_expiry_writeoff(db, certificate):
         db.commit()
         db.refresh(certificate)
     holder = db.get(User, certificate.holder_id)
-    history = tuple(
-        _history(
-            db,
-            certificate.id,
-            actor,
-            holder.full_name if holder is not None else "",
-            certificate.public_number,
-        )
+    page = _history(
+        db,
+        certificate.id,
+        actor,
+        holder.full_name if holder is not None else "",
+        certificate.public_number,
     )
-    return _card_view(db, certificate, holder, base_url, history)
+    return _card_view(
+        db,
+        certificate,
+        holder,
+        base_url,
+        page.items,
+        history_has_more=page.has_more,
+        history_next_before=page.next_before,
+    )
+
+
+def load_history_page(
+    db: Session,
+    certificate: Certificate,
+    actor: User | None,
+    *,
+    limit: int = HISTORY_PAGE_SIZE,
+    before_id: int | None = None,
+) -> HistoryPage:
+    """Следующая порция истории для ленивой подгрузки."""
+    holder = db.get(User, certificate.holder_id)
+    return _history(
+        db,
+        certificate.id,
+        actor,
+        holder.full_name if holder is not None else "",
+        certificate.public_number,
+        limit=limit,
+        before_id=before_id,
+    )
 
 
 def recent_debits(db: Session, actor: User, limit: int = 8) -> list[TxView]:
@@ -761,15 +800,24 @@ def _history(
     actor: User | None,
     holder_name: str,
     public_number: str,
-) -> list[TxView]:
-    rows = db.execute(
+    *,
+    limit: int = HISTORY_PAGE_SIZE,
+    before_id: int | None = None,
+) -> HistoryPage:
+    """Порция операций карты: limit строк + флаг, есть ли ещё."""
+    page_size = max(1, int(limit))
+    query = (
         select(Transaction, User.full_name, User.restaurant)
         .outerjoin(User, Transaction.actor_id == User.id)
         .where(Transaction.certificate_id == certificate_id)
-        .order_by(Transaction.id.desc())
-    ).all()
-    undone = _undone_ids(db, [row[0].id for row in rows])
-    return [
+    )
+    if before_id is not None:
+        query = query.where(Transaction.id < int(before_id))
+    rows = db.execute(query.order_by(Transaction.id.desc()).limit(page_size + 1)).all()
+    has_more = len(rows) > page_size
+    page_rows = rows[:page_size]
+    undone = _undone_ids(db, [row[0].id for row in page_rows])
+    items = tuple(
         _tx_view(
             tx,
             actor_name or "",
@@ -779,8 +827,10 @@ def _history(
             actor,
             restaurant=tx.restaurant or place or "",
         )
-        for tx, actor_name, place in rows
-    ]
+        for tx, actor_name, place in page_rows
+    )
+    next_before = items[-1].id if items else None
+    return HistoryPage(items=items, has_more=has_more, next_before=next_before)
 
 
 def _tx_view(
@@ -826,6 +876,9 @@ def _card_view(
     holder: User | None,
     base_url: str,
     history: tuple[TxView, ...],
+    *,
+    history_has_more: bool = False,
+    history_next_before: int | None = None,
 ) -> CardView:
     from bonus.parts import list_parts
     from bonus.weekdays import allows_weekday
@@ -926,6 +979,8 @@ def _card_view(
         unwrap_kind=unwrap_kind,
         first_name=_first_name("" if holder is None else holder.full_name),
         history=history,
+        history_has_more=history_has_more,
+        history_next_before=history_next_before,
         parts=part_views,
         is_combo=len(part_views) > 1,
     )
