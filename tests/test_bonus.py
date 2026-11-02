@@ -586,6 +586,50 @@ def test_import_keeps_spent_balance_and_skips_bad_row() -> None:
     assert len(issued.certificate.short_code) == 8
 
 
+def test_hr_issue_form_redirects_without_500(tmp_path, monkeypatch) -> None:
+    """Регрессия: после выпуска аудит не падает на несуществующем nominal_value."""
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'issue.db'}")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key-issue")
+    monkeypatch.setenv("SEED_DEMO", "true")
+    monkeypatch.setenv("GOOGLE_SHEETS_SPREADSHEET_ID", "")
+    from bonus.config import get_settings
+
+    get_settings.cache_clear()
+    import bonus.main as main
+    from fastapi.testclient import TestClient
+
+    with TestClient(main.app) as client:
+        _login(client, "hr", "mugle-hr")
+        form = client.get("/hr/new")
+        assert form.status_code == 200
+        match = re.search(r'name="segment_id"[^>]*>[\s\S]*?<option value="(\d+)"', form.text)
+        assert match is not None
+        response = client.post(
+            "/hr/new",
+            data={
+                "csrf_token": _csrf(form.text),
+                "full_name": "Петров Пётр",
+                "company": "ООО Тест",
+                "department": "Хачапури",
+                "job_title": "Официант",
+                "phone": "",
+                "ledger_sheet": "employee",
+                "segment_id": match.group(1),
+                "template_id": "0",
+                "nominal": "10000",
+                "note": "",
+                "expires_on": "",
+                "discount_percent": "",
+                "color": "#00A8A8",
+                "use_days": ["1", "2", "3", "4", "5", "6", "7"],
+            },
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+        assert response.headers["location"].startswith("/hr/c/")
+
+
 def test_login_card_and_debit(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'bonus.db'}")
     monkeypatch.setenv("DATA_DIR", str(tmp_path))

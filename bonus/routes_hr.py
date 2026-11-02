@@ -365,7 +365,7 @@ async def issue_submit(
             summary=f"Карта {issued.certificate.public_number} · {full_name.strip()}",
             target_type="certificate",
             target_id=issued.certificate.id,
-            detail=format_money(nominal_value),
+            detail=format_money(total_nominal),
         )
     except BonusError as exc:
         flash(request, exc.message, "bad")
