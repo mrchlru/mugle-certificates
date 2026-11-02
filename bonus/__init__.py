@@ -1,3 +1,3 @@
 """Teams Bonus — корпоративные сертификаты (замена Statix Bonus)."""
 
-__version__ = "1.2.72-async-sheets-no-gwallet"
+__version__ = "1.2.73-fast-hr-summary"

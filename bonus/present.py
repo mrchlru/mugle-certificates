@@ -3,11 +3,21 @@
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy import ColumnElement, case, exists, func, literal, or_, select
+from sqlalchemy.orm import Session, selectinload
 
 from bonus.catalog import media_url
-from bonus.models import Certificate, CertificateStatus, Role, Segment, Transaction, TxType, User
+from bonus.models import (
+    CardTemplate,
+    Certificate,
+    CertificatePart,
+    CertificateStatus,
+    Role,
+    Segment,
+    Transaction,
+    TxType,
+    User,
+)
 from bonus.barcode_draw import barcode_svg
 from bonus.roles import role_label
 from bonus.services import apply_due_expiries, apply_expiry_writeoff
@@ -107,9 +117,48 @@ class DashboardStats:
 
 @dataclass(frozen=True)
 class CertificateSearchPage:
-    """Страница сводки с ленивой подгрузкой."""
+    """Страница сводки с ленивой подгрузкой (полный CardView — эталон/legacy)."""
 
     cards: tuple[CardView, ...]
+    total: int
+    offset: int
+    limit: int
+
+    @property
+    def has_more(self) -> bool:
+        """Есть ли ещё карты после текущей страницы."""
+        return self.offset + len(self.cards) < self.total
+
+    @property
+    def next_offset(self) -> int:
+        """Смещение для следующего запроса."""
+        return self.offset + len(self.cards)
+
+
+@dataclass(frozen=True)
+class CardRow:
+    """Лёгкая строка сводки HR без штрихкода, частей и истории."""
+
+    id: int
+    public_number: str
+    color: str
+    token: str
+    holder_name: str
+    department: str
+    job_title: str
+    phone: str
+    segment_name: str
+    balance: int
+    expires_on: date | None
+    status: CertificateStatus
+    single_use: bool
+
+
+@dataclass(frozen=True)
+class CertificateRowsPage:
+    """Страница сводки на лёгких строках (тот же контракт, что CertificateSearchPage)."""
+
+    cards: tuple[CardRow, ...]
     total: int
     offset: int
     limit: int
@@ -207,6 +256,11 @@ def load_cards(db: Session, holder_id: int, base_url: str, actor: User) -> list[
             Certificate.holder_id == holder_id,
             Certificate.is_deleted.is_(False),
         )
+        .options(
+            selectinload(Certificate.parts),
+            selectinload(Certificate.template),
+            selectinload(Certificate.segment),
+        )
         .order_by(Certificate.id.desc())
     ).all()
     return [load_card(db, certificate, base_url, actor) for certificate in certificates]
@@ -296,6 +350,94 @@ def normalize_status_filter(raw: str) -> str:
 SUMMARY_PAGE_SIZE = 30
 
 
+def search_certificate_rows(
+    db: Session,
+    query: str,
+    segment_id: int | None = None,
+    *,
+    sort: str = "name",
+    status: str = "all",
+    offset: int = 0,
+    limit: int = SUMMARY_PAGE_SIZE,
+) -> CertificateRowsPage:
+    """Быстрая сводка HR: фильтры и пагинация в SQL, без CardView на каждую карту."""
+    apply_due_expiries(db)
+    status_key = normalize_status_filter(status)
+    sort_key = normalize_sort(sort)
+    today = today_msk()
+    start = max(0, int(offset))
+    page_size = max(1, min(int(limit), 100))
+
+    filters = _summary_filters(segment_id, status_key, today)
+    search_clause = _summary_search_clause(db, query)
+    if search_clause is not None:
+        filters.append(search_clause)
+
+    balance_expr = _summary_balance_expr().label("row_balance")
+    segment_label = _summary_segment_label().label("segment_label")
+    order_by = _summary_order_by(db, sort_key, balance_expr)
+
+    total = int(
+        db.scalar(
+            select(func.count())
+            .select_from(Certificate)
+            .join(User, Certificate.holder_id == User.id)
+            .outerjoin(Segment, Certificate.segment_id == Segment.id)
+            .outerjoin(CardTemplate, Certificate.template_id == CardTemplate.id)
+            .where(*filters)
+        )
+        or 0
+    )
+    rows = db.execute(
+        select(
+            Certificate.id,
+            Certificate.public_number,
+            Certificate.color,
+            Certificate.token,
+            User.full_name,
+            User.department,
+            User.job_title,
+            User.phone,
+            segment_label,
+            balance_expr,
+            Certificate.expires_on,
+            Certificate.status,
+            Certificate.single_use,
+        )
+        .join(User, Certificate.holder_id == User.id)
+        .outerjoin(Segment, Certificate.segment_id == Segment.id)
+        .outerjoin(CardTemplate, Certificate.template_id == CardTemplate.id)
+        .where(*filters)
+        .order_by(*order_by)
+        .offset(start)
+        .limit(page_size)
+    ).all()
+    cards = tuple(
+        CardRow(
+            id=int(row[0]),
+            public_number=str(row[1] or ""),
+            color=str(row[2] or "#00A8A8"),
+            token=str(row[3] or ""),
+            holder_name=str(row[4] or ""),
+            department=str(row[5] or ""),
+            job_title=str(row[6] or ""),
+            phone=str(row[7] or ""),
+            segment_name=str(row[8] or ""),
+            balance=int(row[9] or 0),
+            expires_on=row[10],
+            status=row[11],
+            single_use=bool(row[12]),
+        )
+        for row in rows
+    )
+    return CertificateRowsPage(
+        cards=cards,
+        total=total,
+        offset=start,
+        limit=page_size,
+    )
+
+
 def search_certificates(
     db: Session,
     query: str,
@@ -305,64 +447,116 @@ def search_certificates(
     status: str = "all",
     offset: int = 0,
     limit: int = SUMMARY_PAGE_SIZE,
-) -> CertificateSearchPage:
-    """Список для HR. Поиск, фильтр по сегменту/статусу и сортировка.
+) -> CertificateRowsPage:
+    """Список для HR: быстрые строки сводки (совместимое имя для старых импортов)."""
+    return search_certificate_rows(
+        db,
+        query,
+        segment_id,
+        sort=sort,
+        status=status,
+        offset=offset,
+        limit=limit,
+    )
 
-    Возвращает страницу: по умолчанию 30 карт, дальше — через offset.
-    """
-    apply_due_expiries(db)
-    status_key = normalize_status_filter(status)
-    today = today_msk()
-    statement = (
-        select(Certificate, User)
-        .join(User, Certificate.holder_id == User.id)
-        .where(Certificate.is_deleted.is_(False))
-        .order_by(Certificate.id.desc())
-    )
+
+def _ci(db: Session, column: ColumnElement) -> ColumnElement:
+    """Сравнение без регистра: py_casefold в SQLite, lower() иначе."""
+    dialect = ""
+    bind = db.get_bind()
+    if bind is not None:
+        dialect = (bind.dialect.name or "").casefold()
+    if dialect == "sqlite":
+        return func.py_casefold(column)
+    return func.lower(column)
+
+
+def _summary_filters(
+    segment_id: int | None,
+    status_key: str,
+    today: date,
+) -> list:
+    """Общие WHERE для списка и count сводки."""
+    filters: list = [Certificate.is_deleted.is_(False)]
     if segment_id is not None and segment_id > 0:
-        statement = statement.where(Certificate.segment_id == segment_id)
+        filters.append(Certificate.segment_id == segment_id)
     if status_key == "blocked":
-        statement = statement.where(Certificate.status == CertificateStatus.blocked)
+        filters.append(Certificate.status == CertificateStatus.blocked)
     elif status_key == "expired":
-        statement = statement.where(
-            Certificate.expires_on.is_not(None),
-            Certificate.expires_on < today,
-        )
+        filters.append(Certificate.expires_on.is_not(None))
+        filters.append(Certificate.expires_on < today)
     elif status_key == "active":
-        statement = statement.where(
-            Certificate.status == CertificateStatus.active,
-            or_(Certificate.expires_on.is_(None), Certificate.expires_on >= today),
+        filters.append(Certificate.status == CertificateStatus.active)
+        filters.append(
+            or_(Certificate.expires_on.is_(None), Certificate.expires_on >= today)
         )
-    rows = db.execute(statement).all()
-    needle = query.strip().casefold()
-    found: list[CardView] = []
-    for certificate, holder in rows:
-        segment_name = _segment_name(db, certificate.segment_id)
-        haystack = " ".join(
-            (
-                holder.full_name,
-                holder.department,
-                holder.job_title,
-                holder.phone,
-                certificate.public_number,
-                certificate.short_code,
-                certificate.note,
-                segment_name,
-            )
-        ).casefold()
-        if needle and needle not in haystack:
-            continue
-        found.append(_card_view(db, certificate, holder, "", ()))
-    ordered = _sort_cards(found, normalize_sort(sort))
-    start = max(0, int(offset))
-    page_size = max(1, min(int(limit), 100))
-    page = ordered[start : start + page_size]
-    return CertificateSearchPage(
-        cards=tuple(page),
-        total=len(ordered),
-        offset=start,
-        limit=page_size,
+    return filters
+
+
+def _summary_search_clause(db: Session, query: str):
+    """LIKE по тем же полям, что искал Python casefold; пустой запрос — None."""
+    needle = " ".join(query.split()).casefold()
+    if not needle:
+        return None
+    escaped = (
+        needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     )
+    pattern = f"%{escaped}%"
+    fields = (
+        User.full_name,
+        User.department,
+        User.job_title,
+        User.phone,
+        Certificate.public_number,
+        Certificate.short_code,
+        Certificate.note,
+        Segment.name,
+    )
+    return or_(
+        *(
+            _ci(db, func.coalesce(column, "")).like(pattern, escape="\\")
+            for column in fields
+        )
+    )
+
+
+def _summary_balance_expr():
+    """Баланс строки = сумма частей, иначе Certificate.balance."""
+    parts_exist = exists(
+        select(literal(1)).where(CertificatePart.certificate_id == Certificate.id)
+    )
+    parts_sum = (
+        select(func.coalesce(func.sum(CertificatePart.balance), 0))
+        .where(CertificatePart.certificate_id == Certificate.id)
+        .correlate(Certificate)
+        .scalar_subquery()
+    )
+    return case((parts_exist, parts_sum), else_=Certificate.balance)
+
+
+def _summary_segment_label():
+    """Подпись: имя шаблона, иначе сегмент (как в _card_view)."""
+    return func.coalesce(
+        func.nullif(func.trim(CardTemplate.name), ""),
+        Segment.name,
+        literal(""),
+    )
+
+
+def _summary_order_by(db: Session, sort_key: str, balance_expr) -> list:
+    """ORDER BY со стабильным хвостом по Certificate.id."""
+    name_ci = _ci(db, User.full_name)
+    if sort_key == "balance":
+        return [balance_expr.desc(), name_ci, Certificate.public_number, Certificate.id]
+    if sort_key == "expires":
+        return [
+            Certificate.expires_on.is_(None),
+            Certificate.expires_on.asc(),
+            name_ci,
+            Certificate.public_number,
+            Certificate.id,
+        ]
+    return [name_ci, Certificate.public_number, Certificate.id]
 
 
 def dashboard_stats(db: Session, segment_id: int | None = None) -> DashboardStats:
@@ -633,25 +827,33 @@ def _card_view(
     base_url: str,
     history: tuple[TxView, ...],
 ) -> CardView:
-    from bonus.parts import available_balance, list_parts
+    from bonus.parts import list_parts
     from bonus.weekdays import allows_weekday
 
     template_path = ""
     logo_url = "/static/logo.svg"
     logo_custom = False
     template_name = ""
-    if certificate.template_id is not None:
-        from bonus.catalog import template_logo_is_custom, template_logo_url
-        from bonus.models import CardTemplate
+    template = certificate.template
+    if certificate.template_id is not None and template is None:
+        from bonus.models import CardTemplate as TemplateModel
 
-        template = db.get(CardTemplate, certificate.template_id)
-        if template is not None:
-            template_name = (template.name or "").strip()
-            if template.image_path:
-                template_path = media_url(template.image_path)
+        template = db.get(TemplateModel, certificate.template_id)
+    if template is not None:
+        from bonus.catalog import template_logo_is_custom, template_logo_url
+
+        template_name = (template.name or "").strip()
+        if template.image_path:
+            template_path = media_url(template.image_path)
         logo_url = template_logo_url(template)
         logo_custom = template_logo_is_custom(template)
-    cert_parts = list_parts(db, certificate.id)
+    # Части один раз: и для баланса, и для unwrap_kind.
+    if certificate.parts:
+        cert_parts = sorted(
+            certificate.parts, key=lambda part: (part.sort_order, part.id)
+        )
+    else:
+        cert_parts = list_parts(db, certificate.id)
     today = today_msk().isoweekday()
     part_views = tuple(
         PartView(
@@ -680,7 +882,13 @@ def _card_view(
         primary = min(cert_parts, key=lambda part: (part.sort_order, part.id))
         spend_ok = allows_weekday(primary.use_days, today)
     # Подпись на карточке — название шаблона из «Оформление», иначе сегмент.
-    segment_label = template_name or _segment_name(db, certificate.segment_id)
+    if template_name:
+        segment_label = template_name
+    elif certificate.segment is not None:
+        segment_label = certificate.segment.name or ""
+    else:
+        segment_label = _segment_name(db, certificate.segment_id)
+    unwrap_kind = _unwrap_kind_for_certificate(db, certificate, parts=cert_parts)
     return CardView(
         id=certificate.id,
         public_number=certificate.public_number,
@@ -712,10 +920,10 @@ def _card_view(
         use_days=_use_days_mask(certificate),
         use_days_label=_use_days_caption(certificate),
         use_days_active=_use_days_active(certificate),
-        birthday_unwrap=_unwrap_kind_for_certificate(db, certificate) == "birthday",
+        birthday_unwrap=unwrap_kind == "birthday",
         gift_opened=certificate.gift_opened_at is not None,
         unwrap_pending=bool(getattr(certificate, "unwrap_pending", False)),
-        unwrap_kind=_unwrap_kind_for_certificate(db, certificate),
+        unwrap_kind=unwrap_kind,
         first_name=_first_name("" if holder is None else holder.full_name),
         history=history,
         parts=part_views,
@@ -723,11 +931,17 @@ def _card_view(
     )
 
 
-def _unwrap_kind_for_certificate(db: Session, certificate: Certificate) -> str:
+def _unwrap_kind_for_certificate(
+    db: Session,
+    certificate: Certificate,
+    *,
+    parts: list | None = None,
+) -> str:
     """Вид распаковки: первое непустое среди частей / сегмента карты."""
     from bonus.parts import list_parts, unwrap_kind_from_segments
 
-    part_ids = [part.segment_id for part in list_parts(db, certificate.id)]
+    cert_parts = parts if parts is not None else list_parts(db, certificate.id)
+    part_ids = [part.segment_id for part in cert_parts]
     if part_ids:
         return unwrap_kind_from_segments(db, part_ids)
     if certificate.segment_id is None:

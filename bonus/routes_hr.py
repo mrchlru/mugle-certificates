@@ -70,7 +70,7 @@ from bonus.present import (
     normalize_sort,
     normalize_status_filter,
     preview_birthday_card,
-    search_certificates,
+    search_certificate_rows,
     sort_choices,
     status_choices,
 )
@@ -129,7 +129,7 @@ def dashboard(
     segment_id = segment if segment > 0 else None
     sort_key = normalize_sort(sort)
     status_key = normalize_status_filter(status)
-    page = search_certificates(
+    page = search_certificate_rows(
         db,
         q,
         segment_id,
@@ -171,7 +171,7 @@ def dashboard_cards_more(
 ):
     """Фрагмент строк таблицы сводки для бесконечной подгрузки."""
     segment_id = segment if segment > 0 else None
-    page = search_certificates(
+    page = search_certificate_rows(
         db,
         q,
         segment_id,

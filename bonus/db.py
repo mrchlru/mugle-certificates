@@ -58,3 +58,10 @@ def _install_sqlite_pragmas(bound: Engine) -> None:
         except Exception:
             pass
         cursor.close()
+        # Unicode casefold для LIKE-поиска сводки (built-in lower() — только ASCII).
+        connection.create_function(  # type: ignore[attr-defined]
+            "py_casefold",
+            1,
+            lambda value: value.casefold() if isinstance(value, str) else value,
+            deterministic=True,
+        )

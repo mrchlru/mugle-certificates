@@ -175,6 +175,42 @@ def ensure_schema(engine: Engine) -> None:
     _backfill_unwrap_pending(engine)
     _backfill_certificate_parts(engine)
     _ensure_app_settings_row(engine)
+    _ensure_summary_indexes(engine)
+
+
+def _ensure_summary_indexes(engine: Engine) -> None:
+    """Индексы для быстрой сводки HR (фильтр сегмента / срок)."""
+    inspector = inspect(engine)
+    if "certificates" not in inspector.get_table_names():
+        return
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_certificates_deleted_segment "
+                "ON certificates (is_deleted, segment_id)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_certificates_expires_on "
+                "ON certificates (expires_on)"
+            )
+        )
+    dialect = (engine.dialect.name or "").casefold()
+    if dialect != "postgresql":
+        return
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_users_full_name_trgm "
+                    "ON users USING gin (lower(full_name) gin_trgm_ops)"
+                )
+            )
+    except Exception:
+        # Нет прав на extension / GIN — сводка всё равно работает без них.
+        pass
 
 
 def _backfill_certificate_parts(engine: Engine) -> dict[str, int]:
