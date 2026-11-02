@@ -172,7 +172,7 @@
     <header class="design-panel-head">
       <h2>Google Таблица</h2>
     </header>
-    <p class="muted design-hint">Ставит активные сертификаты в фоновую очередь. Воркер пишет пачками с паузами, чтобы не упираться в лимиты Google. Уже существующие номера не дублируются.</p>
+    <p class="muted design-hint">Перед записью сверяет номер карты с колонкой A: если номер уже есть — строку не добавляет. Дубли на листах можно снять кнопкой ниже (остаётся первая строка номера).</p>
     {% if sheets_credentials_error %}
     <p class="flash bad">Ключ Google сейчас не читается: {{ sheets_credentials_error }}</p>
     {% endif %}
@@ -185,6 +185,11 @@
       <input type="hidden" name="csrf_token" value="{{ csrf }}">
       <button class="btn" type="submit" id="admin-sheets-submit">Синхронизировать с Google Таблицей</button>
     </form>
+    <form id="admin-sheets-dedupe-form" class="design-create" style="margin-top: 12px;">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <button class="btn" type="submit" id="admin-sheets-dedupe-submit">Удалить дубли номеров в таблице</button>
+    </form>
+    <p id="admin-sheets-dedupe-status" class="muted" aria-live="polite"></p>
     <div id="admin-sheets-progress" class="import-progress" hidden>
       <div class="import-progress-bar"><span id="admin-sheets-bar"></span></div>
       <p id="admin-sheets-status" class="muted">Готово</p>
@@ -399,6 +404,38 @@
     });
 
     pollQueue(null, null, false).catch(function () {});
+  }
+
+  var dedupeForm = document.getElementById("admin-sheets-dedupe-form");
+  if (dedupeForm) {
+    var dedupeBtn = document.getElementById("admin-sheets-dedupe-submit");
+    var dedupeStatus = document.getElementById("admin-sheets-dedupe-status");
+    dedupeForm.addEventListener("submit", function (event) {
+      event.preventDefault();
+      if (dedupeBtn) dedupeBtn.disabled = true;
+      if (dedupeStatus) dedupeStatus.textContent = "Сверяю номера и удаляю дубли…";
+      fetch("/hr/settings/sheets-dedupe", {
+        method: "POST",
+        body: new FormData(dedupeForm),
+        credentials: "same-origin",
+      })
+        .then(function (response) {
+          return response.json().then(function (data) {
+            return { ok: response.ok, data: data };
+          });
+        })
+        .then(function (result) {
+          if (dedupeStatus) {
+            dedupeStatus.textContent = (result.data && result.data.message) || (result.ok ? "Готово" : "Ошибка");
+          }
+        })
+        .catch(function (err) {
+          if (dedupeStatus) dedupeStatus.textContent = err.message || "Ошибка сети";
+        })
+        .finally(function () {
+          if (dedupeBtn) dedupeBtn.disabled = false;
+        });
+    });
   }
 })();
 </script>

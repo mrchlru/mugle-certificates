@@ -613,6 +613,70 @@ def settings_sheets_queue_status(
     )
 
 
+@router.post("/hr/settings/sheets-dedupe")
+def settings_sheets_dedupe(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin)),
+    csrf_token: str = Form(""),
+):
+    """Удаляет повторные строки с одним номером карты во всех листах Google Таблицы."""
+    from bonus.sheets_sync import dedupe_all_ledger_sheets, sheets_credentials_error
+
+    try:
+        guard_csrf(request, csrf_token)
+    except BonusError as exc:
+        return JSONResponse({"ok": False, "message": exc.message}, status_code=400)
+
+    cred_error = sheets_credentials_error()
+    if cred_error:
+        return JSONResponse(
+            {
+                "ok": False,
+                "message": (
+                    "Ключ Google не читается: "
+                    f"{cred_error}. Исправьте GOOGLE_SERVICE_ACCOUNT_JSON в Timeweb."
+                ),
+            },
+            status_code=400,
+        )
+
+    result = dedupe_all_ledger_sheets()
+    parts = [f"«{title}»: −{count}" for title, count in result.sheets if count]
+    detail = "; ".join(parts) if parts else "дублей не найдено"
+    if result.errors:
+        detail = f"{detail}; ошибки: {'; '.join(result.errors)}"
+    write_audit(
+        db,
+        actor=user,
+        action=AuditAction.sheets_dedupe,
+        summary=f"Google Sheets: удалено дублей {result.deleted}",
+        target_type="sheets",
+        detail=detail[:500],
+    )
+    if result.errors and result.deleted == 0:
+        return JSONResponse(
+            {
+                "ok": False,
+                "deleted": result.deleted,
+                "sheets": [{"title": title, "deleted": count} for title, count in result.sheets],
+                "message": "Не удалось почистить таблицу: " + "; ".join(result.errors),
+            },
+            status_code=400,
+        )
+    return JSONResponse(
+        {
+            "ok": True,
+            "deleted": result.deleted,
+            "sheets": [{"title": title, "deleted": count} for title, count in result.sheets],
+            "message": (
+                f"Удалено дублей: {result.deleted}. "
+                + (detail if result.deleted else "Повторов номеров не было.")
+            ),
+        }
+    )
+
+
 @router.post("/hr/design/segments")
 async def segment_create(
     request: Request,

@@ -44,6 +44,7 @@ _ACTION_LABELS: dict[str, str] = {
     AuditAction.link_export.value: "Выгрузка ссылок",
     AuditAction.link_delivery_mark.value: "Отметка рассылки",
     AuditAction.login_unblock.value: "Разблокировка входа",
+    AuditAction.sheets_dedupe.value: "Очистка дублей Google Sheets",
 }
 
 

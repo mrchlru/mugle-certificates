@@ -53,6 +53,7 @@ class AuditAction(str, enum.Enum):
     link_export = "link_export"
     link_delivery_mark = "link_delivery_mark"
     login_unblock = "login_unblock"
+    sheets_dedupe = "sheets_dedupe"
 
 
 class CertificateStatus(str, enum.Enum):

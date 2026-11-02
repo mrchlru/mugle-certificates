@@ -1,3 +1,3 @@
 """Teams Bonus — корпоративные сертификаты (замена Statix Bonus)."""
 
-__version__ = "1.2.76-fix-issue-audit"
+__version__ = "1.2.77-sheets-dedupe"

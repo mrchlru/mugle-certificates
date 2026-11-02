@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -28,6 +29,8 @@ logger = logging.getLogger("bonus.sheets")
 _EXPIRED_MARK = "истек"
 _ROW_ALERT_COLOR = {"red": 0.96, "green": 0.80, "blue": 0.80}
 _ROW_CLEAR_COLOR = {"red": 1.0, "green": 1.0, "blue": 1.0}
+# Один процесс: не даём двум пачкам одновременно читать «пусто» и дописать один номер дважды.
+_SHEETS_WRITE_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -191,45 +194,112 @@ def _append_issued_group(
     kind: LedgerSheet,
     group: list[SheetIssuedItem],
 ) -> tuple[int, int, list[int]]:
-    """Дописывает карты одного листа пачками; возвращает (written, skipped, ok_ids)."""
+    """Дописывает карты одного листа пачками; возвращает (written, skipped, ok_ids).
+
+    Сначала чистит дубли на листе, затем пишет только номера, которых ещё нет в колонке A.
+    """
     import time
 
-    worksheet = _worksheet(kind)
-    existing = {
-        _normalize_card_number(str(value))
-        for index, value in enumerate(worksheet.col_values(1), start=1)
-        if index > 1 and str(value).strip()
-    }
-    rows: list[list[str]] = []
-    skipped = 0
-    ok_ids: list[int] = []
-    for item in group:
-        number = _normalize_card_number(item.certificate.public_number)
-        if number in existing:
-            skipped += 1
-            ok_ids.append(item.certificate.id)
-            continue
-        rows.append(
-            _issue_row(
-                kind,
-                item.certificate,
-                item.holder,
-                segment_name=item.segment_name,
+    with _SHEETS_WRITE_LOCK:
+        worksheet = _worksheet(kind)
+        removed = _dedupe_worksheet(worksheet)
+        if removed:
+            logger.info(
+                "Google Sheets: перед записью на «%s» удалено дублей строк: %s",
+                worksheet.title,
+                removed,
             )
-        )
-        existing.add(number)
-        ok_ids.append(item.certificate.id)
-    written = 0
-    chunk_size = 40
-    for start in range(0, len(rows), chunk_size):
-        chunk = rows[start : start + chunk_size]
-        if not chunk:
-            continue
-        worksheet.append_rows(chunk, value_input_option="USER_ENTERED", table_range="A1")
-        written += len(chunk)
-        if start + chunk_size < len(rows):
-            time.sleep(2.0)
-    return written, skipped, ok_ids
+        existing = _existing_card_numbers(worksheet)
+        rows: list[list[str]] = []
+        skipped = 0
+        ok_ids: list[int] = []
+        for item in group:
+            number = _normalize_card_number(item.certificate.public_number)
+            if not number or number in existing:
+                skipped += 1
+                ok_ids.append(item.certificate.id)
+                continue
+            rows.append(
+                _issue_row(
+                    kind,
+                    item.certificate,
+                    item.holder,
+                    segment_name=item.segment_name,
+                )
+            )
+            existing.add(number)
+            ok_ids.append(item.certificate.id)
+        written = 0
+        chunk_size = 40
+        for start in range(0, len(rows), chunk_size):
+            chunk = rows[start : start + chunk_size]
+            if not chunk:
+                continue
+            # Повторная сверка перед пачкой — на случай параллельной записи с другого инстанса.
+            existing |= _existing_card_numbers(worksheet)
+            filtered: list[list[str]] = []
+            for row in chunk:
+                number = _normalize_card_number(str(row[0]) if row else "")
+                if not number or number in existing:
+                    skipped += 1
+                    continue
+                filtered.append(row)
+                existing.add(number)
+            if not filtered:
+                continue
+            worksheet.append_rows(
+                filtered, value_input_option="USER_ENTERED", table_range="A1"
+            )
+            written += len(filtered)
+            if start + chunk_size < len(rows):
+                time.sleep(2.0)
+        return written, skipped, ok_ids
+
+
+@dataclass(frozen=True)
+class SheetDedupeResult:
+    """Итог очистки дублей номеров карт в Google Таблице."""
+
+    sheets: tuple[tuple[str, int], ...] = ()
+    deleted: int = 0
+    errors: tuple[str, ...] = ()
+
+
+def dedupe_all_ledger_sheets() -> SheetDedupeResult:
+    """Удаляет повторы номера карты (колонка A) на всех листах учёта, оставляя первую строку."""
+    if not sheets_enabled():
+        return SheetDedupeResult(errors=("Google Sheets выключен или нет ключа",))
+    per_sheet: list[tuple[str, int]] = []
+    errors: list[str] = []
+    total = 0
+    with _SHEETS_WRITE_LOCK:
+        for kind in LedgerSheet:
+            title = ledger_title(kind)
+            try:
+                worksheet = _worksheet(kind)
+                removed = _dedupe_worksheet(worksheet)
+                per_sheet.append((title, removed))
+                total += removed
+                if removed:
+                    logger.info(
+                        "Google Sheets: лист «%s» — удалено дублей %s",
+                        title,
+                        removed,
+                    )
+            except Exception as exc:
+                message = f"«{title}»: {exc}"
+                errors.append(message)
+                logger.exception(
+                    "Google Sheets: не удалось почистить дубли на «%s» (%s). %s",
+                    title,
+                    exc,
+                    _permission_hint() if _is_permission_error(exc) else "",
+                )
+    return SheetDedupeResult(
+        sheets=tuple(per_sheet),
+        deleted=total,
+        errors=tuple(errors),
+    )
 
 
 def sync_certificate_usage(
@@ -946,6 +1016,47 @@ def _normalize_card_number(value: str) -> str:
     if digits.isdigit():
         return f"MR-{int(digits):05d}"
     return compact
+
+
+def _existing_card_numbers(worksheet: Any) -> set[str]:
+    """Множество нормализованных номеров из колонки A (без заголовка)."""
+    return {
+        _normalize_card_number(str(value))
+        for index, value in enumerate(worksheet.col_values(1), start=1)
+        if index > 1 and str(value).strip()
+    }
+
+
+def _duplicate_row_indexes(column_values: list[str]) -> list[int]:
+    """Номера строк-дублей (1-based), которые нужно удалить; первая встреча номера остаётся."""
+    seen: set[str] = set()
+    to_delete: list[int] = []
+    for index, value in enumerate(column_values, start=1):
+        if index == 1:
+            continue
+        text = str(value or "").strip()
+        if not text:
+            continue
+        number = _normalize_card_number(text)
+        if not number:
+            continue
+        if number in seen:
+            to_delete.append(index)
+            continue
+        seen.add(number)
+    return to_delete
+
+
+def _dedupe_worksheet(worksheet: Any) -> int:
+    """Удаляет повторные строки с тем же номером карты. Возвращает число удалённых."""
+    values = [str(item) for item in worksheet.col_values(1)]
+    duplicates = _duplicate_row_indexes(values)
+    if not duplicates:
+        return 0
+    # Снизу вверх, чтобы индексы не сдвигались.
+    for row_index in sorted(duplicates, reverse=True):
+        worksheet.delete_rows(row_index)
+    return len(duplicates)
 
 
 def _set_cell(worksheet: Any, row: int, col: int, value: str) -> None:
