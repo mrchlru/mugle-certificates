@@ -1408,6 +1408,7 @@ def lookup_for_iiko(db: Session, code: str) -> Certificate:
     if certificate is None:
         raise BonusError("Сертификат не найден")
     expired = apply_expiry_writeoff(db, certificate)
+    repair_iiko_part_balance_drift(db, certificate)
     db.commit()
     db.refresh(certificate)
     if expired:
@@ -1426,7 +1427,11 @@ def debit_for_iiko(
     order_ref: str = "",
     cheque_detail: str = "",
 ) -> IikoDebitResult:
-    """Списывает бонусы до суммы заказа; при нехватке — весь остаток. Идемпотентно по external_id."""
+    """Списывает бонусы до суммы заказа; при нехватке — весь остаток. Идемпотентно по external_id.
+
+    Списание идёт по частям карты (как на кассе desk), иначе баланс на карточке
+    (сумма частей) не меняется.
+    """
     marker = _iiko_marker(external_id)
     existing = _find_iiko_debit(db, marker)
     if existing is not None and not _is_reversed(db, existing.id):
@@ -1442,22 +1447,52 @@ def debit_for_iiko(
         db.commit()
         db.refresh(certificate)
         _sync_usage(db, certificate, expired=True)
+    repair_iiko_part_balance_drift(db, certificate)
+    db.refresh(certificate)
     if certificate.status != CertificateStatus.active:
         raise BonusError("Сертификат заблокирован")
     if certificate.expires_on is not None and certificate.expires_on < today_msk():
         raise BonusError("Срок сертификата истёк")
     if amount <= 0:
         raise BonusError("Сумма списания должна быть больше нуля")
-    if certificate.balance <= 0:
+    parts = list_parts(db, certificate.id)
+    if not parts:
+        ensure_legacy_part(db, certificate)
+        parts = list_parts(db, certificate.id)
+    spendable = (
+        available_balance(parts, enforce_weekdays=False)
+        if parts
+        else certificate.balance
+    )
+    if spendable <= 0:
         raise BonusError("На сертификате нет бонусов")
-    paid = min(amount, certificate.balance)
-    changed = _change_balance(db, certificate.id, -paid, require_active=True)
-    if not changed:
-        db.rollback()
-        raise BonusError("Недостаточно бонусов или сертификат уже недоступен")
-    db.refresh(certificate)
+    paid = min(amount, spendable)
     note = f"{marker} {(comment or 'iiko').strip()}"[:300]
     place = restaurant.strip()[:200]
+    part_id: int | None = None
+    if not parts:
+        changed = _change_balance(db, certificate.id, -paid, require_active=True)
+        if not changed:
+            db.rollback()
+            raise BonusError("Недостаточно бонусов или сертификат уже недоступен")
+    else:
+        remaining = paid
+        for part in spend_order(parts):
+            if remaining <= 0:
+                break
+            take = min(part.balance, remaining)
+            if take <= 0:
+                continue
+            if not change_part_balance(db, part.id, -take):
+                db.rollback()
+                raise BonusError("Недостаточно бонусов или сертификат уже недоступен")
+            remaining -= take
+            part_id = part.id
+        if remaining > 0:
+            db.rollback()
+            raise BonusError("Недостаточно бонусов или сертификат уже недоступен")
+        sync_certificate_totals(db, certificate.id)
+    db.refresh(certificate)
     tx = _add_transaction(
         db,
         certificate_id=certificate.id,
@@ -1469,6 +1504,7 @@ def debit_for_iiko(
         restaurant=place,
         order_ref=order_ref,
         cheque_detail=cheque_detail,
+        part_id=part_id,
     )
     _burn_single_use_remainder(
         db,
@@ -1502,8 +1538,7 @@ def refund_for_iiko(db: Session, external_id: str, reason: str = "") -> Transact
     certificate = db.get(Certificate, tx.certificate_id)
     if certificate is None:
         raise BonusError("Сертификат не найден")
-    changed = _change_balance(db, certificate.id, tx.amount, require_active=False)
-    if not changed:
+    if not _credit_iiko_amount(db, certificate, tx.amount, part_id=tx.part_id):
         db.rollback()
         raise BonusError("Не удалось вернуть бонусы")
     db.refresh(certificate)
@@ -1517,6 +1552,7 @@ def refund_for_iiko(db: Session, external_id: str, reason: str = "") -> Transact
         comment=(reason or "Возврат iiko").strip()[:300],
         reversal_of_id=tx.id,
         restaurant=tx.restaurant,
+        part_id=tx.part_id,
     )
     try:
         db.commit()
@@ -1530,6 +1566,72 @@ def refund_for_iiko(db: Session, external_id: str, reason: str = "") -> Transact
     db.refresh(certificate)
     _sync_usage(db, certificate)
     return reversal
+
+
+def repair_iiko_part_balance_drift(db: Session, certificate: Certificate) -> bool:
+    """Подгоняет части к certificate.balance после старых списаний iiko без частей.
+
+    Раньше debit_for_iiko уменьшал только Certificate.balance, а карточка показывает
+    сумму частей — визуально баланс «не списывался». Возвращает True, если меняли.
+    """
+    parts = list_parts(db, certificate.id)
+    if not parts:
+        return False
+    total = sum(max(0, part.balance) for part in parts)
+    target = max(0, certificate.balance)
+    if total == target:
+        return False
+    if total > target:
+        need = total - target
+        for part in spend_order(parts):
+            if need <= 0:
+                break
+            take = min(max(0, part.balance), need)
+            if take <= 0:
+                continue
+            if not change_part_balance(db, part.id, -take):
+                db.rollback()
+                return False
+            need -= take
+        if need > 0:
+            db.rollback()
+            return False
+    else:
+        delta = target - total
+        primary = spend_order(parts)[0]
+        if not change_part_balance(db, primary.id, delta):
+            db.rollback()
+            return False
+    sync_certificate_totals(db, certificate.id)
+    return True
+
+
+def _credit_iiko_amount(
+    db: Session,
+    certificate: Certificate,
+    amount: int,
+    *,
+    part_id: int | None,
+) -> bool:
+    """Возвращает сумму на часть (если известна) или на первую часть / certificate."""
+    if amount <= 0:
+        return True
+    if part_id is not None:
+        if not change_part_balance(db, part_id, amount):
+            return False
+        sync_certificate_totals(db, certificate.id)
+        return True
+    parts = list_parts(db, certificate.id)
+    if not parts:
+        ensure_legacy_part(db, certificate)
+        parts = list_parts(db, certificate.id)
+    if not parts:
+        return _change_balance(db, certificate.id, amount, require_active=False)
+    primary = spend_order(parts)[0]
+    if not change_part_balance(db, primary.id, amount):
+        return False
+    sync_certificate_totals(db, certificate.id)
+    return True
 
 
 def _reversal_of(db: Session, tx_id: int) -> Transaction | None:

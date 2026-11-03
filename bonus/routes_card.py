@@ -20,7 +20,7 @@ from bonus.models import Certificate, CertificateStatus, Role, User
 from bonus.partners import partner_cities
 from bonus.present import HISTORY_PAGE_SIZE, TxView, load_card, load_cards, load_history_page
 from bonus.security import ensure_csrf
-from bonus.services import find_certificate
+from bonus.services import find_certificate, repair_iiko_part_balance_drift
 from bonus.values import today_msk
 from bonus.weekdays import WEEKDAY_CHOICES
 
@@ -102,6 +102,9 @@ def public_certificate(token: str, request: Request, db: Session = Depends(get_d
     certificate = find_certificate(db, token)
     if certificate is None:
         return render(request, "missing.html", status_code=404)
+    if repair_iiko_part_balance_drift(db, certificate):
+        db.commit()
+        db.refresh(certificate)
     base = public_base(request)
     viewer = _history_actor(request, db)
     card = load_card(db, certificate, base, viewer)

@@ -1005,6 +1005,11 @@ def certificate_page(
     certificate = _certificate_or_redirect(db, request, certificate_id)
     if certificate is None:
         return RedirectResponse("/hr", status_code=303)
+    from bonus.services import repair_iiko_part_balance_drift
+
+    if repair_iiko_part_balance_drift(db, certificate):
+        db.commit()
+        db.refresh(certificate)
     card = load_card(db, certificate, public_base(request), user)
     share_url = f"{public_base(request)}/c/{certificate.token}"
     sync_status = certificate_sync_status(db, certificate.id)
