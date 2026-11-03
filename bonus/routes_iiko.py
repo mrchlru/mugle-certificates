@@ -108,9 +108,9 @@ def iiko_plugin_config(
     """Отдаёт имена типа оплаты/ПС для касс без переустановки DLL."""
     settings = get_settings()
     return PluginConfigResponse(
-        payment_type_name=settings.iiko_plugin_payment_type_name.strip() or "Statix Pro Bonus",
-        payment_system_key=settings.iiko_plugin_payment_system_key.strip() or "StatixProBonus",
-        payment_system_name=settings.iiko_plugin_payment_system_name.strip() or "Statix Pro",
+        payment_type_name=settings.iiko_plugin_payment_type_name.strip() or "Teams Pro Bonus",
+        payment_system_key=settings.iiko_plugin_payment_system_key.strip() or "TeamsProBonus",
+        payment_system_name=settings.iiko_plugin_payment_system_name.strip() or "Teams Pro",
         counteragent_user_name="",
     )
 
