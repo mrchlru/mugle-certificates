@@ -267,13 +267,16 @@ class SheetDedupeResult:
 
 def dedupe_all_ledger_sheets() -> SheetDedupeResult:
     """Удаляет повторы номера карты (колонка A) на всех листах учёта, оставляя первую строку."""
+    import time
+
     if not sheets_enabled():
         return SheetDedupeResult(errors=("Google Sheets выключен или нет ключа",))
     per_sheet: list[tuple[str, int]] = []
     errors: list[str] = []
     total = 0
+    kinds = list(LedgerSheet)
     with _SHEETS_WRITE_LOCK:
-        for kind in LedgerSheet:
+        for index, kind in enumerate(kinds):
             title = ledger_title(kind)
             try:
                 worksheet = _worksheet(kind)
@@ -295,6 +298,8 @@ def dedupe_all_ledger_sheets() -> SheetDedupeResult:
                     exc,
                     _permission_hint() if _is_permission_error(exc) else "",
                 )
+            if index + 1 < len(kinds):
+                time.sleep(_DEDUPE_SHEET_PAUSE_SEC)
     return SheetDedupeResult(
         sheets=tuple(per_sheet),
         deleted=total,
@@ -1047,16 +1052,117 @@ def _duplicate_row_indexes(column_values: list[str]) -> list[int]:
     return to_delete
 
 
+# Пачки deleteDimension: одна batchUpdate ≈ один write к quota Sheets.
+_DEDUPE_RANGE_BATCH = 40
+_DEDUPE_BATCH_PAUSE_SEC = 2.0
+_DEDUPE_SHEET_PAUSE_SEC = 2.0
+_DEDUPE_QUOTA_RETRIES = 8
+_DEDUPE_QUOTA_WAIT_SEC = 20.0
+
+
+def _collapse_row_ranges(indexes: list[int]) -> list[tuple[int, int]]:
+    """Склеивает подряд идущие номера строк в диапазоны (inclusive, 1-based)."""
+    if not indexes:
+        return []
+    ordered = sorted(set(indexes))
+    ranges: list[tuple[int, int]] = []
+    start = previous = ordered[0]
+    for index in ordered[1:]:
+        if index == previous + 1:
+            previous = index
+            continue
+        ranges.append((start, previous))
+        start = previous = index
+    ranges.append((start, previous))
+    return ranges
+
+
+def _is_quota_error(exc: BaseException) -> bool:
+    """Google Sheets вернул 429 / исчерпание write-квоты."""
+    text = str(exc).casefold()
+    return (
+        "429" in text
+        or "quota exceeded" in text
+        or "rate limit" in text
+        or "resourcexhausted" in text.replace(" ", "")
+    )
+
+
 def _dedupe_worksheet(worksheet: Any) -> int:
-    """Удаляет повторные строки с тем же номером карты. Возвращает число удалённых."""
-    values = [str(item) for item in worksheet.col_values(1)]
-    duplicates = _duplicate_row_indexes(values)
-    if not duplicates:
-        return 0
-    # Снизу вверх, чтобы индексы не сдвигались.
-    for row_index in sorted(duplicates, reverse=True):
-        worksheet.delete_rows(row_index)
-    return len(duplicates)
+    """Удаляет повторные строки с тем же номером карты пачками.
+
+    Перечитывает колонку A после каждой пачки, чтобы ничего не упустить при сдвиге
+    индексов и при обрыве по квоте. Диапазоны удаляются снизу вверх одним
+    batchUpdate (или через delete_rows, если spreadsheet недоступен).
+    """
+    import time
+
+    removed = 0
+    while True:
+        values = [str(item) for item in worksheet.col_values(1)]
+        duplicates = _duplicate_row_indexes(values)
+        if not duplicates:
+            return removed
+        ranges = _collapse_row_ranges(duplicates)
+        ranges_desc = sorted(ranges, key=lambda item: item[0], reverse=True)
+        batch = ranges_desc[:_DEDUPE_RANGE_BATCH]
+        _delete_row_ranges(worksheet, batch)
+        removed += sum(end - start + 1 for start, end in batch)
+        if len(ranges_desc) > _DEDUPE_RANGE_BATCH:
+            time.sleep(_DEDUPE_BATCH_PAUSE_SEC)
+
+
+def _delete_row_ranges(worksheet: Any, ranges: list[tuple[int, int]]) -> None:
+    """Удаляет диапазоны строк снизу вверх; при 429 ждёт и повторяет ту же пачку."""
+    import time
+
+    if not ranges:
+        return
+    attempt = 0
+    while True:
+        try:
+            _apply_row_range_deletes(worksheet, ranges)
+            return
+        except Exception as exc:
+            if not _is_quota_error(exc) or attempt >= _DEDUPE_QUOTA_RETRIES:
+                raise
+            attempt += 1
+            wait_sec = _DEDUPE_QUOTA_WAIT_SEC * attempt
+            logger.warning(
+                "Google Sheets: квота write при удалении дублей на «%s», "
+                "пауза %.0f с (попытка %s/%s)",
+                getattr(worksheet, "title", "?"),
+                wait_sec,
+                attempt,
+                _DEDUPE_QUOTA_RETRIES,
+            )
+            time.sleep(wait_sec)
+
+
+def _apply_row_range_deletes(worksheet: Any, ranges: list[tuple[int, int]]) -> None:
+    """Один batchUpdate deleteDimension или fallback на delete_rows по диапазонам."""
+    spreadsheet = getattr(worksheet, "spreadsheet", None)
+    sheet_id = getattr(worksheet, "id", None)
+    if spreadsheet is not None and sheet_id is not None and hasattr(
+        spreadsheet, "batch_update"
+    ):
+        requests = [
+            {
+                "deleteDimension": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "dimension": "ROWS",
+                        "startIndex": start - 1,
+                        "endIndex": end,
+                    }
+                }
+            }
+            for start, end in ranges
+        ]
+        spreadsheet.batch_update({"requests": requests})
+        return
+    for start, end in ranges:
+        worksheet.delete_rows(start, end)
 
 
 def _set_cell(worksheet: Any, row: int, col: int, value: str) -> None:

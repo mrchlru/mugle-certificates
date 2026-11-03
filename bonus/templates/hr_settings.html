@@ -413,7 +413,7 @@
     dedupeForm.addEventListener("submit", function (event) {
       event.preventDefault();
       if (dedupeBtn) dedupeBtn.disabled = true;
-      if (dedupeStatus) dedupeStatus.textContent = "Сверяю номера и удаляю дубли…";
+      if (dedupeStatus) dedupeStatus.textContent = "Сверяю номера и удаляю дубли пачками (при квоте Google подождёт и продолжит)…";
       fetch("/hr/settings/sheets-dedupe", {
         method: "POST",
         body: new FormData(dedupeForm),
