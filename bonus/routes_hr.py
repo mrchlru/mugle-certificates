@@ -103,7 +103,8 @@ from bonus.services import (
     update_holder_profile,
     update_staff,
 )
-from bonus.values import MoneyError, format_money, parse_date
+from bonus.barcode_draw import barcode_png
+from bonus.values import MoneyError, format_money, format_short_code, parse_date
 from bonus.weekdays import (
     ALL_DAYS,
     WEEKDAY_CHOICES,
@@ -1046,6 +1047,33 @@ def certificate_sync_status_api(
             "failed": status == "failed",
             "pending": status == "pending",
         }
+    )
+
+
+@router.get("/hr/c/{certificate_id}/barcode.png")
+def certificate_barcode_png(
+    certificate_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
+):
+    """Скачивание PNG штрихкода для печати на бумажном сертификате."""
+    certificate = _certificate_or_redirect(db, request, certificate_id)
+    if certificate is None:
+        return RedirectResponse("/hr", status_code=303)
+    payload = barcode_png(
+        certificate.short_code,
+        code_label=format_short_code(certificate.short_code),
+        certificate_number=certificate.public_number or "",
+    )
+    if not payload:
+        return Response(status_code=404)
+    number = certificate.public_number or str(certificate.id)
+    filename = f"{number}-barcode.png"
+    return Response(
+        content=payload,
+        media_type="image/png",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

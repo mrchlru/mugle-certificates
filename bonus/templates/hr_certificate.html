@@ -30,7 +30,10 @@
       <div id="share-ready" {% if syncing|default(false) %}hidden{% endif %}>
         <p class="eyebrow">Ссылка сотруднику</p>
         <p class="share">{{ share_url }}</p>
-        <button class="text-link" type="button" data-copy="{{ share_url }}">Скопировать</button>
+        <p class="row-actions">
+          <button class="text-link" type="button" data-copy="{{ share_url }}">Скопировать</button>
+          <a class="text-link" href="/hr/c/{{ card.id }}/barcode.png">Скачать штрихкод PNG</a>
+        </p>
         {% if sync_failed|default(false) %}
         <p class="muted share-sync-hint">Карта уже в системе. Запись в Google догонит из очереди или через «Настройки».</p>
         {% endif %}

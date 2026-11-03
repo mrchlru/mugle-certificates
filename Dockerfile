@@ -15,6 +15,10 @@ WORKDIR /app
 
 COPY --from=uvbin /uv /usr/local/bin/uv
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
 # Офлайн-установка: wheels в репозитории — сборка Timeweb не зависит от медленного PyPI.
 COPY requirements.txt .
 COPY wheels ./wheels
