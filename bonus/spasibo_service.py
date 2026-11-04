@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from bonus.config import get_settings
 from bonus.models import Certificate, Role, Transaction, TxType, User
-from bonus.present import load_card
+from bonus.partners import partner_cities
+from bonus.present import HISTORY_PAGE_SIZE, TxView, load_card, load_history_page
 from bonus.services import BonusError, credit_certificate
 from bonus.spasibo_connect import _certificate_eligible
+from bonus.values import format_dt, format_money_plain, status_label, tx_label
+from bonus.weekdays import WEEKDAY_CHOICES
 
 
 @dataclass(frozen=True)
@@ -30,9 +34,21 @@ class SpasiboCardPayload:
     color: str
     template_url: str
     logo_url: str
+    logo_custom: bool
+    default_logo_url: str
     barcode_value: str
+    barcode_svg: str
     discount_percent: int
     status: str
+    status_label: str
+    segment_name: str
+    use_days_label: str
+    use_days_active: tuple[str, ...]
+    expires_on: str
+    token: str
+    history: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    history_has_more: bool = False
+    history_next_before: int | None = None
 
 
 def resolve_certificate_for_spasibo(db: Session, spasibo_user_id: str) -> Certificate | None:
@@ -74,6 +90,7 @@ def card_payload_for_spasibo(
         raise BonusError("Некорректный ID Спасибо")
     certificate = resolve_certificate_for_spasibo(db, cleaned)
     if certificate is None:
+        root = base_url.rstrip("/")
         return SpasiboCardPayload(
             linked=False,
             spasibo_user_id=cleaned,
@@ -87,12 +104,22 @@ def card_payload_for_spasibo(
             color="#00A8A8",
             template_url="",
             logo_url="",
+            logo_custom=False,
+            default_logo_url=f"{root}/static/logo-teams.png",
             barcode_value="",
+            barcode_svg="",
             discount_percent=0,
             status="",
+            status_label="",
+            segment_name="",
+            use_days_label="",
+            use_days_active=(),
+            expires_on="",
+            token="",
         )
     view = load_card(db, certificate, base_url.rstrip("/"), actor=None)
     root = base_url.rstrip("/")
+    status_text = str(view.status.value if hasattr(view.status, "value") else view.status)
     return SpasiboCardPayload(
         linked=True,
         spasibo_user_id=cleaned,
@@ -106,10 +133,69 @@ def card_payload_for_spasibo(
         color=view.color or "#00A8A8",
         template_url=view.template_url or "",
         logo_url=view.logo_url or "",
+        logo_custom=bool(view.logo_custom),
+        default_logo_url=f"{root}/static/logo-teams.png",
         barcode_value=view.barcode_value,
+        barcode_svg=view.barcode_svg or "",
         discount_percent=view.discount_percent or 0,
-        status=str(view.status.value if hasattr(view.status, "value") else view.status),
+        status=status_text,
+        status_label=status_label(
+            view.status,
+            view.balance,
+            view.expires_on,
+            view.single_use,
+        ),
+        segment_name=view.segment_name or "",
+        use_days_label=view.use_days_label or "",
+        use_days_active=view.use_days_active,
+        expires_on=view.expires_on.isoformat() if view.expires_on else "",
+        token=view.token,
+        history=tuple(_tx_to_dict(item) for item in view.history),
+        history_has_more=view.history_has_more,
+        history_next_before=view.history_next_before,
     )
+
+
+def history_payload_for_spasibo(
+    db: Session,
+    spasibo_user_id: str,
+    *,
+    before_id: int | None = None,
+    limit: int = HISTORY_PAGE_SIZE,
+) -> dict[str, Any]:
+    """Следующая порция истории операций по карте Спасибо."""
+    certificate = resolve_certificate_for_spasibo(db, spasibo_user_id)
+    if certificate is None:
+        raise BonusError("Карта Teams не привязана к этому ID Спасибо")
+    page = load_history_page(
+        db,
+        certificate,
+        None,
+        limit=min(max(limit, 1), HISTORY_PAGE_SIZE),
+        before_id=before_id,
+    )
+    return {
+        "items": [_tx_to_dict(item) for item in page.items],
+        "has_more": page.has_more,
+        "next_before": page.next_before,
+    }
+
+
+def partners_payload_for_spasibo() -> dict[str, Any]:
+    """Каталог партнёров и подписи дней недели (статический JSON)."""
+    return {
+        "weekday_choices": [{"value": value, "title": title} for value, title in WEEKDAY_CHOICES],
+        "cities": [
+            {
+                "city": city.city,
+                "places": [
+                    {"name": place.name, "addresses": list(place.addresses)}
+                    for place in city.places
+                ],
+            }
+            for city in partner_cities()
+        ],
+    }
 
 
 def redeem_bonus_for_spasibo(
@@ -191,6 +277,32 @@ def _clean_spasibo_id(raw: str) -> str | None:
 def _format_rub(kopecks: int) -> str:
     whole = max(0, kopecks) // 100
     return f"{whole:,}".replace(",", " ")
+
+
+def _tx_to_dict(item: TxView) -> dict[str, Any]:
+    """Сериализует операцию для JSON API «Спасибо»."""
+    debit_types = {"debit", "migrate", "expire", "burn"}
+    show_amount = item.tx_type not in {"block", "unblock"}
+    is_minus = item.tx_type in debit_types
+    meta_parts = [format_dt(item.created_at)]
+    if item.actor_name:
+        meta_parts.append(item.actor_name)
+    if item.restaurant:
+        meta_parts.append(item.restaurant)
+    if item.order_ref:
+        meta_parts.append(item.order_ref)
+    if item.comment:
+        meta_parts.append(item.comment)
+    return {
+        "id": item.id,
+        "title": tx_label(item.tx_type, item.reversal_of_id),
+        "meta": " · ".join(meta_parts),
+        "amount_display": format_money_plain(item.amount) if show_amount else "",
+        "is_minus": is_minus,
+        "show_amount": show_amount,
+        "cheque_detail": item.cheque_detail or "",
+        "undone": item.undone,
+    }
 
 
 def _idempotency_marker(key: str) -> str:

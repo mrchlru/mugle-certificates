@@ -1,6 +1,6 @@
 """API для приложения «Спасибо»."""
 
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -11,11 +11,24 @@ from bonus.http import public_base
 from bonus.services import BonusError
 from bonus.spasibo_service import (
     card_payload_for_spasibo,
+    history_payload_for_spasibo,
+    partners_payload_for_spasibo,
     redeem_bonus_for_spasibo,
     spasibo_api_key_expected,
 )
 
 router = APIRouter(prefix="/api/spasibo", tags=["spasibo"])
+
+
+class HistoryItemResponse(BaseModel):
+    id: int
+    title: str
+    meta: str
+    amount_display: str
+    is_minus: bool
+    show_amount: bool
+    cheque_detail: str
+    undone: bool
 
 
 class CardResponse(BaseModel):
@@ -31,9 +44,47 @@ class CardResponse(BaseModel):
     color: str
     template_url: str
     logo_url: str
+    logo_custom: bool = False
+    default_logo_url: str = ""
     barcode_value: str
+    barcode_svg: str = ""
     discount_percent: int
     status: str
+    status_label: str = ""
+    segment_name: str = ""
+    use_days_label: str = ""
+    use_days_active: list[str] = Field(default_factory=list)
+    expires_on: str = ""
+    token: str = ""
+    history: list[HistoryItemResponse] = Field(default_factory=list)
+    history_has_more: bool = False
+    history_next_before: int | None = None
+
+
+class HistoryPageResponse(BaseModel):
+    items: list[HistoryItemResponse]
+    has_more: bool
+    next_before: int | None = None
+
+
+class PartnerPlaceResponse(BaseModel):
+    name: str
+    addresses: list[str]
+
+
+class PartnerCityResponse(BaseModel):
+    city: str
+    places: list[PartnerPlaceResponse]
+
+
+class WeekdayChoiceResponse(BaseModel):
+    value: str
+    title: str
+
+
+class PartnersResponse(BaseModel):
+    weekday_choices: list[WeekdayChoiceResponse]
+    cities: list[PartnerCityResponse]
 
 
 class RedeemBody(BaseModel):
@@ -56,6 +107,11 @@ def require_spasibo_key(
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
+def _payload_to_card_response(payload: Any) -> CardResponse:
+    data = payload.__dict__
+    return CardResponse(**data)
+
+
 @router.get("/card", response_model=CardResponse)
 def spasibo_card(
     request: Request,
@@ -63,8 +119,8 @@ def spasibo_card(
     db: Session = Depends(get_db),
     _: None = Depends(require_spasibo_key),
 ):
-    """Карта Teams по users.id из «Спасибо»."""
-    del _  # auth marker
+    """Карта Teams по users.id из «Спасибо» (с первой страницей истории)."""
+    del _
     try:
         payload = card_payload_for_spasibo(
             db,
@@ -73,7 +129,38 @@ def spasibo_card(
         )
     except BonusError as exc:
         raise HTTPException(status_code=400, detail=exc.message) from exc
-    return CardResponse(**payload.__dict__)
+    return _payload_to_card_response(payload)
+
+
+@router.get("/history", response_model=HistoryPageResponse)
+def spasibo_history(
+    user_id: str,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_spasibo_key),
+    before: int | None = None,
+    limit: int = 10,
+):
+    """Следующая порция истории (ленивая подгрузка)."""
+    del _
+    try:
+        page = history_payload_for_spasibo(
+            db,
+            user_id,
+            before_id=before,
+            limit=limit,
+        )
+    except BonusError as exc:
+        raise HTTPException(status_code=400, detail=exc.message) from exc
+    return HistoryPageResponse(**page)
+
+
+@router.get("/partners", response_model=PartnersResponse)
+def spasibo_partners(
+    _: None = Depends(require_spasibo_key),
+):
+    """Рестораны-партнёры и подписи дней недели."""
+    del _
+    return PartnersResponse(**partners_payload_for_spasibo())
 
 
 @router.post("/redeem", response_model=RedeemResponse)
