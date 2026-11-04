@@ -131,8 +131,8 @@ def card_payload_for_spasibo(
         holder_name=view.holder_name,
         card_url=f"{root}/c/{view.token}",
         color=view.color or "#00A8A8",
-        template_url=view.template_url or "",
-        logo_url=view.logo_url or "",
+        template_url=_absolute_public_url(root, view.template_url or ""),
+        logo_url=_absolute_public_url(root, view.logo_url or ""),
         logo_custom=bool(view.logo_custom),
         default_logo_url=f"{root}/static/logo-teams.png",
         barcode_value=view.barcode_value,
@@ -277,6 +277,18 @@ def _clean_spasibo_id(raw: str) -> str | None:
 def _format_rub(kopecks: int) -> str:
     whole = max(0, kopecks) // 100
     return f"{whole:,}".replace(",", " ")
+
+
+def _absolute_public_url(base: str, url: str) -> str:
+    """Публичный URL ассета Teams (для «Спасибо» нельзя отдавать /static/...)."""
+    cleaned = (url or "").strip()
+    if cleaned == "":
+        return ""
+    if cleaned.startswith("http://") or cleaned.startswith("https://"):
+        return cleaned
+    if not cleaned.startswith("/"):
+        cleaned = f"/{cleaned}"
+    return f"{base.rstrip('/')}{cleaned}"
 
 
 def _tx_to_dict(item: TxView) -> dict[str, Any]:
