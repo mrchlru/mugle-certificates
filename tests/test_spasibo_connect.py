@@ -6,26 +6,27 @@ import io
 
 import pytest
 from openpyxl import Workbook
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
 import bonus.db as database
 from bonus.catalog import ensure_default_segments, list_segments
-from bonus.models import Base
+from bonus.config import get_settings
 from bonus.services import IssueDraft, issue_certificate
 from bonus.spasibo_connect import commit_spasibo_connect, preview_spasibo_workbook
 
 
 @pytest.fixture()
-def db() -> Session:
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)()
-    database._ENGINE = engine
-    database._SESSION_FACTORY = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+def db(monkeypatch: pytest.MonkeyPatch) -> Session:
+    """Та же configure_database, что и у приложения (StaticPool для :memory:)."""
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
+    monkeypatch.setenv("SEED_DEMO", "false")
+    get_settings.cache_clear()
+    database.configure_database("sqlite:///:memory:")
+    session = database.open_session()
     ensure_default_segments(session)
     yield session
     session.close()
+    get_settings.cache_clear()
 
 
 def _workbook_bytes(rows: list[list[object]]) -> bytes:

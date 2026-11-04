@@ -25,7 +25,9 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
         db = database.open_session()
         try:
             ensure_default_segments(db)
-            _linked_holder(db, spasibo_id="321")
+            user, cert = _linked_holder(db, spasibo_id="321")
+            db.refresh(user)
+            db.refresh(cert)
         finally:
             db.close()
         yield test_client
