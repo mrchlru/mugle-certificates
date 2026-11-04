@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     s3_public_base_url: str = ""
     s3_prefix: str = "templates"
     iiko_api_key: str = ""
+    spasibo_api_key: str = ""
     iiko_plugin_payment_type_name: str = "Teams Pro Bonus"
     iiko_plugin_payment_system_key: str = "TeamsProBonus"
     iiko_plugin_payment_system_name: str = "Teams Pro"
