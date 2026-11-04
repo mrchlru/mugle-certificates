@@ -119,6 +119,25 @@ def test_spasibo_connect_idempotent(db: Session) -> None:
     assert holder.spasibo_user_id == "99"
 
 
+def test_spasibo_connect_accepts_first_sheet_with_headers(db: Session) -> None:
+    holder, public_number = _issue_employee(db, "Лист Один")
+    payload = _workbook_bytes(
+        [
+            ["ID Спасибо", "Номер карты Teams"],
+            [11, public_number],
+        ]
+    )
+    book = __import__("io").BytesIO(payload)
+    from openpyxl import load_workbook
+
+    wb = load_workbook(book)
+    wb.active.title = "Sheet1"
+    out = __import__("io").BytesIO()
+    wb.save(out)
+    preview = preview_spasibo_workbook(db, filename="c.xlsx", payload=out.getvalue())
+    assert preview.ok_rows == 1
+
+
 def test_spasibo_connect_conflict_two_holders(db: Session) -> None:
     _, pub1 = _issue_employee(db, "Первый")
     _, pub2 = _issue_employee(db, "Второй")

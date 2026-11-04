@@ -25,16 +25,40 @@ from bonus.services import BonusError, find_certificate
 
 SHEET_NAME = "коннект"
 
+_SHEET_ALIASES = frozenset(
+    {
+        "коннект",
+        "connect",
+        "spasibo",
+        "spasibo connect",
+        "спасибо",
+        "коннект спасибо",
+    }
+)
+
 _HEADER_KEYS: dict[str, set[str]] = {
-    "spasibo_id": {"id спасибо", "id spasibo", "spasibo id", "spasibo_id", "id"},
+    "spasibo_id": {
+        "id спасибо",
+        "id spasibo",
+        "spasibo id",
+        "spasibo_id",
+        "users.id",
+        "user id",
+        "id",
+    },
     "teams_card": {
         "номер карты teams",
+        "номер карты teams bonus",
         "номер карты",
         "карта teams",
+        "карта",
         "public_number",
-        "номер",
+        "public number",
+        "mr",
         "код карты",
         "short code",
+        "short_code",
+        "token",
     },
     "last_name": {"фамилия", "last name", "last_name"},
     "first_name": {"имя", "first name", "first_name"},
@@ -481,14 +505,54 @@ def _read_connect_grid(payload: bytes) -> list[tuple[object, ...]]:
         workbook = load_workbook(io.BytesIO(payload), read_only=True, data_only=True)
     except Exception as exc:
         raise BonusError("Не удалось открыть Excel-файл") from exc
-    sheet = None
-    for name in workbook.sheetnames or []:
-        if str(name).strip().casefold() == SHEET_NAME:
-            sheet = workbook[name]
-            break
-    if sheet is None:
-        raise BonusError('В книге нет листа «Коннект»')
-    return [tuple(row) for row in sheet.iter_rows(values_only=True)]
+    try:
+        sheet, sheet_label = _pick_connect_sheet(workbook)
+        rows = [tuple(row) for row in sheet.iter_rows(values_only=True)]
+    finally:
+        workbook.close()
+    if not rows:
+        raise BonusError(f"Лист «{sheet_label}» пустой")
+    headers = [str(cell or "") for cell in rows[0]]
+    try:
+        _map_headers(headers)
+    except BonusError as exc:
+        raise BonusError(
+            f"{exc.message} (лист «{sheet_label}»). "
+            "Переименуйте лист в «Коннект» или проверьте заголовки строки 1."
+        ) from exc
+    return rows
+
+
+def _pick_connect_sheet(workbook: Workbook) -> tuple[Any, str]:
+    """Выбирает лист «Коннект» или первый лист с подходящими заголовками."""
+    names = [str(name) for name in (workbook.sheetnames or [])]
+    if not names:
+        raise BonusError("В книге нет листов")
+    for name in names:
+        folded = name.strip().casefold()
+        if folded == SHEET_NAME or folded in _SHEET_ALIASES:
+            return workbook[name], name
+    for name in names:
+        sheet = workbook[name]
+        first = next(sheet.iter_rows(max_row=1, values_only=True), None)
+        if first is None:
+            continue
+        headers = [str(cell or "") for cell in first]
+        if _headers_complete(headers):
+            return sheet, name
+    raise BonusError(
+        'Нет листа «Коннект» и не найден лист с колонками «ID Спасибо» и «Номер карты Teams». '
+        f"Листы в файле: {', '.join(names[:8])}"
+    )
+
+
+def _headers_complete(headers: list[str]) -> bool:
+    mapping: dict[str, int] = {}
+    for index, cell in enumerate(headers):
+        key = _header_field(cell)
+        if key is not None:
+            mapping[key] = index
+    return "spasibo_id" in mapping and "teams_card" in mapping
 
 
 def _map_headers(headers: list[str]) -> dict[str, int]:

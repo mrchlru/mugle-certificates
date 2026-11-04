@@ -1666,8 +1666,13 @@ async def settings_spasibo_preview(
             payload=payload,
         )
     except BonusError as exc:
-        flash(request, exc.message, "bad")
-        return RedirectResponse("/hr/settings#spasibo-connect", status_code=303)
+        return _render_settings(request, db, spasibo_upload_error=exc.message)
+    except Exception:
+        return _render_settings(
+            request,
+            db,
+            spasibo_upload_error="Не удалось разобрать файл. Проверьте .xlsx и заголовки.",
+        )
     return _render_settings(request, db, spasibo_preview=preview)
 
 
