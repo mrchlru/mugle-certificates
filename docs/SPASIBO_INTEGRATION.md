@@ -68,16 +68,15 @@
 
 ---
 
-## API для Спасибо (v1 — запланировано)
-
-Пока не реализовано в коде Teams Bonus; ориентир для следующего шага:
+## API для Спасибо (v1)
 
 | Метод | Назначение |
 |-------|------------|
 | `GET /api/spasibo/card?user_id=` | Баланс, short code, URL карты (read-only) |
-| `POST /api/spasibo/redeem` | Обмен спасибок → credit на связанную карту (idempotency-key) |
+| `POST /api/spasibo/redeem` | Обмен спасибок → credit на связанную карту |
 
-Аутентификация: заголовок `X-Spasibo-Key` (env `SPASIBO_API_KEY` / `IIKO_API_KEY` — уточнить при реализации).
+Аутентификация: заголовок `X-Spasibo-Key` (`SPASIBO_API_KEY`, fallback `IIKO_API_KEY`).  
+Redeem: обязателен `Idempotency-Key`. Тело: `spasibo_user_id`, `bonus_amount_rub` (рубли на карте), `comment`.
 
 ---
 
@@ -85,11 +84,11 @@
 
 **Teams Bonus**
 
-- (будущее) `SPASIBO_API_KEY` — ключ для API Спасибо.
+- `SPASIBO_API_KEY` — ключ для API Спасибо (или общий `IIKO_API_KEY`).
 
 **Спасибо**
 
-- (будущее) `TEAMS_BONUS_BASE_URL`, `TEAMS_BONUS_API_KEY`, `TEAMS_BONUS_ENABLED`.
+- `TEAMS_BONUS_BASE_URL`, `TEAMS_BONUS_API_KEY`, `TEAMS_BONUS_ENABLED=true`.
 
 ---
 
@@ -98,3 +97,4 @@
 | Версия | Дата | Изменение |
 |--------|------|-----------|
 | v1 | 2026-03-19 | Excel-коннект, поля `spasibo_user_id` / `spasibo_certificate_id` |
+| v1.1 | 2026-11-05 | `/api/spasibo/card`, `/api/spasibo/redeem`; интеграция в «Спасибо» |
