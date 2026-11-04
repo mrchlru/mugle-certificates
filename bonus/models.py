@@ -100,6 +100,14 @@ class User(Base):
     department: Mapped[str] = mapped_column(String(120), default="")
     job_title: Mapped[str] = mapped_column(String(120), default="")
     phone: Mapped[str] = mapped_column(String(40), default="")
+    # Связь с приложением «Спасибо» (MugleHRbotTopManagment): users.id из их PostgreSQL.
+    spasibo_user_id: Mapped[str] = mapped_column(String(32), default="", index=True)
+    # Какую employee-карту показывать в «Спасибо», если у держателя несколько.
+    spasibo_certificate_id: Mapped[int | None] = mapped_column(
+        ForeignKey("certificates.id"),
+        nullable=True,
+        index=True,
+    )
     is_active: Mapped[bool] = mapped_column(default=True)
     must_change_password: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: _utcnow())

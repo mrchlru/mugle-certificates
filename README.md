@@ -33,6 +33,8 @@ python -m venv .venv
 
 Проверка: `pip install pytest httpx`, затем `python -m pytest`
 
+Интеграция с приложением «Спасибо»: [docs/SPASIBO_INTEGRATION.md](docs/SPASIBO_INTEGRATION.md) (коннект в **Настройках** → «Коннект Спасибо»).
+
 ## Как устроен код
 
 ```

@@ -1630,6 +1630,126 @@ def settings_employee_report(
     )
 
 
+@router.get("/hr/settings/spasibo-connect/sample.xlsx")
+def settings_spasibo_connect_sample(
+    user: User = Depends(require(Role.admin)),
+):
+    """Пример таблицы коннекта «Спасибо»."""
+    from bonus.spasibo_connect import build_sample_workbook
+
+    return Response(
+        content=build_sample_workbook(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": 'attachment; filename="spasibo_connect_sample.xlsx"'
+        },
+    )
+
+
+@router.post("/hr/settings/spasibo-preview")
+async def settings_spasibo_preview(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin)),
+    table: UploadFile = File(...),
+    csrf_token: str = Form(""),
+):
+    """Шаг 1: предпросмотр коннекта «Спасибо» без записи в БД."""
+    from bonus.spasibo_connect import preview_spasibo_workbook
+
+    try:
+        guard_csrf(request, csrf_token)
+        payload = await table.read()
+        preview = preview_spasibo_workbook(
+            db,
+            filename=table.filename or "upload.xlsx",
+            payload=payload,
+        )
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+        return RedirectResponse("/hr/settings#spasibo-connect", status_code=303)
+    return _render_settings(request, db, spasibo_preview=preview)
+
+
+@router.post("/hr/settings/spasibo-commit")
+def settings_spasibo_commit(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin)),
+    batch_id: str = Form(""),
+    apply_duplicates: str = Form("0"),
+    replace_conflicts: str = Form("0"),
+    csrf_token: str = Form(""),
+):
+    """Шаг 2: привязка ID Спасибо к картам Teams."""
+    from bonus.spasibo_connect import (
+        build_spasibo_connect_report,
+        commit_spasibo_connect,
+        save_spasibo_connect_report,
+    )
+
+    try:
+        guard_csrf(request, csrf_token)
+        results = commit_spasibo_connect(
+            db,
+            batch_id=batch_id.strip(),
+            base_url=public_base(request),
+            apply_duplicates=apply_duplicates == "1",
+            replace_conflicts=replace_conflicts == "1",
+        )
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+        return RedirectResponse("/hr/settings#spasibo-connect", status_code=303)
+    linked = sum(1 for row in results if row.status in {"привязано", "обновлено"})
+    skipped = sum(1 for row in results if row.status == "пропущена")
+    failed = sum(1 for row in results if row.status == "ошибка")
+    report_id = save_spasibo_connect_report(
+        batch_id.strip() or "report",
+        build_spasibo_connect_report(results),
+    )
+    write_audit(
+        db,
+        actor=user,
+        action=AuditAction.import_rows,
+        summary=(
+            f"Коннект Спасибо batch={batch_id}: привязано {linked}, "
+            f"пропущено {skipped}, ошибок {failed}"
+        ),
+        target_type="spasibo_connect",
+        detail=batch_id.strip(),
+    )
+    return _render_settings(
+        request,
+        db,
+        spasibo_result_rows=results,
+        spasibo_result_linked=linked,
+        spasibo_result_skipped=skipped,
+        spasibo_result_failed=failed,
+        spasibo_report_id=report_id,
+    )
+
+
+@router.get("/hr/settings/spasibo-report/{report_id}.xlsx")
+def settings_spasibo_report(
+    report_id: str,
+    user: User = Depends(require(Role.admin)),
+):
+    """Скачивание отчёта коннекта «Спасибо»."""
+    from bonus.spasibo_connect import load_spasibo_connect_report
+
+    try:
+        payload = load_spasibo_connect_report(report_id)
+    except BonusError as exc:
+        return Response(exc.message, status_code=404)
+    return Response(
+        content=payload,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": 'attachment; filename="spasibo_connect_report.xlsx"'
+        },
+    )
+
+
 @router.get("/hr/import")
 def import_form(request: Request, user: User = Depends(require(Role.admin, Role.hr, Role.hrd))):
     """Старый раздел импорта — перенесён в Настройки."""

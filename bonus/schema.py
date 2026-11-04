@@ -131,6 +131,12 @@ def ensure_schema(engine: Engine) -> None:
             statements.append("ALTER TABLE users ADD COLUMN job_title VARCHAR(120) DEFAULT ''")
         if "phone" not in columns:
             statements.append("ALTER TABLE users ADD COLUMN phone VARCHAR(40) DEFAULT ''")
+        if "spasibo_user_id" not in columns:
+            statements.append(
+                "ALTER TABLE users ADD COLUMN spasibo_user_id VARCHAR(32) DEFAULT ''"
+            )
+        if "spasibo_certificate_id" not in columns:
+            statements.append("ALTER TABLE users ADD COLUMN spasibo_certificate_id INTEGER")
     if "segments" in tables:
         columns = {column["name"] for column in inspector.get_columns("segments")}
         if "accrual_period" not in columns:
