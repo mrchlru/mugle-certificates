@@ -15,18 +15,15 @@ from bonus.apple_wallet import (
 )
 from bonus.app_settings import certificate_shows_wallet_buttons
 from bonus.db import get_db
-from bonus.http import load_user, public_base, render, require, templates
+from bonus.http import public_base, render, require, templates
 from bonus.models import Certificate, CertificateStatus, Role, User
 from bonus.partners import partner_cities
 from bonus.present import HISTORY_PAGE_SIZE, TxView, load_card, load_cards, load_history_page
-from bonus.security import ensure_csrf
 from bonus.services import find_certificate, repair_iiko_part_balance_drift
 from bonus.values import today_msk
 from bonus.weekdays import WEEKDAY_CHOICES
 
 router = APIRouter()
-
-_STAFF_ROLES = {Role.admin, Role.hr, Role.hrd, Role.manager}
 
 
 def _card_page_extras() -> dict:
@@ -79,18 +76,18 @@ def public_certificate_history(
     if before_id is None:
         return Response(status_code=400)
     page_limit = _clamp_history_limit(limit)
-    actor = _history_actor(request, db)
+    # Публичная карта — только просмотр: отмена списаний здесь не показывается.
     page = load_history_page(
         db,
         certificate,
-        actor,
+        None,
         limit=page_limit,
         before_id=before_id,
     )
     return _history_fragment_response(
         request,
         items=page.items,
-        csrf=ensure_csrf(request) if actor is not None else "",
+        csrf="",
         has_more=page.has_more,
         next_before=page.next_before,
     )
@@ -106,8 +103,8 @@ def public_certificate(token: str, request: Request, db: Session = Depends(get_d
         db.commit()
         db.refresh(certificate)
     base = public_base(request)
-    viewer = _history_actor(request, db)
-    card = load_card(db, certificate, base, viewer)
+    # Ссылка сотруднику: без кнопок «Отменить», даже если в сессии HR/админ.
+    card = load_card(db, certificate, base, None)
     reason = _unavailable_reason(certificate)
     is_unavailable = reason is not None
     if is_unavailable:
@@ -197,14 +194,6 @@ def _empty_wallet_ui() -> dict:
         "walletpasses_enabled": False,
         "walletpasses_href": "",
     }
-
-
-def _history_actor(request: Request, db: Session) -> User | None:
-    """HR/админ/управляющий из сессии — для кнопок отмены в истории."""
-    user = load_user(request, db)
-    if user is None or user.role not in _STAFF_ROLES:
-        return None
-    return user
 
 
 def _parse_before(raw: str) -> int | None:

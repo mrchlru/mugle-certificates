@@ -230,7 +230,8 @@ def test_public_page_query_count_stable(app_client) -> None:
     assert endpoint_n["n"] <= 4
 
 
-def test_undo_visibility_public_vs_staff(app_client) -> None:
+def test_undo_hidden_on_public_card_even_for_staff(app_client) -> None:
+    """На ссылке /c/... отмены нет — даже если в сессии HR."""
     client = app_client
     db = _db()
     hr, certificate = _issued(db)
@@ -258,8 +259,10 @@ def test_undo_visibility_public_vs_staff(app_client) -> None:
     _login(client, settings.hr_login, settings.hr_password)
     staff = client.get(f"/c/{certificate.token}/history?before={page.next_before}")
     assert staff.status_code == 200
-    assert "Отменить" in staff.text
-    assert "csrf_token" in staff.text
+    assert "Отменить" not in staff.text
+    page_html = client.get(f"/c/{certificate.token}")
+    assert page_html.status_code == 200
+    assert "Отменить" not in page_html.text
 
 
 def test_history_comment_escaped(app_client) -> None:
