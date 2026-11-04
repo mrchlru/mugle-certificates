@@ -1,6 +1,10 @@
 """Разбор GOOGLE_SERVICE_ACCOUNT_JSON и дедуп номеров карт в Sheets."""
 
+from datetime import timedelta
+from types import SimpleNamespace
+
 from bonus.sheets_sync import (
+    _certificate_row_alert,
     _collapse_row_ranges,
     _dedupe_worksheet,
     _duplicate_row_indexes,
@@ -8,6 +12,7 @@ from bonus.sheets_sync import (
     _normalize_card_number,
     _parse_service_account_json,
 )
+from bonus.values import today_msk
 
 
 def test_parse_compact_json() -> None:
@@ -60,6 +65,32 @@ def test_collapse_row_ranges() -> None:
 def test_is_quota_error() -> None:
     assert _is_quota_error(RuntimeError("APIError: [429]: Quota exceeded"))
     assert not _is_quota_error(RuntimeError("permission denied"))
+
+
+def test_certificate_row_alert_ignores_usages_with_balance() -> None:
+    """Частичное списание не красит строку; красный — погашение / срок / удаление."""
+    active = SimpleNamespace(
+        balance=36_359_00,
+        expires_on=today_msk() + timedelta(days=365),
+        is_deleted=False,
+    )
+    assert _certificate_row_alert(active, usages=[object()], expired=False) is False
+    assert _certificate_row_alert(
+        SimpleNamespace(balance=0, expires_on=None, is_deleted=False),
+        usages=[],
+        expired=False,
+    )
+    assert _certificate_row_alert(
+        SimpleNamespace(balance=100, expires_on=today_msk() - timedelta(days=1), is_deleted=False),
+        usages=[],
+        expired=False,
+    )
+    assert _certificate_row_alert(
+        SimpleNamespace(balance=100, expires_on=None, is_deleted=True),
+        usages=[],
+        expired=False,
+    )
+    assert _certificate_row_alert(active, usages=[], expired=True)
 
 
 def test_dedupe_worksheet_batches_from_bottom() -> None:

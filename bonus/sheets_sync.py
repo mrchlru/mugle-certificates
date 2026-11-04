@@ -506,7 +506,7 @@ def _paint_certificate_row(
     usages: list[SheetUsageEntry],
     expired: bool,
 ) -> None:
-    """Красит строку красным, если карта использована, закончилась или истекла."""
+    """Красит строку красным для погашенных, истекших и удалённых карт."""
     alert = _certificate_row_alert(certificate, usages, expired)
     last_col = _column_letter(len(ledger_headers(kind)))
     a1 = f"A{row_index}:{last_col}{row_index}"
@@ -519,12 +519,13 @@ def _certificate_row_alert(
     usages: list[SheetUsageEntry],
     expired: bool,
 ) -> bool:
-    """Нужно ли подсветить строку как закрытую / использованную."""
+    """Красный фон: погашена (баланс 0), истекла или удалена — не из‑за факта списания."""
+    del usages  # даты использования пишем в колонки, на цвет не влияют
+    if getattr(certificate, "is_deleted", False):
+        return True
     if expired:
         return True
     if certificate.expires_on is not None and certificate.expires_on < today_msk():
-        return True
-    if usages:
         return True
     if certificate.balance <= 0:
         return True
