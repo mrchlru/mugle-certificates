@@ -23,6 +23,50 @@
     </form>
   </section>
 
+  <section class="design-panel design-wallet-settings" style="margin-top: 20px;" id="debit-code">
+    <header class="design-panel-head">
+      <h2>Подтверждение списания кодом</h2>
+    </header>
+    <form method="post" action="/hr/settings/debit-code" class="design-create stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <label class="switch">
+        <input type="checkbox" name="enabled" value="1" {% if app_settings.debit_code_enabled|default(false) %}checked{% endif %}>
+        <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+        <span class="switch-copy">Требовать код из «Спасибо» при списании</span>
+      </label>
+      <p class="muted design-hint">Пока выключено, списание на кассе идёт как обычно.</p>
+      <label>Область
+        <select name="scope">
+          <option value="marked" {% if app_settings.debit_code_scope|default('marked') == 'marked' %}selected{% endif %}>Только отмеченные карты</option>
+          <option value="all" {% if app_settings.debit_code_scope|default('marked') == 'all' %}selected{% endif %}>Все карты</option>
+        </select>
+      </label>
+      <label>Порог суммы (копейки, min запрошенного и баланса)
+        <input type="number" name="min_amount" min="0" value="{{ app_settings.debit_code_min_amount|default(0) }}">
+      </label>
+      <label>Время жизни кода (сек)
+        <input type="number" name="ttl_sec" min="30" value="{{ app_settings.debit_code_ttl_sec|default(120) }}">
+      </label>
+      <label>Число попыток
+        <input type="number" name="max_attempts" min="1" value="{{ app_settings.debit_code_max_attempts|default(3) }}">
+      </label>
+      <label>Если подтвердить нельзя (нет «Спасибо» / push)
+        <select name="on_failure">
+          <option value="deny" {% if app_settings.debit_code_on_failure|default('deny') == 'deny' %}selected{% endif %}>Отклонить списание</option>
+          <option value="allow" {% if app_settings.debit_code_on_failure|default('deny') == 'allow' %}selected{% endif %}>Списать без кода (с пометкой)</option>
+        </select>
+      </label>
+      <button class="btn" type="submit">Сохранить</button>
+    </form>
+    <form method="post" action="/hr/settings/debit-code-test-push" class="design-create" style="margin-top: 12px;">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <label>Тест push: ID «Спасибо»
+        <input name="spasibo_user_id" maxlength="32" placeholder="users.id">
+      </label>
+      <button class="btn soft" type="submit">Отправить тестовый push</button>
+    </form>
+  </section>
+
   <section class="design-panel" style="margin-top: 20px;" id="login-blocks">
     <header class="design-panel-head">
       <h2>Заблокированные адреса</h2>

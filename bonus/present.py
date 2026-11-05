@@ -107,6 +107,7 @@ class CardView:
     history_next_before: int | None = None
     parts: tuple[PartView, ...] = ()
     is_combo: bool = False
+    require_debit_code: bool = False
 
 
 @dataclass(frozen=True)
@@ -983,6 +984,7 @@ def _card_view(
         history_next_before=history_next_before,
         parts=part_views,
         is_combo=len(part_views) > 1,
+        require_debit_code=bool(getattr(certificate, "require_debit_code", False)),
     )
 
 

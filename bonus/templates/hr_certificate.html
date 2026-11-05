@@ -51,6 +51,15 @@
         <p class="muted share-sync-hint">Ссылка появится здесь, как только запись завершится.</p>
       </div>
     </div>
+    <form method="post" action="/hr/c/{{ card.id }}/require-debit-code" class="design-create">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <label class="switch">
+        <input type="checkbox" name="enabled" value="1" {% if card.require_debit_code|default(false) %}checked{% endif %}>
+        <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+        <span class="switch-copy">Требовать код из «Спасибо» при списании (если включено в настройках)</span>
+      </label>
+      <button class="btn soft" type="submit">Сохранить</button>
+    </form>
     <form method="post" action="/hr/c/{{ card.id }}/name" class="stack">
       <input type="hidden" name="csrf_token" value="{{ csrf }}">
       <p class="eyebrow">Сотрудник</p>
