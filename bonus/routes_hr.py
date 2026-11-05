@@ -1708,6 +1708,40 @@ def settings_employee_commit(
     )
 
 
+@router.get("/hr/settings/cards-export.xlsx")
+def settings_cards_export(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin)),
+):
+    """Полная выгрузка всех карт в Excel."""
+    from bonus.cards_export import build_all_cards_workbook, export_filename
+
+    from sqlalchemy import func, select
+
+    from bonus.models import Certificate
+
+    base = public_base(request)
+    total = db.scalar(
+        select(func.count())
+        .select_from(Certificate)
+        .where(Certificate.is_deleted.is_(False))
+    ) or 0
+    payload = build_all_cards_workbook(db, base_url=base)
+    write_audit(
+        db,
+        actor=user,
+        action=AuditAction.link_export,
+        summary=f"Полная выгрузка карт: {total} шт.",
+        target_type="cards_export",
+    )
+    return Response(
+        content=payload,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{export_filename()}"'},
+    )
+
+
 @router.get("/hr/settings/employee-report/{report_id}.xlsx")
 def settings_employee_report(
     report_id: str,

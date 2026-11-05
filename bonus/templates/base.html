@@ -52,12 +52,12 @@
       <a href="/hr/new" {% if section == 'issue' %}class="is-on"{% endif %}>Выписать</a>
       <a href="/hr/design" {% if section == 'design' %}class="is-on"{% endif %}>Оформление</a>
       <a href="/hr/ledger" {% if section == 'ledger' %}class="is-on"{% endif %}>Журнал</a>
-      <a href="/hr/export" {% if section == 'export' %}class="is-on"{% endif %}>Рассылка</a>
       {% if user and user.role.value == 'admin' %}
+      <a href="/hr/export" {% if section == 'export' %}class="is-on"{% endif %}>Рассылка</a>
+      <a href="/hr/kassy" {% if section == 'kassy' %}class="is-on"{% endif %}>Кассы</a>
       <a href="/hr/settings" {% if section == 'settings' %}class="is-on"{% endif %}>Настройки</a>
       {% endif %}
       {% if staff_role %}
-      <a href="/hr/kassy" {% if section == 'kassy' %}class="is-on"{% endif %}>Кассы</a>
       <a href="/hr/staff" {% if section == 'staff' %}class="is-on"{% endif %}>Доступ</a>
       <a href="/hr/audit" {% if section == 'audit' %}class="is-on"{% endif %}>Контроль</a>
       {% endif %}

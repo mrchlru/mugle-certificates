@@ -16,7 +16,7 @@ router = APIRouter()
 def kassy_page(
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require(Role.admin, Role.hrd)),
+    user: User = Depends(require(Role.admin)),
 ):
     """Мониторинг касс iiko."""
     data = build_dashboard(db)
@@ -31,7 +31,7 @@ def kassy_page(
 @router.get("/hr/kassy/data")
 def kassy_data(
     db: Session = Depends(get_db),
-    user: User = Depends(require(Role.admin, Role.hrd)),
+    user: User = Depends(require(Role.admin)),
 ):
     """JSON для автообновления таблицы касс."""
     return JSONResponse(build_dashboard(db))
@@ -42,7 +42,7 @@ def kassy_forget_terminal(
     terminal_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(require(Role.admin, Role.hrd)),
+    user: User = Depends(require(Role.admin)),
     csrf_token: str = Form(""),
 ):
     """Удаляет запись кассы из мониторинга."""
