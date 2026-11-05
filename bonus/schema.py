@@ -51,6 +51,10 @@ def ensure_schema(engine: Engine) -> None:
             statements.append(
                 "ALTER TABLE certificates ADD COLUMN is_deleted BOOLEAN DEFAULT FALSE"
             )
+        if "require_debit_code" not in columns:
+            statements.append(
+                "ALTER TABLE certificates ADD COLUMN require_debit_code BOOLEAN DEFAULT FALSE"
+            )
     if "app_settings" not in tables:
         statements.append(
             """
@@ -173,6 +177,89 @@ def ensure_schema(engine: Engine) -> None:
             statements.append(
                 "ALTER TABLE segments ADD COLUMN is_deleted BOOLEAN DEFAULT FALSE"
             )
+    if "app_settings" in tables:
+        settings_cols = {column["name"] for column in inspector.get_columns("app_settings")}
+        if "debit_code_enabled" not in settings_cols:
+            statements.append(
+                "ALTER TABLE app_settings ADD COLUMN debit_code_enabled BOOLEAN DEFAULT FALSE"
+            )
+        if "debit_code_scope" not in settings_cols:
+            statements.append(
+                "ALTER TABLE app_settings ADD COLUMN debit_code_scope VARCHAR(16) DEFAULT 'marked'"
+            )
+        if "debit_code_min_amount" not in settings_cols:
+            statements.append(
+                "ALTER TABLE app_settings ADD COLUMN debit_code_min_amount INTEGER DEFAULT 0"
+            )
+        if "debit_code_ttl_sec" not in settings_cols:
+            statements.append(
+                "ALTER TABLE app_settings ADD COLUMN debit_code_ttl_sec INTEGER DEFAULT 120"
+            )
+        if "debit_code_max_attempts" not in settings_cols:
+            statements.append(
+                "ALTER TABLE app_settings ADD COLUMN debit_code_max_attempts INTEGER DEFAULT 3"
+            )
+        if "debit_code_on_failure" not in settings_cols:
+            statements.append(
+                "ALTER TABLE app_settings ADD COLUMN debit_code_on_failure VARCHAR(16) DEFAULT 'deny'"
+            )
+    if "iiko_terminals" not in tables:
+        statements.append(
+            """
+            CREATE TABLE iiko_terminals (
+                id INTEGER PRIMARY KEY,
+                terminal_id VARCHAR(80) NOT NULL UNIQUE,
+                restaurant VARCHAR(200) DEFAULT '',
+                machine_name VARCHAR(120) DEFAULT '',
+                plugin_version VARCHAR(40) DEFAULT '',
+                front_api VARCHAR(16) DEFAULT '',
+                front_version VARCHAR(40) DEFAULT '',
+                features TEXT DEFAULT '[]',
+                license_ok BOOLEAN,
+                payment_type_bound BOOLEAN,
+                payment_type_name VARCHAR(120) DEFAULT '',
+                config_source VARCHAR(16) DEFAULT '',
+                pending_ops INTEGER DEFAULT 0,
+                last_error VARCHAR(300) DEFAULT '',
+                last_error_at TIMESTAMP,
+                first_seen_at TIMESTAMP,
+                last_seen_at TIMESTAMP,
+                last_ip VARCHAR(64) DEFAULT ''
+            )
+            """
+        )
+    if "iiko_expected_restaurants" not in tables:
+        statements.append(
+            """
+            CREATE TABLE iiko_expected_restaurants (
+                id INTEGER PRIMARY KEY,
+                name VARCHAR(200) NOT NULL UNIQUE,
+                created_at TIMESTAMP
+            )
+            """
+        )
+    if "debit_challenges" not in tables:
+        statements.append(
+            """
+            CREATE TABLE debit_challenges (
+                id VARCHAR(36) PRIMARY KEY,
+                certificate_id INTEGER NOT NULL,
+                transaction_id VARCHAR(80) NOT NULL,
+                amount INTEGER NOT NULL,
+                restaurant VARCHAR(200) DEFAULT '',
+                code_hash VARCHAR(128) DEFAULT '',
+                status VARCHAR(16) DEFAULT 'pending',
+                attempts_used INTEGER DEFAULT 0,
+                max_attempts INTEGER DEFAULT 3,
+                sends_count INTEGER DEFAULT 0,
+                last_sent_at TIMESTAMP,
+                push_status VARCHAR(120) DEFAULT '',
+                created_at TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL,
+                confirmed_at TIMESTAMP
+            )
+            """
+        )
     if statements:
         with engine.begin() as connection:
             for statement in statements:
@@ -310,8 +397,17 @@ def _ensure_app_settings_row(engine: Engine) -> None:
         connection.execute(
             text(
                 """
-                INSERT INTO app_settings (id, wallet_buttons_enabled)
-                SELECT 1, FALSE
+                INSERT INTO app_settings (
+                    id,
+                    wallet_buttons_enabled,
+                    debit_code_enabled,
+                    debit_code_scope,
+                    debit_code_min_amount,
+                    debit_code_ttl_sec,
+                    debit_code_max_attempts,
+                    debit_code_on_failure
+                )
+                SELECT 1, FALSE, FALSE, 'marked', 0, 120, 3, 'deny'
                 WHERE NOT EXISTS (SELECT 1 FROM app_settings WHERE id = 1)
                 """
             )

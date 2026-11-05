@@ -4,16 +4,26 @@
 (как Statix). Сюда уходит снимок чека для журнала HR.
 """
 
-from typing import Annotated
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from bonus.config import get_settings
 from bonus.db import get_db
+from bonus.debit_code import (
+    CodeRequiredResponse,
+    DebitCodeError,
+    cancel_challenge,
+    handle_iiko_debit,
+    resend_challenge_code,
+)
+from bonus.iiko_monitor import upsert_heartbeat
 from bonus.services import (
     BonusError,
+    IikoDebitResult,
     debit_for_iiko,
     lookup_for_iiko,
     refund_for_iiko,
@@ -52,6 +62,35 @@ class DebitBody(BaseModel):
     order_number: str = ""
     table: str = ""
     cheque_detail: str = ""
+    challenge_id: str = ""
+    debit_code: str = Field(default="", max_length=8, description="4 цифры подтверждения")
+
+
+class HeartbeatBody(BaseModel):
+    """Сигнал «плагин жив» с кассы."""
+
+    terminal_id: str = Field(min_length=1, max_length=80)
+    machine_name: str = ""
+    restaurant: str = ""
+    plugin_version: str = ""
+    front_api: str = ""
+    front_version: str | None = None
+    features: list[str] | None = None
+    license_ok: bool | None = None
+    payment_type_bound: bool | None = None
+    payment_type_name: str = ""
+    config_source: str = ""
+    pending_ops: int = 0
+    last_error: str | None = None
+    last_error_at: str | None = None
+
+    model_config = {"extra": "ignore"}
+
+
+class ChallengeIdBody(BaseModel):
+    """Идентификатор вызова подтверждения."""
+
+    challenge_id: str = Field(min_length=1, max_length=40)
 
 
 class DebitResponse(BaseModel):
@@ -115,6 +154,22 @@ def iiko_plugin_config(
     )
 
 
+@router.post("/heartbeat")
+def iiko_heartbeat(
+    body: HeartbeatBody,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_iiko_key),
+) -> dict[str, bool]:
+    """Принимает heartbeat плагина (upsert по terminal_id)."""
+    client_ip = request.client.host if request.client else ""
+    try:
+        upsert_heartbeat(db, body.model_dump(), client_ip)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True}
+
+
 @router.post("/lookup", response_model=LookupResponse)
 def iiko_lookup(
     body: LookupBody,
@@ -144,32 +199,95 @@ def iiko_lookup(
     )
 
 
-@router.post("/debit", response_model=DebitResponse)
+@router.post("/debit")
 def iiko_debit(
     body: DebitBody,
     db: Session = Depends(get_db),
     _: None = Depends(require_iiko_key),
-) -> DebitResponse:
+    x_plugin_features: Annotated[str, Header(alias="X-Plugin-Features")] = "",
+) -> Any:
     """Списывает бонусы (целиком или часть); remainder — доплата картой/налом."""
     from bonus.values import MoneyError, format_money, parse_money
 
     try:
         amount = parse_money(body.amount_rub)
         certificate = lookup_for_iiko(db, body.code)
-        result = debit_for_iiko(
+        outcome = handle_iiko_debit(
             db,
             certificate,
-            amount=amount,
+            order_amount=amount,
             external_id=body.transaction_id,
             restaurant=body.restaurant,
             comment=body.comment or "Teams Bonus",
             order_ref=body.order_number or body.table,
             cheque_detail=_cheque_text(body),
+            challenge_id=body.challenge_id.strip() or None,
+            code=body.debit_code.strip() or None,
+            plugin_features=x_plugin_features,
         )
     except MoneyError as exc:
         raise HTTPException(status_code=400, detail=exc.message) from exc
+    except DebitCodeError as exc:
+        raise HTTPException(status_code=400, detail=exc.message) from exc
     except BonusError as exc:
         raise HTTPException(status_code=400, detail=exc.message) from exc
+
+    if isinstance(outcome, CodeRequiredResponse):
+        return JSONResponse(
+            status_code=202,
+            content={
+                "status": "code_required",
+                "challenge_id": outcome.challenge_id,
+                "digits": outcome.digits,
+                "expires_in_sec": outcome.expires_in_sec,
+                "attempts_left": outcome.attempts_left,
+                "resend_after_sec": outcome.resend_after_sec,
+                "message": outcome.message,
+            },
+        )
+
+    return _debit_response(certificate, outcome)
+
+
+@router.post("/debit/code/resend")
+def iiko_debit_code_resend(
+    body: ChallengeIdBody,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_iiko_key),
+) -> JSONResponse:
+    """Повторная отправка push с кодом."""
+    try:
+        outcome = resend_challenge_code(db, body.challenge_id)
+    except DebitCodeError as exc:
+        raise HTTPException(status_code=400, detail=exc.message) from exc
+    return JSONResponse(
+        status_code=202,
+        content={
+            "status": "code_required",
+            "challenge_id": outcome.challenge_id,
+            "digits": outcome.digits,
+            "expires_in_sec": outcome.expires_in_sec,
+            "attempts_left": outcome.attempts_left,
+            "resend_after_sec": outcome.resend_after_sec,
+            "message": outcome.message,
+        },
+    )
+
+
+@router.post("/debit/code/cancel")
+def iiko_debit_code_cancel(
+    body: ChallengeIdBody,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_iiko_key),
+) -> dict[str, bool]:
+    """Закрывает вызов подтверждения без списания."""
+    cancel_challenge(db, body.challenge_id)
+    return {"ok": True}
+
+
+def _debit_response(certificate, result: IikoDebitResult) -> DebitResponse:
+    from bonus.values import format_money
+
     return DebitResponse(
         public_number=certificate.public_number,
         paid=result.paid,

@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}Кассы{% endblock %}
+{% block head_scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  var table = document.getElementById("kassy-table-body");
+  var summary = document.getElementById("kassy-summary");
+  function refresh() {
+    fetch("/hr/kassy/data", { credentials: "same-origin" })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (summary && data.counts) {
+          summary.textContent =
+            "Всего касс: " + data.counts.total +
+            " · хорошо: " + data.counts.ok +
+            " · внимание: " + data.counts.warn +
+            " · проблема: " + data.counts.bad +
+            " · нет связи: " + data.counts.offline +
+            " · не подключено: " + data.counts.missing;
+        }
+        if (!table || !data.rows) return;
+        table.innerHTML = data.rows.map(function (row) {
+          var actions = "";
+          if (row.terminal_db_id) {
+            actions = '<form method="post" action="/hr/kassy/terminals/' + row.terminal_db_id + '/forget" class="inline">' +
+              '<input type="hidden" name="csrf_token" value="{{ csrf }}">' +
+              '<button type="submit" class="text-link">Забыть кассу</button></form>';
+          }
+          var ver = row.plugin_version;
+          if (row.version_outdated) ver += ' <span class="tag warn">устарела</span>';
+          var code = row.debit_code_supported ? "да" : "нет";
+          return "<tr>" +
+            "<td>" + (row.restaurant || "—") + "</td>" +
+            "<td>" + (row.machine_name || "—") + "</td>" +
+            '<td><span class="tag ' + row.status_css + '">' + row.status_label + "</span><br><small>" + row.status_reason + "</small></td>" +
+            "<td>" + ver + "</td>" +
+            '<td title="' + (row.last_seen_exact || "") + '">' + row.last_seen_label + "</td>" +
+            "<td>" + row.pending_ops + "</td>" +
+            "<td>" + code + "</td>" +
+            "<td>" + (row.last_error || "—") + "</td>" +
+            "<td>" + actions + "</td></tr>";
+        }).join("");
+      })
+      .catch(function () {});
+  }
+  setInterval(refresh, 60000);
+});
+</script>
+{% endblock %}
+{% block content %}
+<h1>Кассы iiko</h1>
+<p id="kassy-summary" class="muted">
+  Всего касс: {{ dashboard.counts.total }}
+  · хорошо: {{ dashboard.counts.ok }}
+  · внимание: {{ dashboard.counts.warn }}
+  · проблема: {{ dashboard.counts.bad }}
+  · нет связи: {{ dashboard.counts.offline }}
+  · не подключено: {{ dashboard.counts.missing }}
+</p>
+<p class="muted">Актуальная версия плагина: {{ dashboard.latest_plugin_version }}</p>
+
+<section class="stack">
+  <h2>Ожидаемые рестораны</h2>
+  <p class="muted">Где плагин Teams Bonus должен быть установлен. Без списка статус «Не подключена» не показывается.</p>
+  <ul>
+    {% for item in dashboard.expected %}
+    <li>{{ item.name }}
+      <form method="post" action="/hr/kassy/expected/{{ item.id }}/delete" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf }}">
+        <button type="submit" class="text-link">удалить</button>
+      </form>
+    </li>
+    {% else %}
+    <li class="muted">Список пуст</li>
+    {% endfor %}
+  </ul>
+  <form method="post" action="/hr/kassy/expected" class="design-create">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    <label>Добавить ресторан<input type="text" name="name" maxlength="200" required></label>
+    <button type="submit" class="btn">Добавить</button>
+  </form>
+</section>
+
+<table class="data-table">
+  <thead>
+    <tr>
+      <th>Ресторан</th>
+      <th>Касса</th>
+      <th>Статус</th>
+      <th>Версия</th>
+      <th>Последний сигнал</th>
+      <th>Очередь</th>
+      <th>Код списания</th>
+      <th>Ошибка</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody id="kassy-table-body">
+    {% for row in dashboard.rows %}
+    <tr>
+      <td>{{ row.restaurant }}</td>
+      <td>{{ row.machine_name }}</td>
+      <td>
+        <span class="tag {{ row.status_css }}">{{ row.status_label }}</span>
+        <br><small>{{ row.status_reason }}</small>
+      </td>
+      <td>
+        {{ row.plugin_version }}
+        {% if row.version_outdated %}<span class="tag warn">устарела</span>{% endif %}
+      </td>
+      <td title="{{ row.last_seen_exact }}">{{ row.last_seen_label }}</td>
+      <td>{{ row.pending_ops }}</td>
+      <td>{% if row.debit_code_supported %}да{% else %}нет{% endif %}</td>
+      <td>{{ row.last_error or "—" }}</td>
+      <td>
+        {% if row.terminal_db_id %}
+        <form method="post" action="/hr/kassy/terminals/{{ row.terminal_db_id }}/forget" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf }}">
+          <button type="submit" class="text-link">Забыть кассу</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

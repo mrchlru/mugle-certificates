@@ -27,7 +27,12 @@ from bonus.catalog import (
     update_segment,
     update_template,
 )
-from bonus.app_settings import set_wallet_buttons_enabled, wallet_buttons_enabled
+from bonus.app_settings import (
+    get_app_settings,
+    set_wallet_buttons_enabled,
+    update_debit_code_settings,
+    wallet_buttons_enabled,
+)
 from bonus.audit import credit_audit_detail, debit_audit_detail, list_audit, write_audit
 from bonus.db import get_db
 from bonus.http import (
@@ -425,6 +430,72 @@ def settings_wallet_buttons(
             "Кнопки кошелька включены" if enabled == "1" else "Кнопки кошелька скрыты",
         )
     return RedirectResponse("/hr/settings", status_code=303)
+
+
+@router.post("/hr/settings/debit-code")
+def settings_debit_code(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin)),
+    enabled: str = Form("0"),
+    scope: str = Form("marked"),
+    min_amount: str = Form("0"),
+    ttl_sec: str = Form("120"),
+    max_attempts: str = Form("3"),
+    on_failure: str = Form("deny"),
+    csrf_token: str = Form(""),
+):
+    """Настройки подтверждения списания кодом."""
+    try:
+        guard_csrf(request, csrf_token)
+        min_kopecks = int(min_amount or "0")
+        update_debit_code_settings(
+            db,
+            enabled=enabled == "1",
+            scope=scope,
+            min_amount=min_kopecks,
+            ttl_sec=int(ttl_sec or "120"),
+            max_attempts=int(max_attempts or "3"),
+            on_failure=on_failure,
+        )
+        write_audit(
+            db,
+            actor=user,
+            action=AuditAction.debit_code_settings,
+            summary="Настройки подтверждения списания кодом",
+            detail=f"enabled={enabled == '1'} scope={scope} min={min_kopecks}",
+        )
+    except (BonusError, ValueError) as exc:
+        flash(request, str(exc), "bad")
+    else:
+        flash(request, "Настройки подтверждения списания сохранены")
+    return RedirectResponse("/hr/settings#debit-code", status_code=303)
+
+
+@router.post("/hr/settings/debit-code-test-push")
+def settings_debit_code_test_push(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin)),
+    spasibo_user_id: str = Form(""),
+    csrf_token: str = Form(""),
+):
+    """Тестовый push в «Спасибо» без реального кода в ответе."""
+    from bonus.push_provider import get_push_provider
+
+    try:
+        guard_csrf(request, csrf_token)
+        user_id = spasibo_user_id.strip()
+        if not user_id:
+            raise BonusError("Укажите ID «Спасибо»")
+        result = get_push_provider().send_debit_code(user_id, "0000", 100, "Тест Teams Bonus")
+        if not result.ok:
+            raise BonusError(result.detail or "Push не удался")
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+    else:
+        flash(request, "Тестовый push отправлен (см. лог при режиме log)")
+    return RedirectResponse("/hr/settings#debit-code", status_code=303)
 
 
 @router.post("/hr/settings/login-unblock")
@@ -1082,6 +1153,31 @@ def certificate_barcode_png(
     )
 
 
+@router.post("/hr/c/{certificate_id}/require-debit-code")
+def certificate_require_debit_code(
+    certificate_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
+    enabled: str = Form("0"),
+    csrf_token: str = Form(""),
+):
+    """Включает или выключает обязательный код списания для карты (scope=marked)."""
+    certificate = _certificate_or_redirect(db, request, certificate_id)
+    if certificate is None:
+        return RedirectResponse("/hr", status_code=303)
+    guard_csrf(request, csrf_token)
+    certificate.require_debit_code = enabled == "1"
+    db.commit()
+    flash(
+        request,
+        "Код при списании включён для карты"
+        if certificate.require_debit_code
+        else "Код при списании выключен для карты",
+    )
+    return RedirectResponse(f"/hr/c/{certificate_id}", status_code=303)
+
+
 @router.post("/hr/c/{certificate_id}/credit")
 def credit_submit(
     certificate_id: int,
@@ -1481,6 +1577,7 @@ def _render_settings(request: Request, db: Session, **extra):
         "hr_settings.html",
         section="settings",
         wallet_buttons_enabled=wallet_buttons_enabled(db),
+        app_settings=get_app_settings(db),
         sheets_queue=queue_stats(db),
         sheets_credentials_error=sheets_credentials_error(),
         blocked_logins=list_blocked_attempts(db),

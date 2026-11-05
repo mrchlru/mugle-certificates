@@ -54,6 +54,7 @@ class AuditAction(str, enum.Enum):
     link_delivery_mark = "link_delivery_mark"
     login_unblock = "login_unblock"
     sheets_dedupe = "sheets_dedupe"
+    debit_code_settings = "debit_code_settings"
 
 
 class CertificateStatus(str, enum.Enum):
@@ -210,6 +211,7 @@ class Certificate(Base):
     gift_opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Тестовая карта: кнопки кошелька видны даже при выключенной глобальной настройке.
     show_wallet_buttons: Mapped[bool] = mapped_column(default=False)
+    require_debit_code: Mapped[bool] = mapped_column(default=False)
     issued_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: _utcnow())
 
@@ -266,6 +268,79 @@ class AppSettings(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     wallet_buttons_enabled: Mapped[bool] = mapped_column(default=False)
+    debit_code_enabled: Mapped[bool] = mapped_column(default=False)
+    debit_code_scope: Mapped[str] = mapped_column(String(16), default="marked")
+    debit_code_min_amount: Mapped[int] = mapped_column(Integer, default=0)
+    debit_code_ttl_sec: Mapped[int] = mapped_column(Integer, default=120)
+    debit_code_max_attempts: Mapped[int] = mapped_column(Integer, default=3)
+    debit_code_on_failure: Mapped[str] = mapped_column(String(16), default="deny")
+
+
+class IikoTerminal(Base):
+    """Последний heartbeat плагина iikoFront с кассы."""
+
+    __tablename__ = "iiko_terminals"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    terminal_id: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    restaurant: Mapped[str] = mapped_column(String(200), default="")
+    machine_name: Mapped[str] = mapped_column(String(120), default="")
+    plugin_version: Mapped[str] = mapped_column(String(40), default="")
+    front_api: Mapped[str] = mapped_column(String(16), default="")
+    front_version: Mapped[str] = mapped_column(String(40), default="")
+    features: Mapped[str] = mapped_column(Text, default="[]")
+    license_ok: Mapped[bool | None] = mapped_column(nullable=True)
+    payment_type_bound: Mapped[bool | None] = mapped_column(nullable=True)
+    payment_type_name: Mapped[str] = mapped_column(String(120), default="")
+    config_source: Mapped[str] = mapped_column(String(16), default="")
+    pending_ops: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[str] = mapped_column(String(300), default="")
+    last_error_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: _utcnow())
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: _utcnow())
+    last_ip: Mapped[str] = mapped_column(String(64), default="")
+
+
+class IikoExpectedRestaurant(Base):
+    """Рестораны, где плагин должен быть установлен."""
+
+    __tablename__ = "iiko_expected_restaurants"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: _utcnow())
+
+
+class DebitChallengeStatus(str, enum.Enum):
+    """Состояние одноразового кода подтверждения списания."""
+
+    pending = "pending"
+    confirmed = "confirmed"
+    failed = "failed"
+    expired = "expired"
+    cancelled = "cancelled"
+
+
+class DebitChallenge(Base):
+    """Вызов подтверждения списания бонусов кодом из «Спасибо»."""
+
+    __tablename__ = "debit_challenges"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    certificate_id: Mapped[int] = mapped_column(ForeignKey("certificates.id"), index=True)
+    transaction_id: Mapped[str] = mapped_column(String(80), index=True)
+    amount: Mapped[int] = mapped_column(Integer)
+    restaurant: Mapped[str] = mapped_column(String(200), default="")
+    code_hash: Mapped[str] = mapped_column(String(128), default="")
+    status: Mapped[str] = mapped_column(String(16), default=DebitChallengeStatus.pending.value, index=True)
+    attempts_used: Mapped[int] = mapped_column(Integer, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, default=3)
+    sends_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    push_status: Mapped[str] = mapped_column(String(120), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: _utcnow())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class SheetsSyncJob(Base):
