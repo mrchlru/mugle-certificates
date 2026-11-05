@@ -119,6 +119,47 @@ def forget_terminal(db: Session, terminal_id: int) -> bool:
     return True
 
 
+def build_settings_kassy_summary(db: Session) -> dict[str, Any]:
+    """Краткая сводка касс iiko для блока в «Настройках»."""
+    dash = build_dashboard(db)
+    priority = {"bad": 4, "warn": 3, "offline": 2, "ok": 1, "missing": 0}
+    connected: dict[str, dict[str, Any]] = {}
+    for row in dash["rows"]:
+        if row.get("kind") != "terminal":
+            continue
+        name = (row.get("restaurant") or "—").strip()
+        key = normalize_restaurant(name)
+        entry = connected.get(key)
+        if entry is None:
+            connected[key] = {
+                "name": name,
+                "terminals": 1,
+                "status_key": row["status_key"],
+                "status_label": row["status_label"],
+                "status_css": row["status_css"],
+                "status_reason": row["status_reason"],
+                "last_seen_label": row["last_seen_label"],
+            }
+            continue
+        entry["terminals"] += 1
+        if priority.get(row["status_key"], 0) > priority.get(entry["status_key"], 0):
+            entry["status_key"] = row["status_key"]
+            entry["status_label"] = row["status_label"]
+            entry["status_css"] = row["status_css"]
+            entry["status_reason"] = row["status_reason"]
+        if row["last_seen_label"] != "—":
+            entry["last_seen_label"] = row["last_seen_label"]
+    missing = [row for row in dash["rows"] if row.get("kind") == "missing"]
+    connected_list = sorted(connected.values(), key=lambda item: item["name"].casefold())
+    return {
+        "counts": dash["counts"],
+        "expected": dash["expected"],
+        "connected": connected_list,
+        "missing": missing,
+        "latest_plugin_version": dash["latest_plugin_version"],
+    }
+
+
 def build_dashboard(db: Session) -> dict[str, Any]:
     """Сводка и строки таблицы «Кассы»."""
     now = datetime.now(timezone.utc)

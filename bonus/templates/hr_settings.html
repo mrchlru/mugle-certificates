@@ -67,6 +67,82 @@
     </form>
   </section>
 
+  <section class="design-panel design-wallet-settings" style="margin-top: 20px;" id="iiko-kassy">
+    <header class="design-panel-head">
+      <h2>Кассы iiko (Teams Bonus)</h2>
+    </header>
+    <p class="muted design-hint">
+      Здесь видно, какие рестораны уже шлют heartbeat с касс, и какие вы ждёте, но сигнала ещё не было.
+      Подробная таблица по каждой кассе —
+      {% if user.role.value == 'admin' %}
+      <a class="text-link" href="/hr/kassy">страница «Кассы»</a> (доступна и HRD).
+      {% else %}
+      <a class="text-link" href="/hr/kassy">страница «Кассы»</a>.
+      {% endif %}
+    </p>
+    {% if kassy_summary %}
+    <p class="muted">
+      Касс на связи: {{ kassy_summary.counts.total|default(0) }}
+      · в норме: {{ kassy_summary.counts.ok|default(0) }}
+      · внимание: {{ kassy_summary.counts.warn|default(0) }}
+      · проблема: {{ kassy_summary.counts.bad|default(0) }}
+      · нет связи: {{ kassy_summary.counts.offline|default(0) }}
+      · не подключено: {{ kassy_summary.counts.missing|default(0) }}
+    </p>
+    <h3 class="eyebrow">Подключённые рестораны</h3>
+    {% if kassy_summary.connected %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Ресторан</th><th>Касс</th><th>Статус</th><th>Последний сигнал</th></tr>
+        </thead>
+        <tbody>
+          {% for row in kassy_summary.connected %}
+          <tr>
+            <td>{{ row.name }}</td>
+            <td>{{ row.terminals }}</td>
+            <td><span class="tag {{ row.status_css }}">{{ row.status_label }}</span><br><small>{{ row.status_reason }}</small></td>
+            <td>{{ row.last_seen_label }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="muted">Пока ни один ресторан не присылал heartbeat — проверьте плагин 1.1.0 на кассах.</p>
+    {% endif %}
+
+    <h3 class="eyebrow" style="margin-top: 1.25rem;">Ожидаемые рестораны</h3>
+    <p class="muted design-hint">Добавьте название как в iiko (GetHostRestaurant). Если сигнала нет — статус «Не подключена».</p>
+    {% if kassy_summary.expected %}
+    <ul>
+      {% for item in kassy_summary.expected %}
+      <li>{{ item.name }}
+        <form method="post" action="/hr/kassy/expected/{{ item.id }}/delete" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf }}">
+          <input type="hidden" name="return_to" value="settings">
+          <button type="submit" class="text-link">удалить</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">Список пуст — «не подключена» ни для кого не показывается.</p>
+    {% endif %}
+    {% if kassy_summary.missing %}
+    <p class="flash bad" style="margin-top: 0.75rem;">Без сигнала:
+      {% for row in kassy_summary.missing %}{{ row.restaurant }}{% if not loop.last %}, {% endif %}{% endfor %}
+    </p>
+    {% endif %}
+    <form method="post" action="/hr/kassy/expected" class="design-create">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <input type="hidden" name="return_to" value="settings">
+      <label>Добавить ресторан<input type="text" name="name" maxlength="200" required placeholder="Как в iiko Office"></label>
+      <button class="btn soft" type="submit">Добавить</button>
+    </form>
+    {% endif %}
+  </section>
+
   <section class="design-panel" style="margin-top: 20px;" id="login-blocks">
     <header class="design-panel-head">
       <h2>Заблокированные адреса</h2>

@@ -17,6 +17,13 @@ from bonus.models import Role, User
 router = APIRouter()
 
 
+def _redirect_after_kassy(return_to: str) -> RedirectResponse:
+    """Возврат на «Кассы» или в «Настройки» после правки списка."""
+    if (return_to or "").strip() == "settings":
+        return RedirectResponse("/hr/settings#iiko-kassy", status_code=303)
+    return RedirectResponse("/hr/kassy", status_code=303)
+
+
 @router.get("/hr/kassy")
 def kassy_page(
     request: Request,
@@ -49,11 +56,12 @@ def kassy_add_expected(
     user: User = Depends(require(Role.admin, Role.hrd)),
     name: str = Form(""),
     csrf_token: str = Form(""),
+    return_to: str = Form(""),
 ):
     """Добавляет ресторан в список ожидаемых."""
     guard_csrf(request, csrf_token)
     add_expected_restaurant(db, name)
-    return RedirectResponse("/hr/kassy", status_code=303)
+    return _redirect_after_kassy(return_to)
 
 
 @router.post("/hr/kassy/expected/{restaurant_id}/delete")
@@ -63,11 +71,12 @@ def kassy_remove_expected(
     db: Session = Depends(get_db),
     user: User = Depends(require(Role.admin, Role.hrd)),
     csrf_token: str = Form(""),
+    return_to: str = Form(""),
 ):
     """Удаляет ресторан из ожидаемых."""
     guard_csrf(request, csrf_token)
     remove_expected_restaurant(db, restaurant_id)
-    return RedirectResponse("/hr/kassy", status_code=303)
+    return _redirect_after_kassy(return_to)
 
 
 @router.post("/hr/kassy/terminals/{terminal_id}/forget")

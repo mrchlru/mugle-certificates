@@ -1568,6 +1568,7 @@ def export_unmark(
 
 def _render_settings(request: Request, db: Session, **extra):
     """Общий рендер страницы Настройки (кошельки, импорты, Sheets)."""
+    from bonus.iiko_monitor import build_settings_kassy_summary
     from bonus.login_guard import list_blocked_attempts
     from bonus.sheets_queue import queue_stats
     from bonus.sheets_sync import sheets_credentials_error
@@ -1578,6 +1579,7 @@ def _render_settings(request: Request, db: Session, **extra):
         section="settings",
         wallet_buttons_enabled=wallet_buttons_enabled(db),
         app_settings=get_app_settings(db),
+        kassy_summary=build_settings_kassy_summary(db),
         sheets_queue=queue_stats(db),
         sheets_credentials_error=sheets_credentials_error(),
         blocked_logins=list_blocked_attempts(db),
