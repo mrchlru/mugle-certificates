@@ -6,22 +6,10 @@ from sqlalchemy.orm import Session
 
 from bonus.db import get_db
 from bonus.http import guard_csrf, render, require
-from bonus.iiko_monitor import (
-    add_expected_restaurant,
-    build_dashboard,
-    forget_terminal,
-    remove_expected_restaurant,
-)
+from bonus.iiko_monitor import build_dashboard, forget_terminal
 from bonus.models import Role, User
 
 router = APIRouter()
-
-
-def _redirect_after_kassy(return_to: str) -> RedirectResponse:
-    """Возврат на «Кассы» или в «Настройки» после правки списка."""
-    if (return_to or "").strip() == "settings":
-        return RedirectResponse("/hr/settings#iiko-kassy", status_code=303)
-    return RedirectResponse("/hr/kassy", status_code=303)
 
 
 @router.get("/hr/kassy")
@@ -47,36 +35,6 @@ def kassy_data(
 ):
     """JSON для автообновления таблицы касс."""
     return JSONResponse(build_dashboard(db))
-
-
-@router.post("/hr/kassy/expected")
-def kassy_add_expected(
-    request: Request,
-    db: Session = Depends(get_db),
-    user: User = Depends(require(Role.admin, Role.hrd)),
-    name: str = Form(""),
-    csrf_token: str = Form(""),
-    return_to: str = Form(""),
-):
-    """Добавляет ресторан в список ожидаемых."""
-    guard_csrf(request, csrf_token)
-    add_expected_restaurant(db, name)
-    return _redirect_after_kassy(return_to)
-
-
-@router.post("/hr/kassy/expected/{restaurant_id}/delete")
-def kassy_remove_expected(
-    restaurant_id: int,
-    request: Request,
-    db: Session = Depends(get_db),
-    user: User = Depends(require(Role.admin, Role.hrd)),
-    csrf_token: str = Form(""),
-    return_to: str = Form(""),
-):
-    """Удаляет ресторан из ожидаемых."""
-    guard_csrf(request, csrf_token)
-    remove_expected_restaurant(db, restaurant_id)
-    return _redirect_after_kassy(return_to)
 
 
 @router.post("/hr/kassy/terminals/{terminal_id}/forget")

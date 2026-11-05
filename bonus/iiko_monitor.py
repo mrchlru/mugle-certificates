@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from bonus.config import get_settings
-from bonus.models import IikoExpectedRestaurant, IikoTerminal
+from bonus.models import IikoTerminal
 
 STALE_MINUTES = 15
 ERROR_FRESH_MINUTES = 60
@@ -76,39 +76,6 @@ def upsert_heartbeat(db: Session, payload: dict[str, Any], client_ip: str) -> No
     db.commit()
 
 
-def list_expected_restaurants(db: Session) -> list[IikoExpectedRestaurant]:
-    """Список ресторанов, где плагин обязан быть."""
-    return list(
-        db.scalars(select(IikoExpectedRestaurant).order_by(IikoExpectedRestaurant.name)).all()
-    )
-
-
-def add_expected_restaurant(db: Session, name: str) -> IikoExpectedRestaurant | None:
-    """Добавляет ожидаемый ресторан; None если имя пустое или дубликат."""
-    cleaned = (name or "").strip()[:200]
-    if not cleaned:
-        return None
-    norm = normalize_restaurant(cleaned)
-    for row in list_expected_restaurants(db):
-        if normalize_restaurant(row.name) == norm:
-            return None
-    row = IikoExpectedRestaurant(name=cleaned)
-    db.add(row)
-    db.commit()
-    db.refresh(row)
-    return row
-
-
-def remove_expected_restaurant(db: Session, restaurant_id: int) -> bool:
-    """Удаляет ожидаемый ресторан."""
-    row = db.get(IikoExpectedRestaurant, restaurant_id)
-    if row is None:
-        return False
-    db.delete(row)
-    db.commit()
-    return True
-
-
 def forget_terminal(db: Session, terminal_id: int) -> bool:
     """Удаляет запись кассы из мониторинга."""
     row = db.get(IikoTerminal, terminal_id)
@@ -149,13 +116,10 @@ def build_settings_kassy_summary(db: Session) -> dict[str, Any]:
             entry["status_reason"] = row["status_reason"]
         if row["last_seen_label"] != "—":
             entry["last_seen_label"] = row["last_seen_label"]
-    missing = [row for row in dash["rows"] if row.get("kind") == "missing"]
     connected_list = sorted(connected.values(), key=lambda item: item["name"].casefold())
     return {
         "counts": dash["counts"],
-        "expected": dash["expected"],
         "connected": connected_list,
-        "missing": missing,
         "latest_plugin_version": dash["latest_plugin_version"],
     }
 
@@ -165,41 +129,13 @@ def build_dashboard(db: Session) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     latest = get_settings().iiko_plugin_latest_version.strip() or "1.1.0"
     terminals = list(db.scalars(select(IikoTerminal).order_by(IikoTerminal.restaurant)).all())
-    expected = list_expected_restaurants(db)
-    seen_norms = {normalize_restaurant(t.restaurant) for t in terminals if t.restaurant.strip()}
     rows: list[dict[str, Any]] = []
-    counts = {"ok": 0, "warn": 0, "bad": 0, "offline": 0, "missing": 0}
+    counts = {"ok": 0, "warn": 0, "bad": 0, "offline": 0}
 
     for terminal in terminals:
         status = compute_terminal_status(terminal, now, latest)
         counts[status.key] = counts.get(status.key, 0) + 1
         rows.append(_terminal_row(terminal, status, now, latest))
-
-    for exp in expected:
-        norm = normalize_restaurant(exp.name)
-        if norm in seen_norms:
-            continue
-        counts["missing"] += 1
-        rows.append(
-            {
-                "kind": "missing",
-                "expected_id": exp.id,
-                "restaurant": exp.name,
-                "machine_name": "—",
-                "status_key": "missing",
-                "status_label": "Не подключена",
-                "status_css": "muted",
-                "status_reason": "Сигналов от касс этого ресторана не было",
-                "plugin_version": "—",
-                "version_outdated": False,
-                "last_seen_label": "—",
-                "last_seen_exact": "",
-                "pending_ops": 0,
-                "debit_code_supported": False,
-                "last_error": "",
-                "terminal_db_id": None,
-            }
-        )
 
     rows.sort(key=lambda item: (item.get("restaurant") or "", item.get("machine_name") or ""))
     return {
@@ -209,10 +145,8 @@ def build_dashboard(db: Session) -> dict[str, Any]:
             "warn": counts.get("warn", 0),
             "bad": counts.get("bad", 0),
             "offline": counts.get("offline", 0),
-            "missing": counts.get("missing", 0),
         },
         "rows": rows,
-        "expected": [{"id": e.id, "name": e.name} for e in expected],
         "latest_plugin_version": latest,
     }
 

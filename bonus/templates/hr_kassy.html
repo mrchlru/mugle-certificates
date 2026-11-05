@@ -15,8 +15,7 @@ document.addEventListener("DOMContentLoaded", function () {
             " · хорошо: " + data.counts.ok +
             " · внимание: " + data.counts.warn +
             " · проблема: " + data.counts.bad +
-            " · нет связи: " + data.counts.offline +
-            " · не подключено: " + data.counts.missing;
+            " · нет связи: " + data.counts.offline;
         }
         if (!table || !data.rows) return;
         table.innerHTML = data.rows.map(function (row) {
@@ -55,31 +54,11 @@ document.addEventListener("DOMContentLoaded", function () {
   · внимание: {{ dashboard.counts.warn }}
   · проблема: {{ dashboard.counts.bad }}
   · нет связи: {{ dashboard.counts.offline }}
-  · не подключено: {{ dashboard.counts.missing }}
 </p>
-<p class="muted">Актуальная версия плагина: {{ dashboard.latest_plugin_version }}</p>
-
-<section class="stack">
-  <h2>Ожидаемые рестораны</h2>
-  <p class="muted">Где плагин Teams Bonus должен быть установлен. Без списка статус «Не подключена» не показывается.</p>
-  <ul>
-    {% for item in dashboard.expected %}
-    <li>{{ item.name }}
-      <form method="post" action="/hr/kassy/expected/{{ item.id }}/delete" class="inline">
-        <input type="hidden" name="csrf_token" value="{{ csrf }}">
-        <button type="submit" class="text-link">удалить</button>
-      </form>
-    </li>
-    {% else %}
-    <li class="muted">Список пуст</li>
-    {% endfor %}
-  </ul>
-  <form method="post" action="/hr/kassy/expected" class="design-create">
-    <input type="hidden" name="csrf_token" value="{{ csrf }}">
-    <label>Добавить ресторан<input type="text" name="name" maxlength="200" required></label>
-    <button type="submit" class="btn">Добавить</button>
-  </form>
-</section>
+<p class="muted">
+  Ресторан и касса появляются сами, когда плагин Teams Bonus на iikoFront впервые отправит heartbeat
+  (название ресторана берётся из iiko). Актуальная версия плагина: {{ dashboard.latest_plugin_version }}.
+</p>
 
 <table class="data-table">
   <thead>
@@ -121,6 +100,8 @@ document.addEventListener("DOMContentLoaded", function () {
         {% endif %}
       </td>
     </tr>
+    {% else %}
+    <tr><td colspan="9" class="muted">Пока нет касс — установите плагин на iikoFront и перезапустите кассу.</td></tr>
     {% endfor %}
   </tbody>
 </table>

@@ -10,7 +10,7 @@ import bonus.db as database
 from bonus.app_settings import get_app_settings, update_debit_code_settings
 from bonus.catalog import ensure_default_segments, list_segments
 from bonus.config import get_settings
-from bonus.iiko_monitor import add_expected_restaurant, build_dashboard, upsert_heartbeat
+from bonus.iiko_monitor import build_dashboard, upsert_heartbeat
 from bonus.main import create_app
 from bonus.models import Base, IikoTerminal, Role, User
 from bonus.security import hash_password
@@ -88,10 +88,9 @@ def _card_code(db: Session) -> str:
     return cert.short_code
 
 
-def test_heartbeat_upsert_and_missing_restaurant(client: TestClient) -> None:
+def test_heartbeat_upsert_registers_terminal(client: TestClient) -> None:
     db = database.open_session()
     try:
-        add_expected_restaurant(db, "Ресторан Тест")
         upsert_heartbeat(
             db,
             {
@@ -107,7 +106,7 @@ def test_heartbeat_upsert_and_missing_restaurant(client: TestClient) -> None:
         )
         dash = build_dashboard(db)
         assert dash["counts"]["total"] == 1
-        assert dash["counts"]["missing"] == 0
+        assert dash["rows"][0]["restaurant"] == "Ресторан Тест"
         assert dash["rows"][0]["status_key"] == "ok"
     finally:
         db.close()
