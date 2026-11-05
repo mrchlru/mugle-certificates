@@ -12,6 +12,7 @@ from bonus.services import BonusError
 from bonus.spasibo_service import (
     card_payload_for_spasibo,
     history_payload_for_spasibo,
+    link_spasibo_to_teams_card,
     partners_payload_for_spasibo,
     redeem_bonus_for_spasibo,
     spasibo_api_key_expected,
@@ -99,6 +100,18 @@ class RedeemResponse(BaseModel):
     replayed: bool
 
 
+class LinkBody(BaseModel):
+    spasibo_user_id: str = Field(min_length=1, max_length=32)
+    teams_card: str = Field(max_length=120)
+    replace_conflicts: bool = True
+
+
+class LinkResponse(BaseModel):
+    linked: bool
+    public_number: str
+    spasibo_user_id: str
+
+
 def require_spasibo_key(
     x_spasibo_key: Annotated[str, Header(alias="X-Spasibo-Key")] = "",
 ) -> None:
@@ -161,6 +174,32 @@ def spasibo_partners(
     """Рестораны-партнёры и подписи дней недели."""
     del _
     return PartnersResponse(**partners_payload_for_spasibo())
+
+
+@router.post("/link", response_model=LinkResponse)
+def spasibo_link(
+    body: LinkBody,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_spasibo_key),
+):
+    """Привязка или отвязка ID «Спасибо» к карте Teams (из админки «Спасибо»)."""
+    del _
+    try:
+        public_number = link_spasibo_to_teams_card(
+            db,
+            spasibo_user_id=body.spasibo_user_id,
+            teams_card=body.teams_card,
+            replace_conflicts=body.replace_conflicts,
+        )
+    except BonusError as exc:
+        raise HTTPException(status_code=400, detail=exc.message) from exc
+    linked = bool(public_number)
+    cleaned = str(body.spasibo_user_id).strip()
+    return LinkResponse(
+        linked=linked,
+        public_number=public_number,
+        spasibo_user_id=cleaned,
+    )
 
 
 @router.post("/redeem", response_model=RedeemResponse)

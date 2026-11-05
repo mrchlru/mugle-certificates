@@ -12,8 +12,8 @@ from bonus.config import get_settings
 from bonus.models import Certificate, Role, Transaction, TxType, User
 from bonus.partners import partner_cities
 from bonus.present import HISTORY_PAGE_SIZE, TxView, load_card, load_history_page
-from bonus.services import BonusError, credit_certificate
-from bonus.spasibo_connect import _certificate_eligible
+from bonus.services import BonusError, credit_certificate, find_certificate
+from bonus.spasibo_connect import _certificate_eligible, _link_conflict
 from bonus.values import format_dt, format_money_plain, status_label, tx_label
 from bonus.weekdays import WEEKDAY_CHOICES
 
@@ -49,6 +49,66 @@ class SpasiboCardPayload:
     history: tuple[dict[str, Any], ...] = field(default_factory=tuple)
     history_has_more: bool = False
     history_next_before: int | None = None
+
+
+def link_spasibo_to_teams_card(
+    db: Session,
+    *,
+    spasibo_user_id: str,
+    teams_card: str,
+    replace_conflicts: bool = True,
+) -> str:
+    """
+    Привязывает users.id «Спасибо» к employee-карте Teams (MR-…, short code или token).
+
+    Пустой teams_card снимает привязку с держателя, у которого был этот ID Спасибо.
+    """
+    cleaned_id = _clean_spasibo_id(spasibo_user_id)
+    if cleaned_id is None:
+        raise BonusError("Некорректный ID Спасибо")
+    card_ref = str(teams_card or "").strip()
+    if card_ref == "":
+        holder = db.scalar(select(User).where(User.spasibo_user_id == cleaned_id))
+        if holder is not None:
+            holder.spasibo_user_id = ""
+            holder.spasibo_certificate_id = None
+            db.commit()
+        return ""
+    certificate = find_certificate(db, card_ref)
+    if certificate is None:
+        raise BonusError("Карта Teams не найдена")
+    holder = certificate.holder
+    if holder is None or holder.role != Role.employee:
+        raise BonusError("Не карта сотрудника")
+    eligible, why = _certificate_eligible(db, certificate)
+    if not eligible:
+        raise BonusError(why or "Карта не подходит для «Спасибо»")
+    if not replace_conflicts:
+        conflict = _link_conflict(db, cleaned_id, holder.id, certificate.id)
+        if conflict:
+            raise BonusError(conflict)
+    else:
+        for other in db.scalars(
+            select(User).where(
+                User.spasibo_user_id == cleaned_id,
+                User.id != holder.id,
+            )
+        ):
+            other.spasibo_user_id = ""
+            other.spasibo_certificate_id = None
+        for other in db.scalars(
+            select(User).where(
+                User.spasibo_certificate_id == certificate.id,
+                User.id != holder.id,
+            )
+        ):
+            if other.spasibo_user_id != cleaned_id:
+                other.spasibo_user_id = ""
+                other.spasibo_certificate_id = None
+    holder.spasibo_user_id = cleaned_id
+    holder.spasibo_certificate_id = certificate.id
+    db.commit()
+    return certificate.public_number or ""
 
 
 def resolve_certificate_for_spasibo(db: Session, spasibo_user_id: str) -> Certificate | None:

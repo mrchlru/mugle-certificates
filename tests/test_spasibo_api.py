@@ -76,6 +76,37 @@ def test_spasibo_card_linked(client: TestClient) -> None:
     assert data["balance_kopecks"] == 5_000
 
 
+def test_spasibo_link_by_public_number(client: TestClient) -> None:
+    db = database.open_session()
+    try:
+        _, cert = _linked_holder(db, spasibo_id="999")
+        cert.holder.spasibo_user_id = ""
+        cert.holder.spasibo_certificate_id = None
+        db.commit()
+        public_number = cert.public_number
+    finally:
+        db.close()
+    response = client.post(
+        "/api/spasibo/link",
+        json={
+            "spasibo_user_id": "42",
+            "teams_card": public_number,
+            "replace_conflicts": True,
+        },
+        headers={"X-Spasibo-Key": "test-spasibo-key"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["linked"] is True
+    assert data["public_number"] == public_number
+    card = client.get(
+        "/api/spasibo/card?user_id=42",
+        headers={"X-Spasibo-Key": "test-spasibo-key"},
+    )
+    assert card.status_code == 200
+    assert card.json()["linked"] is True
+
+
 def test_spasibo_redeem_idempotent(client: TestClient) -> None:
     headers = {
         "X-Spasibo-Key": "test-spasibo-key",

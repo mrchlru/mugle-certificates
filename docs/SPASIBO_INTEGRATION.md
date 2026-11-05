@@ -74,6 +74,7 @@
 |-------|------------|
 | `GET /api/spasibo/card?user_id=` | Баланс, short code, URL карты (read-only) |
 | `POST /api/spasibo/redeem` | Обмен спасибок → credit на связанную карту |
+| `POST /api/spasibo/link` | Привязка ID Спасибо к карте Teams (админка «Спасибо» или bulk Excel) |
 
 Аутентификация: заголовок `X-Spasibo-Key` (`SPASIBO_API_KEY`, fallback `IIKO_API_KEY`).  
 Redeem: обязателен `Idempotency-Key`. Тело: `spasibo_user_id`, `bonus_amount_rub` (рубли на карте), `comment`.
