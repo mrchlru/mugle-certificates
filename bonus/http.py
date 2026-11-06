@@ -8,7 +8,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from bonus import __version__
-from bonus.catalog import accrual_label
+from bonus.catalog import accrual_label, accrual_nominal_field_label
 from bonus.config import get_settings
 from bonus.db import get_db, open_session
 from bonus.models import Role, User
@@ -38,6 +38,7 @@ templates.env.globals["tx_label"] = tx_label
 templates.env.globals["format_short_code"] = format_short_code
 templates.env.globals["format_date"] = format_date
 templates.env.globals["accrual_label"] = accrual_label
+templates.env.globals["accrual_nominal_field_label"] = accrual_nominal_field_label
 templates.env.globals["role_label"] = role_label
 templates.env.globals["can_manage_staff"] = can_manage_staff
 templates.env.globals["can_view_audit"] = can_view_audit

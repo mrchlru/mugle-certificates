@@ -91,6 +91,29 @@
       </label>
       <button class="btn ghost" type="submit">Сохранить срок</button>
     </form>
+    {% set accrual_nominal_periods = ['daily', 'weekly', 'monthly', 'yearly'] %}
+    {% if card.parts %}
+    {% set ns = namespace(show_accrual_nominal=false) %}
+    {% for part in card.parts %}
+      {% if part.accrual_period in accrual_nominal_periods %}{% set ns.show_accrual_nominal = true %}{% endif %}
+    {% endfor %}
+    {% if ns.show_accrual_nominal %}
+    <form method="post" action="/hr/c/{{ card.id }}/accrual-nominal" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <p class="eyebrow">Лимит автоначисления</p>
+      <p class="muted design-hint">Новая сумма лимита по расписанию сегмента (ежедневно / еженедельно / ежемесячно). Текущий остаток не пополняется — только меняется лимит; с 1-го числа или по расписанию баланс выровняется. Разовые премии — блок ниже.</p>
+      {% for part in card.parts %}
+      {% if part.accrual_period in accrual_nominal_periods %}
+      <label class="field">{{ part.segment_name }} — {{ accrual_nominal_field_label(part.accrual_period) }}
+        <input name="nominal_part_{{ part.id }}" inputmode="decimal" required value="{{ (part.nominal / 100)|int if part.nominal % 100 == 0 else ('%.2f'|format(part.nominal / 100)) }}">
+      </label>
+      <p class="muted">Сейчас на карте: {{ part.balance|money }} из {{ part.nominal|money }}</p>
+      {% endif %}
+      {% endfor %}
+      <button class="btn ghost" type="submit">Сохранить лимиты</button>
+    </form>
+    {% endif %}
+    {% endif %}
     <form method="post" action="/hr/c/{{ card.id }}/credit" class="stack">
       <input type="hidden" name="csrf_token" value="{{ csrf }}">
       <p class="eyebrow">Изменить баланс</p>

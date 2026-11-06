@@ -45,6 +45,7 @@ class AuditAction(str, enum.Enum):
     certificate_block = "certificate_block"
     certificate_unblock = "certificate_unblock"
     certificate_expiry = "certificate_expiry"
+    certificate_accrual_nominal = "certificate_accrual_nominal"
     debit_undo = "debit_undo"
     import_rows = "import_rows"
     certificate_delete = "certificate_delete"

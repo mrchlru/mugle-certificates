@@ -565,6 +565,28 @@ def accrual_label(period: AccrualPeriod | str) -> str:
     return key
 
 
+ACCRUAL_NOMINAL_PERIODS: frozenset[AccrualPeriod] = frozenset(
+    {
+        AccrualPeriod.daily,
+        AccrualPeriod.weekly,
+        AccrualPeriod.monthly,
+        AccrualPeriod.yearly,
+    }
+)
+
+
+def accrual_nominal_field_label(period: AccrualPeriod | str) -> str:
+    """Подпись поля лимита начисления на карточке HR."""
+    key = period.value if isinstance(period, AccrualPeriod) else str(period)
+    labels = {
+        AccrualPeriod.daily.value: "Ежедневный лимит, ₽",
+        AccrualPeriod.weekly.value: "Еженедельный лимит, ₽",
+        AccrualPeriod.monthly.value: "Ежемесячный лимит, ₽",
+        AccrualPeriod.yearly.value: "Годовой лимит, ₽",
+    }
+    return labels.get(key, "Лимит начисления, ₽")
+
+
 def _sync_segment_defaults(
     segment: Segment,
     period: AccrualPeriod,

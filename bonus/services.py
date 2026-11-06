@@ -30,9 +30,18 @@ from bonus.parts import (
     unwrap_kind_from_segments,
 )
 from bonus.security import generate_password, hash_password
-from bonus.values import MSK, as_utc, format_date, today_msk
+from bonus.values import MSK, as_utc, format_date, format_money, today_msk
 
 UNDO_WINDOW = timedelta(minutes=15)
+
+_ACCRUAL_NOMINAL_PERIODS: frozenset[AccrualPeriod] = frozenset(
+    {
+        AccrualPeriod.daily,
+        AccrualPeriod.weekly,
+        AccrualPeriod.monthly,
+        AccrualPeriod.yearly,
+    }
+)
 
 
 class BonusError(Exception):
@@ -633,6 +642,91 @@ def credit_certificate(
     db.refresh(certificate)
     _sync_usage(db, certificate)
     return tx
+
+
+@dataclass(frozen=True)
+class AccrualNominalChange:
+    """Одна изменённая часть карты (лимит автоначисления)."""
+
+    part_id: int
+    segment_name: str
+    old_nominal: int
+    new_nominal: int
+
+
+def update_certificate_accrual_nominals(
+    db: Session,
+    certificate: Certificate,
+    actor: User,
+    part_nominals: dict[int, int],
+) -> list[AccrualNominalChange]:
+    """
+    Задаёт новые лимиты автоначисления по частям (номинал), без разового начисления на остаток.
+
+    Остаток не увеличивается — с 1-го числа (monthly) или по расписанию сегмента
+    баланс выровняется до нового лимита. Если лимит уменьшили ниже текущего остатка части,
+    остаток части обрезается до нового лимита.
+    """
+    if certificate.is_deleted:
+        raise BonusError("Сертификат удалён")
+    parts = list_parts(db, certificate.id)
+    if not parts:
+        ensure_legacy_part(db, certificate)
+        parts = list_parts(db, certificate.id)
+    if not parts:
+        raise BonusError("У карты нет частей для изменения лимита")
+
+    changes: list[AccrualNominalChange] = []
+    for part in parts:
+        if part.accrual_period not in _ACCRUAL_NOMINAL_PERIODS:
+            continue
+        if part.id not in part_nominals:
+            continue
+        new_nominal = part_nominals[part.id]
+        if new_nominal < 0:
+            raise BonusError("Лимит не может быть отрицательным")
+        old_nominal = max(0, part.nominal)
+        if new_nominal == old_nominal:
+            continue
+        part.nominal = new_nominal
+        db.flush()
+        if part.balance > new_nominal:
+            delta = new_nominal - part.balance
+            if not change_part_balance(db, part.id, delta):
+                db.rollback()
+                raise BonusError("Не удалось скорректировать остаток части")
+        sync_certificate_totals(db, certificate.id)
+        db.refresh(certificate)
+        label = (part.segment_name or "").strip()
+        _add_transaction(
+            db,
+            certificate_id=certificate.id,
+            actor_id=actor.id,
+            tx_type=TxType.migrate,
+            amount=abs(new_nominal - old_nominal),
+            balance_after=certificate.balance,
+            comment=(
+                f"Лимит начисления ({label}): "
+                f"{format_money(old_nominal)} → {format_money(new_nominal)}"
+            )[:300],
+            part_id=part.id,
+        )
+        changes.append(
+            AccrualNominalChange(
+                part_id=part.id,
+                segment_name=label,
+                old_nominal=old_nominal,
+                new_nominal=new_nominal,
+            )
+        )
+
+    if not changes:
+        raise BonusError("Нет изменений лимита или не указаны суммы")
+
+    db.commit()
+    db.refresh(certificate)
+    _sync_usage(db, certificate)
+    return changes
 
 
 def set_blocked(db: Session, certificate: Certificate, actor: User, blocked: bool) -> int:

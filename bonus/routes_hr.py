@@ -33,7 +33,13 @@ from bonus.app_settings import (
     update_debit_code_settings,
     wallet_buttons_enabled,
 )
-from bonus.audit import credit_audit_detail, debit_audit_detail, list_audit, write_audit
+from bonus.audit import (
+    accrual_nominal_audit_detail,
+    credit_audit_detail,
+    debit_audit_detail,
+    list_audit,
+    write_audit,
+)
 from bonus.db import get_db
 from bonus.http import (
     form_money,
@@ -104,12 +110,15 @@ from bonus.services import (
     set_blocked,
     set_certificate_expiry,
     set_user_active,
+    update_certificate_accrual_nominals,
     update_certificate_profile,
     update_holder_profile,
     update_staff,
 )
 from bonus.barcode_draw import barcode_png
-from bonus.values import MoneyError, format_money, format_short_code, parse_date
+from bonus.catalog import ACCRUAL_NOMINAL_PERIODS
+from bonus.parts import list_parts
+from bonus.values import MoneyError, format_money, format_short_code, parse_date, parse_money
 from bonus.weekdays import (
     ALL_DAYS,
     WEEKDAY_CHOICES,
@@ -1175,6 +1184,63 @@ def certificate_require_debit_code(
         if certificate.require_debit_code
         else "Код при списании выключен для карты",
     )
+    return RedirectResponse(f"/hr/c/{certificate_id}", status_code=303)
+
+
+@router.post("/hr/c/{certificate_id}/accrual-nominal")
+async def accrual_nominal_submit(
+    certificate_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
+    csrf_token: str = Form(""),
+):
+    """Задаёт лимиты автоначисления (номинал частей) без разового начисления на остаток."""
+    certificate = _certificate_or_redirect(db, request, certificate_id)
+    if certificate is None:
+        return RedirectResponse("/hr", status_code=303)
+    try:
+        guard_csrf(request, csrf_token)
+        form = await request.form()
+        parts = list_parts(db, certificate.id)
+        updates: dict[int, int] = {}
+        for part in parts:
+            if part.accrual_period not in ACCRUAL_NOMINAL_PERIODS:
+                continue
+            key = f"nominal_part_{part.id}"
+            raw = form.get(key)
+            if raw is None or not str(raw).strip():
+                label = (part.segment_name or "часть").strip()
+                raise BonusError(f"Укажите лимит для «{label}»")
+            try:
+                value = parse_money(raw, blank_as_none=False)
+            except MoneyError as exc:
+                raise BonusError(exc.message) from exc
+            if value is None or value < 0:
+                raise BonusError("Лимит должен быть неотрицательным числом")
+            updates[part.id] = value
+        changes = update_certificate_accrual_nominals(
+            db, certificate, user, updates
+        )
+        detail = "; ".join(
+            accrual_nominal_audit_detail(c.segment_name, c.old_nominal, c.new_nominal)
+            for c in changes
+        )
+        write_audit(
+            db,
+            actor=user,
+            action=AuditAction.certificate_accrual_nominal,
+            summary=f"Лимит начисления · {certificate.public_number}",
+            target_type="certificate",
+            target_id=certificate.id,
+            detail=detail,
+        )
+        db.refresh(certificate)
+        push_certificate_to_sheets(db, certificate)
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+    else:
+        flash(request, "Лимиты автоначисления сохранены")
     return RedirectResponse(f"/hr/c/{certificate_id}", status_code=303)
 
 

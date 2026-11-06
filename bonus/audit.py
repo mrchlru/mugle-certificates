@@ -36,6 +36,7 @@ _ACTION_LABELS: dict[str, str] = {
     AuditAction.certificate_block.value: "Блокировка карты",
     AuditAction.certificate_unblock.value: "Разблокировка карты",
     AuditAction.certificate_expiry.value: "Срок действия карты",
+    AuditAction.certificate_accrual_nominal.value: "Лимит автоначисления",
     AuditAction.debit_undo.value: "Отмена списания",
     AuditAction.import_rows.value: "Импорт карт",
     AuditAction.certificate_delete.value: "Удаление карты",
@@ -105,6 +106,14 @@ def credit_audit_detail(amount: int, comment: str) -> str:
     if cleaned:
         parts.append(cleaned)
     return " · ".join(parts)
+
+
+def accrual_nominal_audit_detail(segment_name: str, old_kopecks: int, new_kopecks: int) -> str:
+    """Описание смены лимита начисления для журнала."""
+    label = segment_name.strip() or "Часть карты"
+    return (
+        f"{label}: {format_money(old_kopecks)} → {format_money(new_kopecks)}"
+    )
 
 
 def debit_audit_detail(amount: int, comment: str) -> str:
