@@ -62,31 +62,31 @@ def fresh_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 def test_summary_rows_match_full_implementation() -> None:
     db = _db()
     _seed(db, cards=60)
-    segment_id = _first_segment_id(db)
-    # Покрываем sort × status × сегмент × запрос × offset, без полного декартова
+    combo_template_id = _combo_template_id(db)
+    # Покрываем sort × status × шаблон × запрос × offset, без полного декартова
     # произведения (старый full CardView слишком тяжёлый на тысячах прогонов).
     cases = [
         ("name", "all", None, "", 0, 30),
         ("name", "all", None, "иван", 0, 30),
         ("name", "all", None, "ИВАН", 0, 30),
-        ("name", "active", segment_id, "", 0, 30),
+        ("name", "active", combo_template_id, "", 0, 30),
         ("name", "expired", None, "", 0, 15),
         ("name", "blocked", None, "", 0, 15),
         ("balance", "all", None, "", 0, 30),
         ("balance", "all", None, "7999", 0, 10),
         ("expires", "all", None, "", 0, 30),
         ("expires", "active", None, "MR-", 10, 15),
-        ("name", "all", None, "Ланч", 0, 30),
+        ("name", "all", None, "Комбо", 0, 30),
         ("name", "all", None, "", 10, 15),
         ("name", "all", None, "", 0, 5),
     ]
-    for sort, status, seg, query, offset, limit in cases:
-        sid = seg if seg and seg > 0 else None
+    for sort, status, tmpl, query, offset, limit in cases:
+        tid = tmpl if tmpl and tmpl > 0 else None
         old = search_certificates_full(
-            db, query, sid, sort=sort, status=status, offset=offset, limit=limit
+            db, query, tid, sort=sort, status=status, offset=offset, limit=limit
         )
         new = search_certificate_rows(
-            db, query, sid, sort=sort, status=status, offset=offset, limit=limit
+            db, query, tid, sort=sort, status=status, offset=offset, limit=limit
         )
         assert new.total == old.total, (sort, status, query, offset)
         assert [card.id for card in new.cards] == [card.id for card in old.cards]
@@ -151,12 +151,14 @@ def _db():
     return database.SessionLocal()
 
 
-def _first_segment_id(db) -> int:
-    from bonus.catalog import list_segments
+def _combo_template_id(db) -> int:
+    """ID шаблона «Комбо карта» из _seed (combo_template_id)."""
+    from bonus.catalog import list_templates
 
-    items = list_segments(db)
-    assert items
-    return items[0].id
+    for item in list_templates(db, active_only=False):
+        if item.name == "Комбо карта":
+            return item.id
+    raise AssertionError("template Комбо карта not found")
 
 
 def _person(db, login: str, role: Role) -> User:

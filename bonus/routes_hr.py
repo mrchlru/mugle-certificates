@@ -80,6 +80,7 @@ from bonus.present import (
     load_card,
     normalize_sort,
     normalize_status_filter,
+    parse_summary_template_filter,
     preview_birthday_card,
     search_certificate_rows,
     sort_choices,
@@ -136,18 +137,18 @@ def dashboard(
     db: Session = Depends(get_db),
     user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
     q: str = "",
-    segment: int = 0,
+    template: int = 0,
     sort: str = "name",
     status: str = "all",
 ):
-    """Сводка и поиск сертификатов с фильтром по сегменту, статусу и сортировкой."""
-    segment_id = segment if segment > 0 else None
+    """Сводка и поиск сертификатов с фильтром по шаблону, статусу и сортировкой."""
+    template_id = parse_summary_template_filter(template)
     sort_key = normalize_sort(sort)
     status_key = normalize_status_filter(status)
     page = search_certificate_rows(
         db,
         q,
-        segment_id,
+        template_id,
         sort=sort_key,
         status=status_key,
         offset=0,
@@ -157,18 +158,18 @@ def dashboard(
         request,
         "hr.html",
         section="home",
-        stats=dashboard_stats(db, segment_id),
+        stats=dashboard_stats(db, template_id),
         cards=page.cards,
         cards_total=page.total,
         cards_offset=page.next_offset,
         cards_has_more=page.has_more,
         query=q,
-        segment_id=segment_id or 0,
+        template_id=template_id or 0,
         sort=sort_key,
         sort_options=sort_choices(),
         status=status_key,
         status_options=status_choices(),
-        segments=list_segments(db),
+        templates=list_templates(db),
         card_base=public_base(request),
     )
 
@@ -179,17 +180,17 @@ def dashboard_cards_more(
     db: Session = Depends(get_db),
     user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
     q: str = "",
-    segment: int = 0,
+    template: int = 0,
     sort: str = "name",
     status: str = "all",
     offset: int = 0,
 ):
     """Фрагмент строк таблицы сводки для бесконечной подгрузки."""
-    segment_id = segment if segment > 0 else None
+    template_id = parse_summary_template_filter(template)
     page = search_certificate_rows(
         db,
         q,
-        segment_id,
+        template_id,
         sort=normalize_sort(sort),
         status=normalize_status_filter(status),
         offset=max(0, offset),

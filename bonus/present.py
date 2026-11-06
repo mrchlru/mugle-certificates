@@ -387,13 +387,18 @@ def normalize_status_filter(raw: str) -> str:
     return cleaned if cleaned in allowed else "all"
 
 
+def parse_summary_template_filter(raw: int) -> int | None:
+    """ID шаблона из query-сводки: 0 — все шаблоны, иначе фильтр по ``Certificate.template_id``."""
+    return None if int(raw) <= 0 else int(raw)
+
+
 SUMMARY_PAGE_SIZE = 30
 
 
 def search_certificate_rows(
     db: Session,
     query: str,
-    segment_id: int | None = None,
+    template_id: int | None = None,
     *,
     sort: str = "name",
     status: str = "all",
@@ -408,7 +413,7 @@ def search_certificate_rows(
     start = max(0, int(offset))
     page_size = max(1, min(int(limit), 100))
 
-    filters = _summary_filters(segment_id, status_key, today)
+    filters = _summary_filters(template_id, status_key, today)
     search_clause = _summary_search_clause(db, query)
     if search_clause is not None:
         filters.append(search_clause)
@@ -481,7 +486,7 @@ def search_certificate_rows(
 def search_certificates(
     db: Session,
     query: str,
-    segment_id: int | None = None,
+    template_id: int | None = None,
     *,
     sort: str = "name",
     status: str = "all",
@@ -492,7 +497,7 @@ def search_certificates(
     return search_certificate_rows(
         db,
         query,
-        segment_id,
+        template_id,
         sort=sort,
         status=status,
         offset=offset,
@@ -512,14 +517,14 @@ def _ci(db: Session, column: ColumnElement) -> ColumnElement:
 
 
 def _summary_filters(
-    segment_id: int | None,
+    template_id: int | None,
     status_key: str,
     today: date,
 ) -> list:
     """Общие WHERE для списка и count сводки."""
     filters: list = [Certificate.is_deleted.is_(False)]
-    if segment_id is not None and segment_id > 0:
-        filters.append(Certificate.segment_id == segment_id)
+    if template_id is not None and template_id > 0:
+        filters.append(Certificate.template_id == template_id)
     if status_key == "blocked":
         filters.append(Certificate.status == CertificateStatus.blocked)
     elif status_key == "expired":
@@ -551,6 +556,7 @@ def _summary_search_clause(db: Session, query: str):
         Certificate.short_code,
         Certificate.note,
         Segment.name,
+        CardTemplate.name,
     )
     return or_(
         *(
@@ -575,7 +581,7 @@ def _summary_balance_expr():
 
 
 def _summary_segment_label():
-    """Подпись: имя шаблона, иначе сегмент (как в _card_view)."""
+    """Подпись строки: имя шаблона, иначе сегмент (как в _card_view)."""
     return func.coalesce(
         func.nullif(func.trim(CardTemplate.name), ""),
         Segment.name,
@@ -599,13 +605,13 @@ def _summary_order_by(db: Session, sort_key: str, balance_expr) -> list:
     return [name_ci, Certificate.public_number, Certificate.id]
 
 
-def dashboard_stats(db: Session, segment_id: int | None = None) -> DashboardStats:
-    """Активные, сумма на балансах и списания за сегодня — с учётом сегмента."""
+def dashboard_stats(db: Session, template_id: int | None = None) -> DashboardStats:
+    """Активные, сумма на балансах и списания за сегодня — с учётом шаблона карты."""
     apply_due_expiries(db)
     active = Certificate.status == CertificateStatus.active
     cert_filters = [active]
-    if segment_id is not None and segment_id > 0:
-        cert_filters.append(Certificate.segment_id == segment_id)
+    if template_id is not None and template_id > 0:
+        cert_filters.append(Certificate.template_id == template_id)
     active_count = int(
         db.scalar(select(func.count()).select_from(Certificate).where(*cert_filters)) or 0
     )
@@ -623,10 +629,10 @@ def dashboard_stats(db: Session, segment_id: int | None = None) -> DashboardStat
         Transaction.id.not_in(reversed_ids),
     ]
     spent_query = select(func.coalesce(func.sum(Transaction.amount), 0))
-    if segment_id is not None and segment_id > 0:
+    if template_id is not None and template_id > 0:
         spent_query = spent_query.join(
             Certificate, Transaction.certificate_id == Certificate.id
-        ).where(*spent_filters, Certificate.segment_id == segment_id)
+        ).where(*spent_filters, Certificate.template_id == template_id)
     else:
         spent_query = spent_query.where(*spent_filters)
     spent_today = int(db.scalar(spent_query) or 0)

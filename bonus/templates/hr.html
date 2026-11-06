@@ -3,7 +3,7 @@
 {% block content %}
 <section class="stats">
   <article>
-    <p class="eyebrow">Активные{% if segment_id %} · сегмент{% endif %}</p>
+    <p class="eyebrow">Активные{% if template_id %} · шаблон{% endif %}</p>
     <p class="stat">{{ stats.active_count }}</p>
   </article>
   <article>
@@ -17,10 +17,10 @@
 </section>
 <form class="search filters" method="get" action="/hr">
   <input name="q" value="{{ query }}" placeholder="Имя, отдел, должность, телефон или номер">
-  <select name="segment">
-    <option value="0">Все сегменты</option>
-    {% for item in segments %}
-    <option value="{{ item.id }}" {% if segment_id == item.id %}selected{% endif %}>{{ item.name }}</option>
+  <select name="template">
+    <option value="0">Все шаблоны</option>
+    {% for item in templates %}
+    <option value="{{ item.id }}" {% if template_id == item.id %}selected{% endif %}>{{ item.name }}</option>
     {% endfor %}
   </select>
   <select name="status" aria-label="Статус">
@@ -35,11 +35,11 @@
   </select>
   <button class="btn" type="submit">Найти</button>
 </form>
-{% if segments %}
-<nav class="segment-chips">
-  <a href="/hr?q={{ query }}&sort={{ sort }}&status={{ status }}" class="{% if not segment_id %}is-on{% endif %}">Все</a>
-  {% for item in segments %}
-  <a href="/hr?q={{ query }}&segment={{ item.id }}&sort={{ sort }}&status={{ status }}" class="{% if segment_id == item.id %}is-on{% endif %}">{{ item.name }}</a>
+{% if templates %}
+<nav class="segment-chips template-chips">
+  <a href="/hr?q={{ query }}&sort={{ sort }}&status={{ status }}" class="{% if not template_id %}is-on{% endif %}">Все</a>
+  {% for item in templates %}
+  <a href="/hr?q={{ query }}&template={{ item.id }}&sort={{ sort }}&status={{ status }}" class="{% if template_id == item.id %}is-on{% endif %}">{{ item.name }}</a>
   {% endfor %}
 </nav>
 {% endif %}
@@ -51,7 +51,7 @@
       <tr>
         <th>Сертификат</th>
         <th>Сотрудник</th>
-        <th>Сегмент</th>
+        <th>Шаблон / витрина</th>
         <th>Остаток</th>
         <th>Срок</th>
         <th>Статус</th>
@@ -63,7 +63,7 @@
            data-has-more="{{ '1' if cards_has_more else '0' }}"
            data-total="{{ cards_total }}"
            data-q="{{ query }}"
-           data-segment="{{ segment_id }}"
+           data-template="{{ template_id }}"
            data-sort="{{ sort }}"
            data-status="{{ status }}">
       {% include "_hr_card_rows.html" %}
@@ -83,7 +83,7 @@
 (function () {
   var form = document.querySelector("form.filters");
   if (form) {
-    ["sort", "segment", "status"].forEach(function (name) {
+    ["sort", "template", "status"].forEach(function (name) {
       var el = form.querySelector('select[name="' + name + '"]');
       if (el) el.addEventListener("change", function () { form.submit(); });
     });
@@ -112,7 +112,7 @@
     sentinel.hidden = false;
     var params = new URLSearchParams({
       q: body.getAttribute("data-q") || "",
-      segment: body.getAttribute("data-segment") || "0",
+      template: body.getAttribute("data-template") || "0",
       sort: body.getAttribute("data-sort") || "name",
       status: body.getAttribute("data-status") || "all",
       offset: body.getAttribute("data-offset") || "0"
