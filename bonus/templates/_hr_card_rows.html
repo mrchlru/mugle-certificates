@@ -1,5 +1,11 @@
 {% for card in cards %}
 <tr>
+  <td class="summary-pick-cell">
+    <label class="summary-pick-label">
+      <input type="checkbox" class="summary-pick" value="{{ card.id }}" data-public="{{ card.public_number }}">
+      <span class="visually-hidden">Выбрать {{ card.public_number }}</span>
+    </label>
+  </td>
   <td>
     <span class="cert-ref">
       <a href="/hr/c/{{ card.id }}">{{ card.public_number }}</a>

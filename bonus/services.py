@@ -587,6 +587,7 @@ def credit_certificate(
     *,
     grow_nominal: bool = True,
     part_id: int | None = None,
+    commit: bool = True,
 ) -> Transaction:
     """Добавляет бонусы к остатку (к выбранной части или к первой).
 
@@ -640,10 +641,15 @@ def credit_certificate(
         comment=text[:300],
         part_id=None if target is None else target.id,
     )
-    db.commit()
-    db.refresh(tx)
-    db.refresh(certificate)
-    _sync_usage(db, certificate)
+    if commit:
+        db.commit()
+        db.refresh(tx)
+        db.refresh(certificate)
+        _sync_usage(db, certificate)
+    else:
+        db.flush()
+        db.refresh(certificate)
+        db.refresh(tx)
     return tx
 
 
@@ -662,6 +668,8 @@ def update_certificate_accrual_nominals(
     certificate: Certificate,
     actor: User,
     part_nominals: dict[int, int],
+    *,
+    commit: bool = True,
 ) -> list[AccrualNominalChange]:
     """
     Задаёт новые лимиты автоначисления по частям (номинал), без разового начисления на остаток.
@@ -726,10 +734,259 @@ def update_certificate_accrual_nominals(
     if not changes:
         raise BonusError("Нет изменений лимита или не указаны суммы")
 
-    db.commit()
-    db.refresh(certificate)
-    _sync_usage(db, certificate)
+    if commit:
+        db.commit()
+        db.refresh(certificate)
+        _sync_usage(db, certificate)
+    else:
+        db.flush()
+        db.refresh(certificate)
     return changes
+
+
+@dataclass(frozen=True)
+class BatchHrAdjustmentItem:
+    """Результат обработки одной карты в пакетной операции HR."""
+
+    certificate_id: int
+    public_number: str
+    ok: bool
+    message: str
+
+
+@dataclass(frozen=True)
+class BatchHrAdjustmentResult:
+    """Итог пакета: кто прошёл, кто пропущен с причиной."""
+
+    items: tuple[BatchHrAdjustmentItem, ...]
+    limits_applied: int
+    credits_applied: int
+    certificate_ids_updated: tuple[int, ...]
+
+
+def apply_batch_hr_adjustments(
+    db: Session,
+    actor: User,
+    certificate_ids: list[int],
+    *,
+    limit_daily: int | None = None,
+    limit_weekly: int | None = None,
+    limit_monthly: int | None = None,
+    limit_yearly: int | None = None,
+    credit_amount: int | None = None,
+    credit_period: AccrualPeriod | None = None,
+    comment: str = "",
+) -> BatchHrAdjustmentResult:
+    """Пакетно меняет лимиты автоначисления по периоду и/или начисляет сумму на часть с тем же периодом.
+
+    Для каждой карты выполняются все запрошенные операции или карта пропускается с причиной
+    (нет ровно одной части с нужным периодом, карта неактивна и т.д.). Одна общая транзакция БД;
+    отдельные карты не ломают успех по остальным.
+    """
+    if not certificate_ids:
+        raise BonusError("Не выбрано ни одной карты")
+
+    wants_limits = any(
+        x is not None for x in (limit_daily, limit_weekly, limit_monthly, limit_yearly)
+    )
+    credit_kopecks = 0
+    if credit_amount is not None:
+        if credit_amount <= 0:
+            raise BonusError("Сумма начисления должна быть больше нуля")
+        credit_kopecks = credit_amount
+    wants_credit = credit_kopecks > 0
+    if not wants_limits and not wants_credit:
+        raise BonusError("Укажите хотя бы новый лимит или сумму начисления")
+
+    period_limits: dict[AccrualPeriod, int] = {}
+    if limit_daily is not None:
+        period_limits[AccrualPeriod.daily] = limit_daily
+    if limit_weekly is not None:
+        period_limits[AccrualPeriod.weekly] = limit_weekly
+    if limit_monthly is not None:
+        period_limits[AccrualPeriod.monthly] = limit_monthly
+    if limit_yearly is not None:
+        period_limits[AccrualPeriod.yearly] = limit_yearly
+    for _period, cents in period_limits.items():
+        if cents < 0:
+            raise BonusError("Лимит не может быть отрицательным")
+
+    if wants_credit and credit_period is None:
+        raise BonusError("Выберите период части для начисления")
+
+    credit_text = (comment or "").strip() or "Пакетное начисление (сводка HR)"
+
+    seen: set[int] = set()
+    unique_ids: list[int] = []
+    for cid in certificate_ids:
+        if cid in seen:
+            continue
+        seen.add(cid)
+        unique_ids.append(cid)
+
+    items: list[BatchHrAdjustmentItem] = []
+    limits_count = 0
+    credits_count = 0
+    updated_ids: list[int] = []
+
+    try:
+        for certificate_id in unique_ids:
+            certificate = db.get(Certificate, certificate_id)
+            if certificate is None or certificate.is_deleted:
+                items.append(
+                    BatchHrAdjustmentItem(
+                        certificate_id,
+                        "",
+                        ok=False,
+                        message="карта не найдена",
+                    )
+                )
+                continue
+            public_number = (certificate.public_number or "").strip()
+            if certificate.status != CertificateStatus.active:
+                items.append(
+                    BatchHrAdjustmentItem(
+                        certificate_id,
+                        public_number,
+                        ok=False,
+                        message="карта не активна (заблокирована)",
+                    )
+                )
+                continue
+            if certificate.expires_on is not None and certificate.expires_on < today_msk():
+                items.append(
+                    BatchHrAdjustmentItem(
+                        certificate_id,
+                        public_number,
+                        ok=False,
+                        message="истёк срок карты",
+                    )
+                )
+                continue
+
+            parts = list_parts(db, certificate.id)
+            if not parts:
+                ensure_legacy_part(db, certificate)
+                parts = list_parts(db, certificate.id)
+
+            period_counts: dict[AccrualPeriod, int] = {}
+            for part in parts:
+                ap = part.accrual_period
+                period_counts[ap] = period_counts.get(ap, 0) + 1
+            part_by_period: dict[AccrualPeriod, CertificatePart] = {}
+            for part in parts:
+                ap = part.accrual_period
+                if period_counts.get(ap, 0) == 1:
+                    part_by_period[ap] = part
+
+            skip_msg: str | None = None
+            part_nominals: dict[int, int] = {}
+
+            if wants_limits:
+                for period, new_nominal in period_limits.items():
+                    if period_counts.get(period, 0) > 1:
+                        skip_msg = (
+                            f"несколько частей с периодом «{period.value}» — откройте карту"
+                        )
+                        break
+                    part = part_by_period.get(period)
+                    if part is None or part.accrual_period not in _ACCRUAL_NOMINAL_PERIODS:
+                        skip_msg = f"нет части с периодом «{period.value}» для лимита"
+                        break
+                    part_nominals[part.id] = new_nominal
+
+            credit_part_id: int | None = None
+            if skip_msg is None and wants_credit and credit_period is not None:
+                if period_counts.get(credit_period, 0) > 1:
+                    skip_msg = (
+                        f"несколько частей с периодом «{credit_period.value}» — откройте карту"
+                    )
+                else:
+                    cpart = part_by_period.get(credit_period)
+                    if cpart is None:
+                        skip_msg = (
+                            f"нет части с периодом «{credit_period.value}» для начисления"
+                        )
+                    else:
+                        credit_part_id = cpart.id
+
+            if skip_msg is not None:
+                items.append(
+                    BatchHrAdjustmentItem(
+                        certificate_id,
+                        public_number,
+                        ok=False,
+                        message=skip_msg,
+                    )
+                )
+                continue
+
+            card_messages: list[str] = []
+
+            try:
+                if part_nominals:
+                    changes = update_certificate_accrual_nominals(
+                        db,
+                        certificate,
+                        actor,
+                        part_nominals,
+                        commit=False,
+                    )
+                    limits_count += len(changes)
+                if wants_credit and credit_part_id is not None:
+                    credit_certificate(
+                        db,
+                        certificate,
+                        actor,
+                        credit_kopecks,
+                        credit_text,
+                        grow_nominal=False,
+                        part_id=credit_part_id,
+                        commit=False,
+                    )
+                    credits_count += 1
+            except BonusError as exc:
+                items.append(
+                    BatchHrAdjustmentItem(
+                        certificate_id,
+                        public_number,
+                        ok=False,
+                        message=exc.message,
+                    )
+                )
+                continue
+
+            updated_ids.append(certificate_id)
+            detail_parts: list[str] = []
+            if part_nominals:
+                detail_parts.append("лимиты")
+            if wants_credit:
+                detail_parts.append("начисление")
+            items.append(
+                BatchHrAdjustmentItem(
+                    certificate_id,
+                    public_number,
+                    ok=True,
+                    message=", ".join(detail_parts) if detail_parts else "готово",
+                )
+            )
+
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    for cid in updated_ids:
+        certificate = db.get(Certificate, cid)
+        if certificate is not None:
+            _sync_usage(db, certificate)
+
+    return BatchHrAdjustmentResult(
+        items=tuple(items),
+        limits_applied=limits_count,
+        credits_applied=credits_count,
+        certificate_ids_updated=tuple(updated_ids),
+    )
 
 
 def set_blocked(db: Session, certificate: Certificate, actor: User, blocked: bool) -> int:

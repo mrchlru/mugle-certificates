@@ -30,6 +30,7 @@ from bonus.accrual import apply_monthly_accruals
 from bonus.services import (
     BonusError,
     IssueDraft,
+    apply_batch_hr_adjustments,
     apply_expiry_writeoff,
     create_staff,
     credit_certificate,
@@ -517,6 +518,46 @@ def test_credit_with_grow_nominal_false_keeps_accrual_cap() -> None:
     )
     assert issued.certificate.balance == 1_250_000
     assert issued.certificate.nominal == 1_000_000
+
+
+def test_batch_hr_adjustments_sets_limit_and_credits_without_growing_cap() -> None:
+    """Пакетная операция: новый ежемесячный лимит + начисление на ту же часть."""
+    db = _db()
+    hr = _person(db, "hr-batch", Role.hr)
+    segment = create_segment(db, "Месячный пакет (тест)", AccrualPeriod.monthly)
+    draft = IssueDraft(
+        full_name="Иван Петров",
+        login="",
+        password="",
+        nominal=4_000_00,
+        balance=None,
+        note="",
+        expires_on=None,
+        segment_id=segment.id,
+    )
+    first = issue_certificate(db, draft, hr, sync_external=False).certificate
+    second = issue_certificate(db, draft, hr, sync_external=False).certificate
+
+    result = apply_batch_hr_adjustments(
+        db,
+        hr,
+        [first.id, second.id],
+        limit_monthly=6_000_00,
+        credit_amount=2_000_00,
+        credit_period=AccrualPeriod.monthly,
+        comment="пакетный тест",
+    )
+    assert len(result.items) == 2
+    assert all(item.ok for item in result.items)
+    assert result.limits_applied == 2
+    assert result.credits_applied == 2
+
+    db.refresh(first)
+    db.refresh(second)
+    assert first.balance == 6_000_00
+    assert second.balance == 6_000_00
+    assert first.nominal == 6_000_00
+    assert second.nominal == 6_000_00
 
 
 def test_unavailable_reason_covers_deleted_blocked_expired() -> None:

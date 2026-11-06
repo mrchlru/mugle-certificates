@@ -37,6 +37,7 @@ _ACTION_LABELS: dict[str, str] = {
     AuditAction.certificate_unblock.value: "Разблокировка карты",
     AuditAction.certificate_expiry.value: "Срок действия карты",
     AuditAction.certificate_accrual_nominal.value: "Лимит автоначисления",
+    AuditAction.batch_hr_adjustments.value: "Пакетно: лимиты и начисления",
     AuditAction.debit_undo.value: "Отмена списания",
     AuditAction.import_rows.value: "Импорт карт",
     AuditAction.certificate_delete.value: "Удаление карты",

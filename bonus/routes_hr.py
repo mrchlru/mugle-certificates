@@ -98,6 +98,7 @@ from bonus.security import flash
 from bonus.services import (
     BonusError,
     IssueDraft,
+    apply_batch_hr_adjustments,
     create_staff,
     credit_certificate,
     debit_certificate,
@@ -117,7 +118,7 @@ from bonus.services import (
     update_staff,
 )
 from bonus.barcode_draw import barcode_png
-from bonus.catalog import ACCRUAL_NOMINAL_PERIODS
+from bonus.catalog import ACCRUAL_NOMINAL_PERIODS, parse_accrual_period
 from bonus.parts import list_parts
 from bonus.values import MoneyError, format_money, format_short_code, parse_date, parse_money
 from bonus.weekdays import (
@@ -209,6 +210,118 @@ def dashboard_cards_more(
     response.headers["X-Next-Offset"] = str(page.next_offset)
     response.headers["X-Total"] = str(page.total)
     return response
+
+
+def _parse_certificate_id_list(raw: str) -> list[int]:
+    """Список ID карт из поля формы (через запятую, пробел или перенос строки)."""
+    result: list[int] = []
+    for chunk in (raw or "").replace(",", " ").split():
+        piece = chunk.strip()
+        if not piece:
+            continue
+        try:
+            result.append(int(piece))
+        except ValueError:
+            continue
+    return result
+
+
+def _credit_period_from_form(raw: str) -> AccrualPeriod | None:
+    """Период части для пакетного начисления: только daily / weekly / monthly."""
+    cleaned = (raw or "").strip()
+    if not cleaned:
+        return None
+    period = parse_accrual_period(cleaned)
+    if period not in (
+        AccrualPeriod.daily,
+        AccrualPeriod.weekly,
+        AccrualPeriod.monthly,
+    ):
+        raise BonusError(
+            "Для начисления укажите период части: ежедневно, еженедельно или ежемесячно"
+        )
+    return period
+
+
+@router.post("/hr/batch-adjust")
+def dashboard_batch_adjust(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
+    certificate_ids: str = Form(""),
+    limit_daily: str = Form(""),
+    limit_weekly: str = Form(""),
+    limit_monthly: str = Form(""),
+    limit_yearly: str = Form(""),
+    credit_amount: str = Form(""),
+    credit_period: str = Form(""),
+    comment: str = Form(""),
+    csrf_token: str = Form(""),
+):
+    """Пакетно меняет лимиты автоначисления и/или начисляет сумму на выбранные карты (сводка HR)."""
+    try:
+        guard_csrf(request, csrf_token)
+        ids = _parse_certificate_id_list(certificate_ids)
+        ld = optional_money(limit_daily)
+        lw = optional_money(limit_weekly)
+        lm = optional_money(limit_monthly)
+        ly = optional_money(limit_yearly)
+        credit_k = optional_money(credit_amount)
+        period_for_credit = _credit_period_from_form(credit_period)
+
+        result = apply_batch_hr_adjustments(
+            db,
+            user,
+            ids,
+            limit_daily=ld,
+            limit_weekly=lw,
+            limit_monthly=lm,
+            limit_yearly=ly,
+            credit_amount=credit_k,
+            credit_period=period_for_credit,
+            comment=comment,
+        )
+        db.commit()
+        ok_n = sum(1 for item in result.items if item.ok)
+        fail_items = [item for item in result.items if not item.ok]
+        detail_parts = [
+            f"карт выбрано: {len(ids)}",
+            f"успешно: {ok_n}",
+            f"пропущено: {len(fail_items)}",
+            f"лимитов применено (изменений): {result.limits_applied}",
+            f"начислений: {result.credits_applied}",
+        ]
+        if fail_items:
+            preview = "; ".join(
+                f"{item.public_number or item.certificate_id}: {item.message}"
+                for item in fail_items[:12]
+            )
+            detail_parts.append(f"пропуски: {preview}")
+        write_audit(
+            db,
+            actor=user,
+            action=AuditAction.batch_hr_adjustments,
+            summary="Пакет: лимиты и/или начисления (сводка)",
+            target_type="batch",
+            target_id=None,
+            detail=" · ".join(detail_parts),
+        )
+        flash(
+            request,
+            f"Готово: {ok_n} из {len(result.items)} карт. "
+            f"Лимитов: {result.limits_applied}, начислений: {result.credits_applied}.",
+            "ok",
+        )
+        if fail_items:
+            flash(
+                request,
+                f"Пропущено {len(fail_items)} карт (нет однозначной части по периоду, "
+                "неактивны и т.п.) — см. журнал аудита.",
+                "bad",
+            )
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+    return RedirectResponse("/hr", status_code=303)
 
 
 @router.get("/hr/dashboard")

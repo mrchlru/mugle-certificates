@@ -45,10 +45,20 @@
 {% endif %}
 {% if cards %}
 <p class="muted summary-count" id="summary-count">Показано {{ cards|length }} из {{ cards_total }}</p>
+<div class="summary-batch-bar">
+  <button type="button" class="btn soft" id="summary-batch-open" disabled>Действие для выбранных…</button>
+  <p class="muted" id="summary-batch-hint">Отметьте строки в таблице.</p>
+</div>
 <div class="table-wrap">
   <table>
     <thead>
       <tr>
+        <th class="summary-pick-cell" scope="col">
+          <label class="summary-pick-label">
+            <input type="checkbox" id="summary-pick-all" title="Выбрать все на экране">
+            <span class="visually-hidden">Выбрать все на экране</span>
+          </label>
+        </th>
         <th>Сертификат</th>
         <th>Сотрудник</th>
         <th>Шаблон / витрина</th>
@@ -70,6 +80,51 @@
     </tbody>
   </table>
 </div>
+<dialog id="summary-batch-dialog" class="hr-batch-dialog">
+  <div class="hr-batch-dialog-inner">
+    <h2>Нескольким картам</h2>
+    <p class="muted design-hint">Лимиты — только для карт с ровно одной частью на период (ежедн./еженед./ежемес.). Начисление — на часть с выбранным периодом. Комбо с двумя «месячными» пропускаются.</p>
+    <form method="post" action="/hr/batch-adjust" id="hr-batch-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <input type="hidden" name="certificate_ids" id="hr-batch-ids" value="">
+      <div class="hr-batch-grid cols-2">
+        <label class="field">Ежедневный лимит, ₽
+          <input name="limit_daily" inputmode="decimal" placeholder="пусто — не менять">
+        </label>
+        <label class="field">Еженедельный лимит, ₽
+          <input name="limit_weekly" inputmode="decimal" placeholder="пусто — не менять">
+        </label>
+        <label class="field">Ежемесячный лимит, ₽
+          <input name="limit_monthly" inputmode="decimal" placeholder="пусто — не менять">
+        </label>
+        <label class="field">Годовой лимит, ₽
+          <input name="limit_yearly" inputmode="decimal" placeholder="пусто — не менять">
+        </label>
+      </div>
+      <p class="eyebrow" style="margin: 14px 0 6px;">Разовое начисление</p>
+      <div class="hr-batch-grid cols-2">
+        <label class="field">Сумма, ₽
+          <input name="credit_amount" inputmode="decimal" placeholder="пусто — только лимиты">
+        </label>
+        <label class="field">Период части для начисления
+          <select name="credit_period">
+            <option value="">— не начислять —</option>
+            <option value="daily">Ежедневно (часть daily)</option>
+            <option value="weekly">Еженедельно (часть weekly)</option>
+            <option value="monthly">Ежемесячно (часть monthly)</option>
+          </select>
+        </label>
+      </div>
+      <label class="field">Комментарий в истории
+        <input name="comment" maxlength="300" placeholder="Премия, корректировка лимитов">
+      </label>
+      <div class="hr-batch-foot">
+        <button type="button" class="btn ghost" id="summary-batch-cancel">Отмена</button>
+        <button type="submit" class="btn">Применить</button>
+      </div>
+    </form>
+  </div>
+</dialog>
 <div id="summary-load-more" class="summary-load-more" {% if not cards_has_more %}hidden{% endif %}>
   <div class="summary-load-bar" aria-hidden="true"><span></span></div>
   <p class="muted">Подгружаем ещё карты…</p>
@@ -92,7 +147,93 @@
   var body = document.getElementById("summary-cards-body");
   var sentinel = document.getElementById("summary-load-more");
   var countEl = document.getElementById("summary-count");
+  var batchOpen = document.getElementById("summary-batch-open");
+  var batchHint = document.getElementById("summary-batch-hint");
+  var batchDialog = document.getElementById("summary-batch-dialog");
+  var batchCancel = document.getElementById("summary-batch-cancel");
+  var pickAll = document.getElementById("summary-pick-all");
+  var batchForm = document.getElementById("hr-batch-form");
+  var batchIds = document.getElementById("hr-batch-ids");
+
+  function pickedCount() {
+    if (!body) return 0;
+    return body.querySelectorAll("input.summary-pick:checked").length;
+  }
+
+  function syncBatchBar() {
+    if (!batchOpen || !batchHint) return;
+    var n = pickedCount();
+    batchOpen.disabled = n === 0;
+    batchHint.textContent = n ? ("Выбрано карт: " + n) : "Отметьте строки в таблице.";
+  }
+
+  function syncPickAll() {
+    if (!body || !pickAll) return;
+    var boxes = body.querySelectorAll("input.summary-pick");
+    var total = boxes.length;
+    if (total === 0) {
+      pickAll.checked = false;
+      pickAll.indeterminate = false;
+      return;
+    }
+    var checked = 0;
+    for (var i = 0; i < boxes.length; i++) {
+      if (boxes[i].checked) checked += 1;
+    }
+    pickAll.checked = checked === total;
+    pickAll.indeterminate = checked > 0 && checked < total;
+  }
+
+  function bindRowPicks() {
+    if (!body) return;
+    var boxes = body.querySelectorAll("input.summary-pick");
+    for (var i = 0; i < boxes.length; i++) {
+      boxes[i].addEventListener("change", function () {
+        syncPickAll();
+        syncBatchBar();
+      });
+    }
+    syncPickAll();
+    syncBatchBar();
+  }
+
+  if (pickAll && body) {
+    pickAll.addEventListener("change", function () {
+      var boxes = body.querySelectorAll("input.summary-pick");
+      for (var i = 0; i < boxes.length; i++) {
+        boxes[i].checked = pickAll.checked;
+      }
+      pickAll.indeterminate = false;
+      syncBatchBar();
+    });
+  }
+
+  if (batchOpen && batchDialog && batchForm && batchIds) {
+    batchOpen.addEventListener("click", function () {
+      var ids = [];
+      if (body) {
+        var sel = body.querySelectorAll("input.summary-pick:checked");
+        for (var i = 0; i < sel.length; i++) {
+          ids.push(sel[i].value);
+        }
+      }
+      batchIds.value = ids.join(" ");
+      batchDialog.showModal();
+    });
+  }
+  if (batchCancel && batchDialog) {
+    batchCancel.addEventListener("click", function () { batchDialog.close(); });
+  }
+
+  if (batchForm && batchDialog) {
+    batchForm.addEventListener("submit", function () {
+      batchDialog.close();
+    });
+  }
+
   if (!body || !sentinel) return;
+
+  bindRowPicks();
 
   var loading = false;
 
@@ -137,6 +278,7 @@
         body.setAttribute("data-has-more", more ? "1" : "0");
         sentinel.hidden = !more;
         updateCount();
+        bindRowPicks();
       })
       .catch(function () {
         sentinel.querySelector("p").textContent = "Не удалось подгрузить. Прокрутите ещё раз.";
