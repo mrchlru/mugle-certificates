@@ -507,6 +507,18 @@ def test_credit_adds_bonuses_to_balance() -> None:
     assert issued.certificate.nominal == 1_250_000
 
 
+def test_credit_with_grow_nominal_false_keeps_accrual_cap() -> None:
+    """Ручная корректировка баланса (как из HR) не должна трогать лимит автоначисления."""
+    db = _db()
+    hr = _person(db, "hr", Role.hr)
+    issued = issue_certificate(db, _draft(1_000_000), hr)
+    credit_certificate(
+        db, issued.certificate, hr, 250_000, "долили без смены лимита", grow_nominal=False
+    )
+    assert issued.certificate.balance == 1_250_000
+    assert issued.certificate.nominal == 1_000_000
+
+
 def test_unavailable_reason_covers_deleted_blocked_expired() -> None:
     from bonus.routes_card import _unavailable_reason
 

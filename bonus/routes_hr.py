@@ -1266,7 +1266,13 @@ def credit_submit(
         target_part = part_id if part_id > 0 else None
         if signed > 0:
             credit_certificate(
-                db, certificate, user, signed, comment, part_id=target_part
+                db,
+                certificate,
+                user,
+                signed,
+                comment,
+                grow_nominal=False,
+                part_id=target_part,
             )
             write_audit(
                 db,
