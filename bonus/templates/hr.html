@@ -118,6 +118,15 @@
       <label class="field">Комментарий в истории
         <input name="comment" maxlength="300" placeholder="Премия, корректировка лимитов">
       </label>
+      <p class="eyebrow" style="margin: 14px 0 6px;">Разовое сгорание остатка</p>
+      <label class="field">После 1-го списания
+        <select name="single_use_mode">
+          <option value="">Не менять</option>
+          <option value="1">Включить — остаток сгорает</option>
+          <option value="0">Выключить</option>
+        </select>
+      </label>
+      <p class="muted design-hint">Как в сегментах: при первом списании весь неиспользованный баланс обнуляется. Для комбо-карт не применяется.</p>
       <div class="hr-batch-foot">
         <button type="button" class="btn ghost" id="summary-batch-cancel">Отмена</button>
         <button type="submit" class="btn">Применить</button>

@@ -41,6 +41,7 @@ from bonus.services import (
     reset_monthly_balance,
     set_blocked,
     set_certificate_expiry,
+    set_certificate_single_use,
     undo_debit,
 )
 from bonus.values import format_date, parse_money
@@ -558,6 +559,40 @@ def test_batch_hr_adjustments_sets_limit_and_credits_without_growing_cap() -> No
     assert second.balance == 6_000_00
     assert first.nominal == 6_000_00
     assert second.nominal == 6_000_00
+
+
+def test_batch_hr_adjustments_sets_single_use_flag() -> None:
+    db = _db()
+    hr = _person(db, "hr-su", Role.hr)
+    first = issue_certificate(db, _draft(1_000_00), hr, sync_external=False).certificate
+    second = issue_certificate(db, _draft(1_000_00), hr, sync_external=False).certificate
+    assert first.single_use is False
+
+    on = apply_batch_hr_adjustments(db, hr, [first.id, second.id], single_use=True)
+    assert on.single_use_applied == 2
+    assert all(item.ok for item in on.items)
+    db.refresh(first)
+    db.refresh(second)
+    assert first.single_use is True
+    assert second.single_use is True
+
+    off = apply_batch_hr_adjustments(db, hr, [first.id], single_use=False)
+    assert off.single_use_applied == 1
+    db.refresh(first)
+    assert first.single_use is False
+
+
+def test_set_certificate_single_use_on_card() -> None:
+    db = _db()
+    hr = _person(db, "hr-su2", Role.hr)
+    issued = issue_certificate(db, _draft(1_000_00), hr, sync_external=False).certificate
+    assert issued.single_use is False
+    set_certificate_single_use(db, issued, single_use=True)
+    db.refresh(issued)
+    assert issued.single_use is True
+    set_certificate_single_use(db, issued, single_use=False)
+    db.refresh(issued)
+    assert issued.single_use is False
 
 
 def test_unavailable_reason_covers_deleted_blocked_expired() -> None:

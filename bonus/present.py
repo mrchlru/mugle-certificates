@@ -350,9 +350,12 @@ def recent_debits(db: Session, actor: User, limit: int = 8) -> list[TxView]:
 
 
 _SORT_CHOICES: tuple[tuple[str, str], ...] = (
-    ("name", "По алфавиту"),
-    ("balance", "По балансу"),
-    ("expires", "По сроку"),
+    ("name", "По алфавиту (А → Я)"),
+    ("name_desc", "По алфавиту (Я → А)"),
+    ("balance", "По балансу (больше → меньше)"),
+    ("balance_asc", "По балансу (меньше → больше)"),
+    ("expires", "По сроку (раньше → позже)"),
+    ("expires_desc", "По сроку (позже → раньше)"),
 )
 
 _STATUS_CHOICES: tuple[tuple[str, str], ...] = (
@@ -592,16 +595,17 @@ def _summary_segment_label():
 def _summary_order_by(db: Session, sort_key: str, balance_expr) -> list:
     """ORDER BY со стабильным хвостом по Certificate.id."""
     name_ci = _ci(db, User.full_name)
+    tail = [name_ci, Certificate.public_number, Certificate.id]
     if sort_key == "balance":
-        return [balance_expr.desc(), name_ci, Certificate.public_number, Certificate.id]
+        return [balance_expr.desc(), *tail]
+    if sort_key == "balance_asc":
+        return [balance_expr.asc(), *tail]
     if sort_key == "expires":
-        return [
-            Certificate.expires_on.is_(None),
-            Certificate.expires_on.asc(),
-            name_ci,
-            Certificate.public_number,
-            Certificate.id,
-        ]
+        return [Certificate.expires_on.is_(None), Certificate.expires_on.asc(), *tail]
+    if sort_key == "expires_desc":
+        return [Certificate.expires_on.is_(None), Certificate.expires_on.desc(), *tail]
+    if sort_key == "name_desc":
+        return [name_ci.desc(), Certificate.public_number.desc(), Certificate.id.desc()]
     return [name_ci, Certificate.public_number, Certificate.id]
 
 
@@ -640,11 +644,16 @@ def dashboard_stats(db: Session, template_id: int | None = None) -> DashboardSta
 
 
 def _sort_cards(cards: list[CardView], sort: str) -> list[CardView]:
-    """Сортирует карточки: алфавит, баланс убыв., срок (без даты — внизу)."""
+    """Сортирует карточки: алфавит, баланс, срок (без даты — внизу)."""
     if sort == "balance":
         return sorted(
             cards,
             key=lambda card: (-card.balance, card.holder_name.casefold(), card.public_number),
+        )
+    if sort == "balance_asc":
+        return sorted(
+            cards,
+            key=lambda card: (card.balance, card.holder_name.casefold(), card.public_number),
         )
     if sort == "expires":
         return sorted(
@@ -655,6 +664,25 @@ def _sort_cards(cards: list[CardView], sort: str) -> list[CardView]:
                 card.holder_name.casefold(),
                 card.public_number,
             ),
+        )
+    if sort == "expires_desc":
+        return sorted(
+            cards,
+            key=lambda card: (
+                card.expires_on is None,
+                -(card.expires_on or date(1, 1, 1)).toordinal(),
+                card.holder_name.casefold(),
+                card.public_number,
+            ),
+        )
+    if sort == "name_desc":
+        return sorted(
+            cards,
+            key=lambda card: (
+                card.holder_name.casefold(),
+                card.public_number,
+            ),
+            reverse=True,
         )
     return sorted(
         cards,

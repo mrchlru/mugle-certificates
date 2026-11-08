@@ -117,6 +117,15 @@
       <label class="field">Процент на карточке
         <input name="discount_percent" id="discount-percent" inputmode="numeric" placeholder="например 30" maxlength="3">
       </label>
+      <fieldset class="ledger-field" id="single-use-field">
+        <input type="hidden" name="single_use" value="0">
+        <label class="switch">
+          <input type="checkbox" name="single_use" value="1" id="single-use-checkbox">
+          <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+          <span class="switch-copy">Разовый: после первого списания остаток сгорает</span>
+        </label>
+        <p class="muted design-hint" id="single-use-combo-hint" hidden>Недоступно для комбо — только карта с одним сегментом.</p>
+      </fieldset>
       <label class="field">Комментарий
         <input name="note" maxlength="500">
       </label>
@@ -179,6 +188,9 @@
   var birthInput = document.getElementById("birth-date");
   var defaultLogo = "/static/logo.svg";
   var comboMode = false;
+  var singleUseBox = document.getElementById("single-use-checkbox");
+  var singleUseField = document.getElementById("single-use-field");
+  var singleUseComboHint = document.getElementById("single-use-combo-hint");
   var colorApi = null;
   if (window.TeamsBonusColorPicker) {
     var pickers = window.TeamsBonusColorPicker.initAll({
@@ -199,6 +211,27 @@
     if (birthField) birthField.hidden = !needBirth;
     if (birthInput) birthInput.required = !!needBirth;
     syncExpiry();
+    syncSingleUse();
+  }
+
+  function syncSingleUse() {
+    if (!singleUseBox) return;
+    if (comboMode) {
+      singleUseBox.checked = false;
+      singleUseBox.disabled = true;
+      if (singleUseComboHint) singleUseComboHint.hidden = false;
+      return;
+    }
+    singleUseBox.disabled = false;
+    if (singleUseComboHint) singleUseComboHint.hidden = true;
+    var on = false;
+    var ledger = selectedLedger();
+    if (ledger && ledger.getAttribute("data-single") === "1") on = true;
+    if (select && select.selectedIndex > 0) {
+      var opt = select.options[select.selectedIndex];
+      if (opt.getAttribute("data-single-use") === "1") on = true;
+    }
+    singleUseBox.checked = on;
   }
 
   function syncExpiry() {
@@ -305,6 +338,7 @@
     if (nominalInput) nominalInput.required = !comboMode;
     if (comboMode) buildComboParts(segmentIds || []);
     syncExpiry();
+    syncSingleUse();
     syncPreview();
   }
 
@@ -454,6 +488,7 @@
         templates.value = matched.value;
         applyTemplateDefaults(matched);
       }
+      syncSingleUse();
       syncPreview();
     });
   }
@@ -470,6 +505,7 @@
   }
   syncLedger();
   syncWeekdays();
+  syncSingleUse();
   syncPreview();
 })();
 </script>

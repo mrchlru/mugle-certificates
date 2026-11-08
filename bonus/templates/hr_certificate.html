@@ -60,6 +60,19 @@
       </label>
       <button class="btn soft" type="submit">Сохранить</button>
     </form>
+    <form method="post" action="/hr/c/{{ card.id }}/single-use" class="design-create">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <label class="switch">
+        <input type="checkbox" name="single_use" value="1" {% if card.single_use %}checked{% endif %}{% if card.is_combo %} disabled{% endif %}>
+        <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+        <span class="switch-copy">Разовый: после первого списания остаток сгорает</span>
+      </label>
+      {% if card.is_combo %}
+      <p class="muted design-hint">Недоступно для комбо-карты — только одна часть баланса.</p>
+      {% else %}
+      <button class="btn soft" type="submit">Сохранить</button>
+      {% endif %}
+    </form>
     <form method="post" action="/hr/c/{{ card.id }}/name" class="stack">
       <input type="hidden" name="csrf_token" value="{{ csrf }}">
       <p class="eyebrow">Сотрудник</p>

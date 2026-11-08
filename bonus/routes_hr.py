@@ -111,6 +111,7 @@ from bonus.services import (
     push_certificate_to_sheets,
     set_blocked,
     set_certificate_expiry,
+    set_certificate_single_use,
     set_user_active,
     update_certificate_accrual_nominals,
     update_certificate_profile,
@@ -256,6 +257,7 @@ def dashboard_batch_adjust(
     credit_amount: str = Form(""),
     credit_period: str = Form(""),
     comment: str = Form(""),
+    single_use_mode: str = Form(""),
     csrf_token: str = Form(""),
 ):
     """Пакетно меняет лимиты автоначисления и/или начисляет сумму на выбранные карты (сводка HR)."""
@@ -268,6 +270,11 @@ def dashboard_batch_adjust(
         ly = optional_money(limit_yearly)
         credit_k = optional_money(credit_amount)
         period_for_credit = _credit_period_from_form(credit_period)
+        single_use: bool | None = None
+        if single_use_mode == "1":
+            single_use = True
+        elif single_use_mode == "0":
+            single_use = False
 
         result = apply_batch_hr_adjustments(
             db,
@@ -280,6 +287,7 @@ def dashboard_batch_adjust(
             credit_amount=credit_k,
             credit_period=period_for_credit,
             comment=comment,
+            single_use=single_use,
         )
         db.commit()
         ok_n = sum(1 for item in result.items if item.ok)
@@ -290,6 +298,7 @@ def dashboard_batch_adjust(
             f"пропущено: {len(fail_items)}",
             f"лимитов применено (изменений): {result.limits_applied}",
             f"начислений: {result.credits_applied}",
+            f"разовых (single_use): {result.single_use_applied}",
         ]
         if fail_items:
             preview = "; ".join(
@@ -309,7 +318,8 @@ def dashboard_batch_adjust(
         flash(
             request,
             f"Готово: {ok_n} из {len(result.items)} карт. "
-            f"Лимитов: {result.limits_applied}, начислений: {result.credits_applied}.",
+            f"Лимитов: {result.limits_applied}, начислений: {result.credits_applied}, "
+            f"флагов «разовый»: {result.single_use_applied}.",
             "ok",
         )
         if fail_items:
@@ -452,10 +462,13 @@ async def issue_submit(
             discount = segment.discount_percent
         if discount == 0 and template is not None and template.discount_percent:
             discount = template.discount_percent
-        one_shot = (
-            len(part_drafts) == 1
-            and (segment.single_use or ledger_is_single_use(sheet))
-        )
+        if "single_use" in form:
+            su_values = form.getlist("single_use")
+            one_shot = len(part_drafts) == 1 and "1" in su_values
+        else:
+            one_shot = len(part_drafts) == 1 and (
+                segment.single_use or ledger_is_single_use(sheet)
+            )
         show_wallets = user.role == Role.admin and form.get("show_wallet_buttons") == "1"
         total_nominal = sum(item.nominal for item in part_drafts)
         issued = issue_certificate(
@@ -1297,6 +1310,39 @@ def certificate_require_debit_code(
         "Код при списании включён для карты"
         if certificate.require_debit_code
         else "Код при списании выключен для карты",
+    )
+    return RedirectResponse(f"/hr/c/{certificate_id}", status_code=303)
+
+
+@router.post("/hr/c/{certificate_id}/single-use")
+def certificate_single_use(
+    certificate_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
+    single_use: str = Form("0"),
+    csrf_token: str = Form(""),
+):
+    """Включает или выключает сгорание остатка после первого списания."""
+    certificate = _certificate_or_redirect(db, request, certificate_id)
+    if certificate is None:
+        return RedirectResponse("/hr", status_code=303)
+    guard_csrf(request, csrf_token)
+    try:
+        set_certificate_single_use(
+            db,
+            certificate,
+            single_use=single_use == "1",
+        )
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+        return RedirectResponse(f"/hr/c/{certificate_id}", status_code=303)
+    flash(
+        request,
+        "Разовое сгорание остатка включено"
+        if certificate.single_use
+        else "Разовое сгорание остатка выключено",
+        "ok",
     )
     return RedirectResponse(f"/hr/c/{certificate_id}", status_code=303)
 

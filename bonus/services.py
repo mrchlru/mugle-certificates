@@ -761,6 +761,7 @@ class BatchHrAdjustmentResult:
     items: tuple[BatchHrAdjustmentItem, ...]
     limits_applied: int
     credits_applied: int
+    single_use_applied: int
     certificate_ids_updated: tuple[int, ...]
 
 
@@ -776,6 +777,7 @@ def apply_batch_hr_adjustments(
     credit_amount: int | None = None,
     credit_period: AccrualPeriod | None = None,
     comment: str = "",
+    single_use: bool | None = None,
 ) -> BatchHrAdjustmentResult:
     """Пакетно меняет лимиты автоначисления по периоду и/или начисляет сумму на часть с тем же периодом.
 
@@ -795,8 +797,11 @@ def apply_batch_hr_adjustments(
             raise BonusError("Сумма начисления должна быть больше нуля")
         credit_kopecks = credit_amount
     wants_credit = credit_kopecks > 0
-    if not wants_limits and not wants_credit:
-        raise BonusError("Укажите хотя бы новый лимит или сумму начисления")
+    wants_single_use = single_use is not None
+    if not wants_limits and not wants_credit and not wants_single_use:
+        raise BonusError(
+            "Укажите лимит, начисление или режим «сгорание остатка после 1-го списания»"
+        )
 
     period_limits: dict[AccrualPeriod, int] = {}
     if limit_daily is not None:
@@ -827,6 +832,7 @@ def apply_batch_hr_adjustments(
     items: list[BatchHrAdjustmentItem] = []
     limits_count = 0
     credits_count = 0
+    single_use_count = 0
     updated_ids: list[int] = []
 
     try:
@@ -843,23 +849,19 @@ def apply_batch_hr_adjustments(
                 )
                 continue
             public_number = (certificate.public_number or "").strip()
-            if certificate.status != CertificateStatus.active:
+            skip_msg: str | None = None
+            if wants_limits or wants_credit:
+                if certificate.status != CertificateStatus.active:
+                    skip_msg = "карта не активна (заблокирована)"
+                elif certificate.expires_on is not None and certificate.expires_on < today_msk():
+                    skip_msg = "истёк срок карты"
+            if skip_msg is not None:
                 items.append(
                     BatchHrAdjustmentItem(
                         certificate_id,
                         public_number,
                         ok=False,
-                        message="карта не активна (заблокирована)",
-                    )
-                )
-                continue
-            if certificate.expires_on is not None and certificate.expires_on < today_msk():
-                items.append(
-                    BatchHrAdjustmentItem(
-                        certificate_id,
-                        public_number,
-                        ok=False,
-                        message="истёк срок карты",
+                        message=skip_msg,
                     )
                 )
                 continue
@@ -879,7 +881,6 @@ def apply_batch_hr_adjustments(
                 if period_counts.get(ap, 0) == 1:
                     part_by_period[ap] = part
 
-            skip_msg: str | None = None
             part_nominals: dict[int, int] = {}
 
             if wants_limits:
@@ -921,8 +922,6 @@ def apply_batch_hr_adjustments(
                 )
                 continue
 
-            card_messages: list[str] = []
-
             try:
                 if part_nominals:
                     changes = update_certificate_accrual_nominals(
@@ -945,6 +944,14 @@ def apply_batch_hr_adjustments(
                         commit=False,
                     )
                     credits_count += 1
+                if wants_single_use and single_use is not None:
+                    set_certificate_single_use(
+                        db,
+                        certificate,
+                        single_use=single_use,
+                        commit=False,
+                    )
+                    single_use_count += 1
             except BonusError as exc:
                 items.append(
                     BatchHrAdjustmentItem(
@@ -962,6 +969,8 @@ def apply_batch_hr_adjustments(
                 detail_parts.append("лимиты")
             if wants_credit:
                 detail_parts.append("начисление")
+            if wants_single_use and single_use is not None:
+                detail_parts.append("разовый" if single_use else "не разовый")
             items.append(
                 BatchHrAdjustmentItem(
                     certificate_id,
@@ -985,6 +994,7 @@ def apply_batch_hr_adjustments(
         items=tuple(items),
         limits_applied=limits_count,
         credits_applied=credits_count,
+        single_use_applied=single_use_count,
         certificate_ids_updated=tuple(updated_ids),
     )
 
@@ -1042,6 +1052,30 @@ def update_holder_profile(
     user.job_title = _clean_optional(job_title, 120)
     user.phone = _clean_optional(phone, 40)
     db.commit()
+
+
+def set_certificate_single_use(
+    db: Session,
+    certificate: Certificate,
+    *,
+    single_use: bool,
+    commit: bool = True,
+) -> None:
+    """Включает или выключает сгорание остатка после первого списания."""
+    parts = list_parts(db, certificate.id)
+    if not parts:
+        ensure_legacy_part(db, certificate)
+        parts = list_parts(db, certificate.id)
+    if len(parts) > 1:
+        raise BonusError(
+            "комбо-карта: флаг «разовый» задаётся только для карт с одной частью"
+        )
+    certificate.single_use = single_use
+    if commit:
+        db.commit()
+        db.refresh(certificate)
+    else:
+        db.flush()
 
 
 def update_certificate_profile(
