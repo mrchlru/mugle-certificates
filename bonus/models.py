@@ -353,6 +353,9 @@ class SheetsSyncJob(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     certificate_id: Mapped[int] = mapped_column(ForeignKey("certificates.id"), index=True)
+    job_kind: Mapped[str] = mapped_column(String(16), default="sync", index=True)
+    sheet_public_number: Mapped[str] = mapped_column(String(32), default="")
+    sheet_ledger_sheet: Mapped[str] = mapped_column(String(32), default="")
     status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     last_error: Mapped[str] = mapped_column(String(500), default="")

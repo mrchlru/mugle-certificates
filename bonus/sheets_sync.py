@@ -8,10 +8,14 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from bonus.config import get_settings
 from bonus.ledger import (
@@ -21,8 +25,8 @@ from bonus.ledger import (
     ledger_title,
     parse_ledger_sheet,
 )
-from bonus.models import Certificate, User
-from bonus.values import format_date, format_money_plain, today_msk
+from bonus.models import Certificate, Transaction, TxType, User
+from bonus.values import MSK, as_utc, format_date, format_money_plain, today_msk
 
 logger = logging.getLogger("bonus.sheets")
 
@@ -31,6 +35,9 @@ _ROW_ALERT_COLOR = {"red": 0.96, "green": 0.80, "blue": 0.80}
 _ROW_CLEAR_COLOR = {"red": 1.0, "green": 1.0, "blue": 1.0}
 # Один процесс: не даём двум пачкам одновременно читать «пусто» и дописать один номер дважды.
 _SHEETS_WRITE_LOCK = threading.Lock()
+_SPREADSHEET_CACHE: tuple[Any, float] | None = None
+_SPREADSHEET_CACHE_TTL_SEC = 180.0
+_WORKSHEET_CACHE: dict[str, tuple[Any, float]] = {}
 
 
 @dataclass(frozen=True)
@@ -41,6 +48,31 @@ class SheetUsageEntry:
     amount_kopecks: int
     restaurant: str
     order_ref: str = ""
+
+
+def list_sheet_usages(db: Session, certificate_id: int) -> list[SheetUsageEntry]:
+    """Неотменённые списания карты для колонок Google Sheets."""
+    reversed_ids = select(Transaction.reversal_of_id).where(
+        Transaction.reversal_of_id.is_not(None)
+    )
+    rows = db.scalars(
+        select(Transaction)
+        .where(
+            Transaction.certificate_id == certificate_id,
+            Transaction.tx_type == TxType.debit,
+            Transaction.id.not_in(reversed_ids),
+        )
+        .order_by(Transaction.id)
+    ).all()
+    return [
+        SheetUsageEntry(
+            used_on=as_utc(tx.created_at).astimezone(MSK).date(),
+            amount_kopecks=tx.amount,
+            restaurant=tx.restaurant or "",
+            order_ref=(tx.order_ref or "").strip(),
+        )
+        for tx in rows
+    ]
 
 
 def sheets_enabled() -> bool:
@@ -314,68 +346,71 @@ def sync_certificate_usage(
     usages: list[SheetUsageEntry],
     segment_name: str = "",
     expired: bool = False,
-) -> None:
+) -> bool:
     """Пишет строку карты и колонки использования по журналу списаний."""
     if not sheets_enabled():
         logger.warning(
             "Google Sheets: использование %s не записано — нет spreadsheet id или ключа SA",
             certificate.public_number,
         )
-        return
+        return False
     try:
         kind = parse_ledger_sheet(certificate.ledger_sheet)
-        worksheet = _worksheet(kind)
-        row_index = _ensure_certificate_row(
-            worksheet,
-            kind,
-            certificate,
-            holder,
-            segment_name=segment_name,
-        )
-        _write_profile_columns(
-            worksheet,
-            kind,
-            row_index,
-            certificate,
-            holder,
-            segment_name=segment_name,
-        )
-        date_col, amount_col, place_col = _usage_columns(kind)
-        if expired:
-            _set_cell(worksheet, row_index, date_col, _EXPIRED_MARK)
-            _set_cell(worksheet, row_index, amount_col, format_money_plain(certificate.balance))
+        with _SHEETS_WRITE_LOCK:
+            worksheet = _worksheet(kind)
+            row_index = _ensure_certificate_row(
+                worksheet,
+                kind,
+                certificate,
+                holder,
+                segment_name=segment_name,
+            )
+            _write_profile_columns(
+                worksheet,
+                kind,
+                row_index,
+                certificate,
+                holder,
+                segment_name=segment_name,
+            )
+            date_col, amount_col, place_col = _usage_columns(kind)
+            if expired:
+                _set_cell(worksheet, row_index, date_col, _EXPIRED_MARK)
+                _set_cell(
+                    worksheet, row_index, amount_col, format_money_plain(certificate.balance)
+                )
+                _paint_certificate_row(
+                    worksheet,
+                    kind,
+                    row_index,
+                    certificate,
+                    usages=usages,
+                    expired=True,
+                )
+                logger.info(
+                    "Google Sheets: %s помечена «истек» на листе «%s»",
+                    certificate.public_number,
+                    worksheet.title,
+                )
+                return True
+            _write_usage_columns(
+                worksheet,
+                kind,
+                row_index,
+                date_col,
+                amount_col,
+                place_col,
+                usages,
+                remaining_kopecks=certificate.balance,
+            )
             _paint_certificate_row(
                 worksheet,
                 kind,
                 row_index,
                 certificate,
                 usages=usages,
-                expired=True,
+                expired=False,
             )
-            logger.info(
-                "Google Sheets: %s помечена «истек» на листе «%s»",
-                certificate.public_number,
-                worksheet.title,
-            )
-            return
-        _write_usage_columns(
-            worksheet,
-            kind,
-            row_index,
-            date_col,
-            amount_col,
-            place_col,
-            usages,
-            remaining_kopecks=certificate.balance,
-        )
-        _paint_certificate_row(
-            worksheet,
-            kind,
-            row_index,
-            certificate,
-            usages=usages,
-            expired=False,
-        )
         logger.info(
             "Google Sheets: %s — %s списаний на листе «%s», строка %s, остаток %s",
             certificate.public_number,
@@ -384,13 +419,24 @@ def sync_certificate_usage(
             row_index,
             certificate.balance,
         )
+        return True
     except Exception as exc:
-        logger.exception(
-            "Google Sheets: не удалось обновить использование %s (%s). %s",
-            certificate.public_number,
-            exc,
-            _permission_hint() if _is_permission_error(exc) else "",
-        )
+        hint = _permission_hint() if _is_permission_error(exc) else ""
+        if _is_quota_error(exc):
+            logger.warning(
+                "Google Sheets: квота API, отложено %s (%s). %s",
+                certificate.public_number,
+                exc,
+                hint,
+            )
+        else:
+            logger.exception(
+                "Google Sheets: не удалось обновить использование %s (%s). %s",
+                certificate.public_number,
+                exc,
+                hint,
+            )
+        return False
 
 
 def _is_permission_error(exc: BaseException) -> bool:
@@ -399,38 +445,50 @@ def _is_permission_error(exc: BaseException) -> bool:
     return "403" in text or "permission" in text or "не удалось создать вкладку" in text
 
 
-def delete_certificate_row(public_number: str, ledger_sheet: str) -> None:
+def delete_certificate_row(public_number: str, ledger_sheet: str) -> bool:
     """Удаляет строку карты из Google Sheets целиком."""
     if not sheets_enabled():
         logger.warning(
             "Google Sheets: удаление %s пропущено — нет spreadsheet id или ключа SA",
             public_number,
         )
-        return
+        return False
     try:
         kind = parse_ledger_sheet(ledger_sheet)
-        worksheet = _worksheet(kind)
-        row_index = _find_row(worksheet, public_number)
-        if row_index is None:
-            logger.info(
-                "Google Sheets: строка %s уже отсутствует на листе «%s»",
-                public_number,
-                worksheet.title,
-            )
-            return
-        worksheet.delete_rows(row_index)
+        with _SHEETS_WRITE_LOCK:
+            worksheet = _worksheet(kind)
+            row_index = _find_row(worksheet, public_number)
+            if row_index is None:
+                logger.info(
+                    "Google Sheets: строка %s уже отсутствует на листе «%s»",
+                    public_number,
+                    worksheet.title,
+                )
+                return True
+            worksheet.delete_rows(row_index)
         logger.info(
             "Google Sheets: удалена строка %s с листа «%s»",
             public_number,
             worksheet.title,
         )
+        return True
     except Exception as exc:
-        logger.exception(
-            "Google Sheets: не удалось удалить %s (%s). %s",
-            public_number,
-            exc,
-            _permission_hint() if _is_permission_error(exc) else "",
-        )
+        hint = _permission_hint() if _is_permission_error(exc) else ""
+        if _is_quota_error(exc):
+            logger.warning(
+                "Google Sheets: квота API, удаление %s отложено (%s). %s",
+                public_number,
+                exc,
+                hint,
+            )
+        else:
+            logger.exception(
+                "Google Sheets: не удалось удалить %s (%s). %s",
+                public_number,
+                exc,
+                hint,
+            )
+        return False
 
 
 def _ensure_certificate_row(
@@ -844,12 +902,26 @@ def _unescape_env_json_whitespace(text: str) -> str:
 
 
 def _spreadsheet() -> Any:
+    global _SPREADSHEET_CACHE
     settings = get_settings()
-    return _client().open_by_key(settings.google_sheets_spreadsheet_id.strip())
+    key = settings.google_sheets_spreadsheet_id.strip()
+    now = time.monotonic()
+    if (
+        _SPREADSHEET_CACHE is not None
+        and now - _SPREADSHEET_CACHE[1] < _SPREADSHEET_CACHE_TTL_SEC
+    ):
+        return _SPREADSHEET_CACHE[0]
+    book = _client().open_by_key(key)
+    _SPREADSHEET_CACHE = (book, now)
+    return book
 
 
 def _worksheet(kind: LedgerSheet) -> Any:
     title = ledger_title(kind)
+    now = time.monotonic()
+    cached = _WORKSHEET_CACHE.get(title)
+    if cached is not None and now - cached[1] < _SPREADSHEET_CACHE_TTL_SEC:
+        return cached[0]
     book = _spreadsheet()
     worksheet = _find_worksheet(book, title)
     if worksheet is None:
@@ -872,6 +944,7 @@ def _worksheet(kind: LedgerSheet) -> Any:
                 f"{_permission_hint()}"
             ) from exc
         worksheet.append_row(list(ledger_headers(kind)), value_input_option="USER_ENTERED")
+        _WORKSHEET_CACHE[title] = (worksheet, time.monotonic())
         return worksheet
     headers = list(ledger_headers(kind))
     current = worksheet.row_values(1)
@@ -881,6 +954,7 @@ def _worksheet(kind: LedgerSheet) -> Any:
         # Не затираем чужие данные — только если лист пустой по смыслу.
         if len(current) == 0:
             worksheet.update("A1", [headers])
+    _WORKSHEET_CACHE[title] = (worksheet, time.monotonic())
     return worksheet
 
 

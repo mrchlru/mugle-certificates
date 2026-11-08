@@ -28,11 +28,21 @@
     <option value="{{ key }}" {% if status == key %}selected{% endif %}>{{ label }}</option>
     {% endfor %}
   </select>
-  <select name="sort" aria-label="Сортировка">
-    {% for key, label in sort_options %}
-    <option value="{{ key }}" {% if sort == key %}selected{% endif %}>{{ label }}</option>
-    {% endfor %}
-  </select>
+  <input type="hidden" name="sort" id="hr-sort-input" value="{{ sort }}">
+  <div class="hr-sort" role="group" aria-label="Сортировка">
+    <button type="button" class="hr-sort-chip{% if sort in ['name', 'name_desc'] %} is-on{% endif %}" data-sort-primary="name" data-sort-alt="name_desc" data-sort-label="А–Я" title="По алфавиту — нажмите снова, чтобы сменить направление">
+      <span class="hr-sort-label">Имя</span>
+      <span class="hr-sort-arrow" aria-hidden="true">{% if sort == 'name_desc' %}↓{% else %}↑{% endif %}</span>
+    </button>
+    <button type="button" class="hr-sort-chip{% if sort in ['balance', 'balance_asc'] %} is-on{% endif %}" data-sort-primary="balance" data-sort-alt="balance_asc" data-sort-label="баланс" title="По балансу — нажмите снова, чтобы сменить направление">
+      <span class="hr-sort-label">Баланс</span>
+      <span class="hr-sort-arrow" aria-hidden="true">{% if sort == 'balance_asc' %}↑{% else %}↓{% endif %}</span>
+    </button>
+    <button type="button" class="hr-sort-chip{% if sort in ['expires', 'expires_desc'] %} is-on{% endif %}" data-sort-primary="expires" data-sort-alt="expires_desc" data-sort-label="срок" title="По сроку — нажмите снова, чтобы сменить направление">
+      <span class="hr-sort-label">Срок</span>
+      <span class="hr-sort-arrow" aria-hidden="true">{% if sort == 'expires_desc' %}↓{% else %}↑{% endif %}</span>
+    </button>
+  </div>
   <button class="btn" type="submit">Найти</button>
 </form>
 {% if templates %}
@@ -146,10 +156,28 @@
 <script>
 (function () {
   var form = document.querySelector("form.filters");
+  var sortInput = document.getElementById("hr-sort-input");
   if (form) {
-    ["sort", "template", "status"].forEach(function (name) {
+    ["template", "status"].forEach(function (name) {
       var el = form.querySelector('select[name="' + name + '"]');
       if (el) el.addEventListener("change", function () { form.submit(); });
+    });
+    form.querySelectorAll(".hr-sort-chip").forEach(function (chip) {
+      chip.addEventListener("click", function () {
+        if (!sortInput) return;
+        var primary = chip.getAttribute("data-sort-primary") || "";
+        var alt = chip.getAttribute("data-sort-alt") || "";
+        var cur = sortInput.value || primary;
+        if (cur === primary) {
+          sortInput.value = alt;
+        } else if (cur === alt) {
+          sortInput.value = primary;
+        } else {
+          sortInput.value = primary;
+        }
+        form.submit();
+      });
+      chip.setAttribute("aria-pressed", chip.classList.contains("is-on") ? "true" : "false");
     });
   }
 

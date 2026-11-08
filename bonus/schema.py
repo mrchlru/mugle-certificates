@@ -238,6 +238,20 @@ def ensure_schema(engine: Engine) -> None:
             )
             """
         )
+    if "sheets_sync_jobs" in tables:
+        job_cols = {column["name"] for column in inspector.get_columns("sheets_sync_jobs")}
+        if "job_kind" not in job_cols:
+            statements.append(
+                "ALTER TABLE sheets_sync_jobs ADD COLUMN job_kind VARCHAR(16) DEFAULT 'sync'"
+            )
+        if "sheet_public_number" not in job_cols:
+            statements.append(
+                "ALTER TABLE sheets_sync_jobs ADD COLUMN sheet_public_number VARCHAR(32) DEFAULT ''"
+            )
+        if "sheet_ledger_sheet" not in job_cols:
+            statements.append(
+                "ALTER TABLE sheets_sync_jobs ADD COLUMN sheet_ledger_sheet VARCHAR(32) DEFAULT ''"
+            )
     if "debit_challenges" not in tables:
         statements.append(
             """

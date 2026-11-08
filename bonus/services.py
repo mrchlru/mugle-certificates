@@ -572,9 +572,9 @@ def delete_certificate(db: Session, certificate: Certificate, actor: User) -> st
         comment="Сертификат удалён из системы",
     )
     db.commit()
-    from bonus.sheets_sync import delete_certificate_row
+    from bonus.sheets_queue import enqueue_certificate_delete
 
-    delete_certificate_row(public_number, ledger_sheet)
+    enqueue_certificate_delete(db, certificate)
     return public_number
 
 
@@ -2147,66 +2147,11 @@ def _sync_issue(
     holder: User,
     segment_name: str,
 ) -> None:
-    """Ставит карту в очередь Sheets и пишет в таблицу в фоне.
-
-    HTTP-ответ после выпуска не ждёт Google Sheets — страница карты
-    открывается сразу, статус синка показывается в блоке ссылки.
-    """
-    del holder, segment_name  # сегмент подтянем в фоновом потоке из БД
+    """Ставит карту в очередь Google Sheets (воркер допишет строку и расходы)."""
+    del holder, segment_name
     from bonus.sheets_queue import enqueue_certificate_ids
 
     enqueue_certificate_ids(db, [certificate.id])
-    _start_issue_external_sync(certificate.id)
-
-
-def _start_issue_external_sync(certificate_id: int) -> None:
-    """Запускает фоновую запись выпуска в Google Sheets."""
-    import threading
-
-    thread = threading.Thread(
-        target=_run_issue_external_sync,
-        args=(certificate_id,),
-        daemon=True,
-        name=f"issue-sync-{certificate_id}",
-    )
-    thread.start()
-
-
-def _run_issue_external_sync(certificate_id: int) -> None:
-    """Пишет только что выписанную карту в Sheets вне HTTP-запроса."""
-    import logging
-
-    from bonus.db import open_session
-    from bonus.sheets_queue import mark_certificate_job
-    from bonus.sheets_sync import sheets_enabled, sync_certificate_issued
-
-    logger = logging.getLogger("bonus.services")
-    db = open_session()
-    try:
-        certificate = db.get(Certificate, certificate_id)
-        if certificate is None or certificate.holder is None:
-            mark_certificate_job(db, certificate_id, "failed", "Сертификат не найден")
-            return
-        holder = certificate.holder
-        segment_name = ""
-        if certificate.segment is not None:
-            segment_name = (certificate.segment.name or "").strip()
-        if not sheets_enabled():
-            mark_certificate_job(db, certificate_id, "done")
-        else:
-            ok = sync_certificate_issued(
-                certificate, holder, segment_name=segment_name
-            )
-            if ok:
-                mark_certificate_job(db, certificate_id, "done")
-            # иначе job остаётся pending — доберёт воркер очереди
-    except Exception:
-        logger.exception(
-            "Фоновая синхронизация выпуска не удалась для certificate_id=%s",
-            certificate_id,
-        )
-    finally:
-        db.close()
 
 
 def _sync_usage(
@@ -2215,88 +2160,11 @@ def _sync_usage(
     *,
     expired: bool = False,
 ) -> None:
-    """Ставит обновление Google Sheets в фон — касса и UI не ждут Google.
+    """Ставит обновление Google Sheets в очередь — касса и UI не ждут Google."""
+    del expired  # срок «истек» определит воркер по данным карты
+    from bonus.sheets_queue import enqueue_certificate_ids
 
-    Сама запись (расходы, срок) выполняется в отдельном потоке.
-    """
-    del db  # данные читаем заново в фоне по id
-    _start_usage_external_sync(certificate.id, expired=expired)
-
-
-def _start_usage_external_sync(certificate_id: int, *, expired: bool = False) -> None:
-    """Запускает фоновое обновление строки карты в Google Sheets."""
-    import threading
-
-    thread = threading.Thread(
-        target=_run_usage_external_sync,
-        args=(certificate_id, expired),
-        daemon=True,
-        name=f"usage-sync-{certificate_id}",
-    )
-    thread.start()
-
-
-def _run_usage_external_sync(certificate_id: int, expired: bool) -> None:
-    """Пишет карту и расходы в Sheets вне запроса кассы / HR."""
-    import logging
-
-    from bonus.db import open_session
-    from bonus.sheets_sync import sheets_enabled, sync_certificate_usage
-
-    logger = logging.getLogger("bonus.services")
-    if not sheets_enabled():
-        return
-    db = open_session()
-    try:
-        certificate = db.get(Certificate, certificate_id)
-        if certificate is None:
-            return
-        holder = certificate.holder
-        segment_name = ""
-        if certificate.segment is not None:
-            segment_name = (certificate.segment.name or "").strip()
-        usages = [] if expired else _sheet_usages(db, certificate.id)
-        sync_certificate_usage(
-            certificate,
-            holder,
-            usages=usages,
-            segment_name=segment_name,
-            expired=expired,
-        )
-    except Exception:
-        logger.exception(
-            "Фоновая синхронизация расходов не удалась для certificate_id=%s",
-            certificate_id,
-        )
-    finally:
-        db.close()
-
-
-def _sheet_usages(db: Session, certificate_id: int) -> list:
-    """Неотменённые списания карты для колонок Google Sheets."""
-    from bonus.sheets_sync import SheetUsageEntry
-
-    reversed_ids = select(Transaction.reversal_of_id).where(
-        Transaction.reversal_of_id.is_not(None)
-    )
-    rows = db.scalars(
-        select(Transaction)
-        .where(
-            Transaction.certificate_id == certificate_id,
-            Transaction.tx_type == TxType.debit,
-            Transaction.id.not_in(reversed_ids),
-        )
-        .order_by(Transaction.id)
-    ).all()
-    return [
-        SheetUsageEntry(
-            used_on=as_utc(tx.created_at).astimezone(MSK).date(),
-            amount_kopecks=tx.amount,
-            restaurant=tx.restaurant or "",
-            order_ref=(tx.order_ref or "").strip(),
-        )
-        for tx in rows
-    ]
+    enqueue_certificate_ids(db, [certificate.id])
 
 
 def push_certificate_to_sheets(db: Session, certificate: Certificate) -> None:

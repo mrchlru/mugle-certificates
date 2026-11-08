@@ -1,31 +1,38 @@
 """Фоновая очередь записи сертификатов в Google Sheets.
 
-Пишет небольшими пачками с паузами и ретраями, чтобы не ловить квоту API.
+Все операции с таблицей (синк карты, расходы, удаление строки) идут через
+один воркер с паузами, без параллельных потоков — чтобы не упираться в квоту API.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from bonus.db import open_session
-from bonus.models import Certificate, CertificateStatus, SheetsSyncJob
+from bonus.models import Certificate, SheetsSyncJob, User
 from bonus.sheets_sync import (
-    SheetIssuedItem,
+    delete_certificate_row,
+    list_sheet_usages,
     sheets_credentials_error,
-    sync_certificates_issued_batch,
+    sheets_enabled,
+    sync_certificate_usage,
 )
+from bonus.values import today_msk
 
 logger = logging.getLogger("bonus.sheets_queue")
 
-_BATCH_SIZE = 40
-_SLEEP_BETWEEN_BATCHES_SEC = 2.5
+_BATCH_SIZE = 4
+_SLEEP_BETWEEN_JOBS_SEC = 2.0
+_QUOTA_BACKOFF_SEC = 55.0
 _MAX_ATTEMPTS = 12
 _POLL_IDLE_SEC = 5.0
+_SLEEP_AFTER_WORK_SEC = 2.5
 
 
 def enqueue_certificate_ids(db: Session, certificate_ids: list[int]) -> int:
@@ -47,6 +54,7 @@ def enqueue_certificate_ids(db: Session, certificate_ids: list[int]) -> int:
             db.add(
                 SheetsSyncJob(
                     certificate_id=certificate_id,
+                    job_kind="sync",
                     status="pending",
                     attempts=0,
                     last_error="",
@@ -56,15 +64,37 @@ def enqueue_certificate_ids(db: Session, certificate_ids: list[int]) -> int:
             )
             touched += 1
             continue
-        if job.status == "pending":
+        if job.status == "pending" and job.job_kind == "sync":
+            job.updated_at = now
             continue
         job.status = "pending"
+        job.job_kind = "sync"
+        job.sheet_public_number = ""
+        job.sheet_ledger_sheet = ""
         job.attempts = 0
         job.last_error = ""
         job.updated_at = now
         touched += 1
     db.commit()
     return touched
+
+
+def enqueue_certificate_delete(db: Session, certificate: Certificate) -> None:
+    """Ставит удаление строки карты из Google Sheets в очередь."""
+    enqueue_certificate_ids(db, [certificate.id])
+    job = db.scalar(
+        select(SheetsSyncJob).where(SheetsSyncJob.certificate_id == certificate.id)
+    )
+    if job is None:
+        return
+    job.job_kind = "delete"
+    job.sheet_public_number = (certificate.public_number or "").strip()
+    job.sheet_ledger_sheet = (certificate.ledger_sheet or "").strip()
+    job.status = "pending"
+    job.attempts = 0
+    job.last_error = ""
+    job.updated_at = _utcnow()
+    db.commit()
 
 
 def queue_stats(db: Session) -> dict[str, int]:
@@ -108,6 +138,7 @@ def mark_certificate_job(
         db.add(
             SheetsSyncJob(
                 certificate_id=certificate_id,
+                job_kind="sync",
                 status=status,
                 attempts=1 if status != "pending" else 0,
                 last_error=(last_error or "")[:500],
@@ -131,100 +162,127 @@ def process_sheets_queue_once(limit: int = _BATCH_SIZE) -> dict[str, int]:
     cred_error = sheets_credentials_error()
     if cred_error:
         logger.error("Google Sheets очередь стоит: %s", cred_error)
-        return {"written": 0, "skipped": 0, "errors": 0, "blocked": 1}
+        return {"written": 0, "skipped": 0, "errors": 0, "blocked": 1, "quota_wait": 0}
+
+    if not sheets_enabled():
+        return {"written": 0, "skipped": 0, "errors": 0, "blocked": 0, "quota_wait": 0}
 
     db = open_session()
+    quota_hit = False
+    written = 0
+    errors = 0
     try:
         jobs = list(
             db.scalars(
                 select(SheetsSyncJob)
                 .where(SheetsSyncJob.status == "pending")
-                .order_by(SheetsSyncJob.id)
+                .order_by(SheetsSyncJob.updated_at, SheetsSyncJob.id)
                 .limit(limit)
             ).all()
         )
         if not jobs:
-            return {"written": 0, "skipped": 0, "errors": 0, "blocked": 0}
+            return {"written": 0, "skipped": 0, "errors": 0, "blocked": 0, "quota_wait": 0}
 
-        certificate_ids = [job.certificate_id for job in jobs]
-        certificates = {
-            item.id: item
-            for item in db.scalars(
-                select(Certificate).where(
-                    Certificate.id.in_(certificate_ids),
-                    Certificate.status == CertificateStatus.active,
-                )
-            ).all()
-        }
-        items: list[SheetIssuedItem] = []
-        job_by_cert = {job.certificate_id: job for job in jobs}
         now = _utcnow()
-        for certificate_id in certificate_ids:
-            job = job_by_cert[certificate_id]
-            certificate = certificates.get(certificate_id)
-            if certificate is None or certificate.holder is None:
-                job.status = "failed"
-                job.attempts += 1
-                job.last_error = "Сертификат не найден или неактивен"
-                job.updated_at = now
-                continue
-            segment_name = ""
-            if certificate.segment is not None:
-                segment_name = (certificate.segment.name or "").strip()
-            items.append(
-                SheetIssuedItem(
-                    certificate=certificate,
-                    holder=certificate.holder,
-                    segment_name=segment_name,
-                )
-            )
-
-        result = sync_certificates_issued_batch(items) if items else None
-        ok_set = set(result.ok_ids) if result else set()
-        fail_set = set(result.failed_ids) if result else set()
-        for item in items:
-            job = job_by_cert[item.certificate.id]
+        for job in jobs:
+            if quota_hit:
+                break
+            kind = (job.job_kind or "sync").strip().lower()
+            if kind == "delete":
+                ok, retryable, err = _process_delete_job(job)
+            else:
+                ok, retryable, err = _process_sync_job(db, job)
             job.attempts += 1
             job.updated_at = now
-            if item.certificate.id in ok_set and item.certificate.id not in fail_set:
+            if ok:
                 job.status = "done"
                 job.last_error = ""
-                continue
-            job.last_error = "Пакет Sheets не записан (см. лог)"
-            if job.attempts >= _MAX_ATTEMPTS:
-                job.status = "failed"
+                written += 1
             else:
-                job.status = "pending"
-        db.commit()
-        written = 0 if result is None else result.written
-        skipped = 0 if result is None else result.skipped
-        errors = 0 if result is None else result.errors
-        if written or skipped or errors:
-            print(
-                f"Teams Bonus: Sheets очередь — +{written}, уже были {skipped}, "
-                f"ошибок пакета {errors}",
-                flush=True,
+                job.last_error = (err or "Ошибка Google Sheets")[:500]
+                if job.attempts >= _MAX_ATTEMPTS or not retryable:
+                    job.status = "failed"
+                    errors += 1
+                else:
+                    job.status = "pending"
+                    quota_hit = retryable
+                    errors += 1
+            db.commit()
+            if not quota_hit and job.status == "done":
+                time.sleep(_SLEEP_BETWEEN_JOBS_SEC)
+
+        if written or errors:
+            logger.info(
+                "Google Sheets очередь: готово %s, ошибок/отложено %s",
+                written,
+                errors,
             )
         return {
             "written": written,
-            "skipped": skipped,
+            "skipped": 0,
             "errors": errors,
             "blocked": 0,
+            "quota_wait": 1 if quota_hit else 0,
         }
     finally:
         db.close()
 
 
+def _process_delete_job(job: SheetsSyncJob) -> tuple[bool, bool, str]:
+    """Удаляет строку карты. (успех, можно повторить, сообщение)."""
+    if not job.sheet_public_number.strip():
+        return False, False, "Нет номера карты для удаления"
+    ok = delete_certificate_row(
+        job.sheet_public_number,
+        job.sheet_ledger_sheet,
+    )
+    if ok:
+        return True, False, ""
+    return False, True, "Квота Google Sheets — удаление повторим позже"
+
+
+def _process_sync_job(db: Session, job: SheetsSyncJob) -> tuple[bool, bool, str]:
+    """Синхронизирует одну карту (профиль + расходы) в Google Sheets."""
+    certificate = db.get(Certificate, job.certificate_id)
+    if certificate is None:
+        return False, False, "Сертификат не найден"
+    holder = db.get(User, certificate.holder_id)
+    if holder is None:
+        return False, False, "Держатель не найден"
+    if certificate.is_deleted:
+        return False, False, "Карта удалена — нужна задача delete"
+    segment_name = ""
+    if certificate.segment is not None:
+        segment_name = (certificate.segment.name or "").strip()
+    expired = (
+        certificate.expires_on is not None and certificate.expires_on < today_msk()
+    )
+    usages = [] if expired else list_sheet_usages(db, certificate.id)
+    ok = sync_certificate_usage(
+        certificate,
+        holder,
+        usages=usages,
+        segment_name=segment_name,
+        expired=expired,
+    )
+    if ok:
+        return True, False, ""
+    return False, True, "Квота Google Sheets — синк повторим позже"
+
+
 async def sheets_queue_worker() -> None:
-    """Фоновый цикл: пачками дописывает очередь в Google Sheets."""
+    """Фоновый цикл: последовательно дописывает очередь в Google Sheets."""
     while True:
         try:
             stats = await asyncio.to_thread(process_sheets_queue_once)
             if stats.get("blocked"):
                 await asyncio.sleep(30.0)
                 continue
-            if stats["written"] or stats["skipped"] or stats["errors"]:
-                await asyncio.sleep(_SLEEP_BETWEEN_BATCHES_SEC)
+            if stats.get("quota_wait"):
+                await asyncio.sleep(_QUOTA_BACKOFF_SEC)
+                continue
+            if stats["written"] or stats["errors"]:
+                await asyncio.sleep(_SLEEP_AFTER_WORK_SEC)
             else:
                 await asyncio.sleep(_POLL_IDLE_SEC)
         except asyncio.CancelledError:
