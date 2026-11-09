@@ -634,6 +634,45 @@ def test_blocked_and_expired_cannot_be_spent() -> None:
         debit_certificate(db, issued.certificate, manager, 100, "нет")
 
 
+def test_undo_duplicate_auto_credit_keeps_balance() -> None:
+    """Отмена одного из двух credit с одним маркером не обнуляет часть."""
+    db = _db()
+    admin = _person(db, "admin", Role.admin)
+    hr = _person(db, "hr", Role.hr)
+    issued = issue_certificate(db, _draft(500_000), hr)
+    marker = "Автоначисление: еженедельно 2026-W46"
+    credit_certificate(
+        db,
+        issued.certificate,
+        None,
+        130_000,
+        marker,
+        grow_nominal=False,
+    )
+    credit_certificate(
+        db,
+        issued.certificate,
+        None,
+        130_000,
+        marker,
+        grow_nominal=False,
+    )
+    db.refresh(issued.certificate)
+    assert issued.certificate.balance == 760_000
+    dup = db.scalars(
+        select(Transaction)
+        .where(
+            Transaction.certificate_id == issued.certificate.id,
+            Transaction.comment == marker,
+        )
+        .order_by(Transaction.id.desc())
+    ).first()
+    assert dup is not None
+    undo_credit(db, dup.id, admin, "дубль")
+    db.refresh(issued.certificate)
+    assert issued.certificate.balance == 760_000
+
+
 def test_admin_undo_credit_idempotent() -> None:
     db = _db()
     admin = _person(db, "admin", Role.admin)

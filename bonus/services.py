@@ -415,7 +415,11 @@ def undo_credit(db: Session, tx_id: int, actor: User, reason: str) -> Transactio
     certificate = db.get(Certificate, tx.certificate_id, with_for_update=True)
     if certificate is None:
         raise BonusError("Сертификат не найден")
+    from bonus.accrual_repair import sibling_active_accrual_credit
+
     amount = max(0, int(tx.amount))
+    if amount > 0 and sibling_active_accrual_credit(db, tx):
+        amount = 0
     if amount > 0:
         if tx.part_id is not None:
             if not change_part_balance(db, tx.part_id, -amount):
