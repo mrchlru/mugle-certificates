@@ -40,6 +40,7 @@ _ACTION_LABELS: dict[str, str] = {
     AuditAction.batch_hr_adjustments.value: "Пакетно: лимиты и начисления",
     AuditAction.debit_undo.value: "Отмена списания",
     AuditAction.credit_undo.value: "Отмена начисления",
+    AuditAction.accrual_balance_repair.value: "Восстановление остатков автоначисления",
     AuditAction.import_rows.value: "Импорт карт",
     AuditAction.certificate_delete.value: "Удаление карты",
     AuditAction.template_delete.value: "Удаление шаблона",

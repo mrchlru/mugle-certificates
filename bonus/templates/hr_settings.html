@@ -17,6 +17,20 @@
     <p><a class="btn soft" href="/hr/settings/cards-export.xlsx">Скачать Excel</a></p>
   </section>
 
+  <section class="design-panel design-wallet-settings" id="accrual-repair">
+    <header class="design-panel-head">
+      <h2>Восстановление автоначислений</h2>
+    </header>
+    <p class="muted design-hint">
+      Если после отмены <strong>дубля</strong> в журнале остаток недели/дня стал 0, а в истории ещё есть живое начисление с тем же маркером — эта кнопка вернёт номинал только таким картам (текущая неделя, день и месяц).
+      На балансе, который сотрудник уже потратил, не меняет сумму.
+    </p>
+    <form method="post" action="/hr/settings/repair-accrual-balances" class="design-create">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <button class="btn soft" type="submit">Восстановить нулевые остатки</button>
+    </form>
+  </section>
+
   <section class="design-panel design-wallet-settings">
     <header class="design-panel-head">
       <h2>Кошельки</h2>

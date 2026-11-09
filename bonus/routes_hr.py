@@ -1674,6 +1674,37 @@ def undo_credit_tx(
     return RedirectResponse(target, status_code=303)
 
 
+@router.post("/hr/settings/repair-accrual-balances")
+def settings_repair_accrual_balances(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin)),
+    csrf_token: str = Form(""),
+):
+    """Восстанавливает нулевые недельные/дневные части после ошибочной отмены дубля."""
+    from bonus.accrual_repair import repair_zero_after_duplicate_undo
+
+    try:
+        guard_csrf(request, csrf_token)
+        result = repair_zero_after_duplicate_undo(db, user)
+        write_audit(
+            db,
+            actor=user,
+            action=AuditAction.accrual_balance_repair,
+            summary=f"Восстановлено частей: {result.fixed}",
+            target_type="accrual",
+            detail=", ".join(result.markers)[:500],
+        )
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+        return RedirectResponse("/hr/settings#accrual-repair", status_code=303)
+    flash(
+        request,
+        f"Восстановлено карт: {result.fixed}. Периоды: {', '.join(result.markers)}",
+    )
+    return RedirectResponse("/hr/settings#accrual-repair", status_code=303)
+
+
 @router.get("/hr/export")
 def export_page(
     request: Request,
