@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from bonus.db import open_session
+from bonus.db import open_session, release_accrual_cluster_lock, try_accrual_cluster_lock
 from bonus.models import (
     AccrualPeriod,
     Certificate,
@@ -35,19 +35,25 @@ def run_scheduled_accruals() -> int:
     """Окно 04:00 — начисления; с 23:59 — сгорание daily/weekly остатка."""
     db = open_session()
     try:
-        now = datetime.now(MSK)
-        total = 0
-        if _accrual_window_open(now):
-            total += apply_daily_accruals(db, now)
-            total += apply_weekly_accruals(db, now)
-            total += apply_monthly_accruals(db, now)
-        if _daily_burn_window_open(now):
-            total += apply_daily_burns(db, now)
-            total += apply_weekly_burns(db, now)
-        elif _weekly_burn_catchup_open(now):
-            # После дня сгорания догоняем пропущенный 23:59 до пн.
-            total += apply_weekly_burns(db, now)
-        return total
+        if not try_accrual_cluster_lock(db):
+            logger.info("Автоначисление: другой процесс уже выполняет задание")
+            return 0
+        try:
+            now = datetime.now(MSK)
+            total = 0
+            if _accrual_window_open(now):
+                total += apply_daily_accruals(db, now)
+                total += apply_weekly_accruals(db, now)
+                total += apply_monthly_accruals(db, now)
+            if _daily_burn_window_open(now):
+                total += apply_daily_burns(db, now)
+                total += apply_weekly_burns(db, now)
+            elif _weekly_burn_catchup_open(now):
+                # После дня сгорания догоняем пропущенный 23:59 до пн.
+                total += apply_weekly_burns(db, now)
+            return total
+        finally:
+            release_accrual_cluster_lock(db)
     finally:
         db.close()
 
@@ -60,7 +66,7 @@ def apply_daily_accruals(db: Session, now: datetime | None = None) -> int:
     for part, certificate in _parts_with_period(db, AccrualPeriod.daily):
         if not _part_accepts_daily(part, certificate, moment):
             continue
-        if _has_marker(db, certificate.id, part.id, TxType.credit, marker):
+        if not _accrue_part_if_needed(db, part, certificate, TxType.credit, marker):
             continue
         try:
             reset_part_balance(db, part, marker)
@@ -92,7 +98,7 @@ def apply_daily_burns(db: Session, now: datetime | None = None) -> int:
     for part, certificate in _parts_with_period(db, AccrualPeriod.daily):
         if certificate.expires_on is not None and certificate.expires_on < today_msk():
             continue
-        if _has_marker(db, certificate.id, part.id, TxType.burn, marker):
+        if not _burn_part_if_needed(db, part, certificate, marker):
             continue
         try:
             burn_part_remainder(db, part, marker)
@@ -124,7 +130,7 @@ def apply_weekly_accruals(db: Session, now: datetime | None = None) -> int:
     for part, certificate in _parts_with_period(db, AccrualPeriod.weekly):
         if not _part_accepts_weekly(certificate, moment):
             continue
-        if _has_marker(db, certificate.id, part.id, TxType.credit, marker):
+        if not _accrue_part_if_needed(db, part, certificate, TxType.credit, marker):
             continue
         try:
             reset_part_balance(db, part, marker)
@@ -168,7 +174,7 @@ def apply_weekly_burns(db: Session, now: datetime | None = None) -> int:
         burn_day = int(normalize_single_weekday(part.accrual_days, default="5"))
         if not _weekly_burn_due(moment, burn_day):
             continue
-        if _has_marker(db, certificate.id, part.id, TxType.burn, marker):
+        if not _burn_part_if_needed(db, part, certificate, marker):
             continue
         try:
             burn_part_remainder(db, part, marker)
@@ -203,7 +209,7 @@ def apply_monthly_accruals(db: Session, now: datetime | None = None) -> int:
     for part, certificate in _parts_with_period(db, AccrualPeriod.monthly):
         if not _part_accepts_monthly(certificate, moment):
             continue
-        if _has_marker(db, certificate.id, part.id, TxType.credit, marker):
+        if not _accrue_part_if_needed(db, part, certificate, TxType.credit, marker):
             continue
         try:
             reset_part_balance(db, part, marker)
@@ -360,6 +366,57 @@ def _part_accepts_monthly(certificate: Certificate, moment: datetime) -> bool:
         return False
     created = as_utc(certificate.created_at).astimezone(MSK)
     if (created.year, created.month) >= (moment.year, moment.month):
+        return False
+    return True
+
+
+def _burn_part_if_needed(
+    db: Session,
+    part: CertificatePart,
+    certificate: Certificate,
+    marker: str,
+) -> bool:
+    """Проверяет маркер сгорания и лочит часть."""
+    if _has_marker(db, certificate.id, part.id, TxType.burn, marker):
+        return False
+    row = db.execute(
+        select(CertificatePart.id)
+        .where(
+            CertificatePart.id == part.id,
+            CertificatePart.certificate_id == certificate.id,
+        )
+        .with_for_update()
+    ).scalar()
+    if row is None:
+        return False
+    db.flush()
+    if _has_marker(db, certificate.id, part.id, TxType.burn, marker):
+        return False
+    return True
+
+
+def _accrue_part_if_needed(
+    db: Session,
+    part: CertificatePart,
+    certificate: Certificate,
+    tx_type: TxType,
+    marker: str,
+) -> bool:
+    """Проверяет маркер и лочит строку части перед автоначислением."""
+    if _has_marker(db, certificate.id, part.id, tx_type, marker):
+        return False
+    row = db.execute(
+        select(CertificatePart.id)
+        .where(
+            CertificatePart.id == part.id,
+            CertificatePart.certificate_id == certificate.id,
+        )
+        .with_for_update()
+    ).scalar()
+    if row is None:
+        return False
+    db.flush()
+    if _has_marker(db, certificate.id, part.id, tx_type, marker):
         return False
     return True
 

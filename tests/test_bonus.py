@@ -42,6 +42,7 @@ from bonus.services import (
     set_blocked,
     set_certificate_expiry,
     set_certificate_single_use,
+    undo_credit,
     undo_debit,
 )
 from bonus.values import format_date, parse_money
@@ -631,6 +632,28 @@ def test_blocked_and_expired_cannot_be_spent() -> None:
     db.commit()
     with pytest.raises(BonusError):
         debit_certificate(db, issued.certificate, manager, 100, "нет")
+
+
+def test_admin_undo_credit_idempotent() -> None:
+    db = _db()
+    admin = _person(db, "admin", Role.admin)
+    hr = _person(db, "hr", Role.hr)
+    issued = issue_certificate(db, _draft(500_000), hr)
+    credit_tx = credit_certificate(db, issued.certificate, hr, 100_000, "ошибочное")
+    db.refresh(issued.certificate)
+    assert issued.certificate.balance == 600_000
+    undo_credit(db, credit_tx.id, admin, "дубль")
+    db.refresh(issued.certificate)
+    assert issued.certificate.balance == 500_000
+    reversal = db.scalar(
+        select(Transaction).where(Transaction.reversal_of_id == credit_tx.id)
+    )
+    assert reversal is not None
+    assert reversal.tx_type == TxType.debit
+    with pytest.raises(BonusError):
+        undo_credit(db, credit_tx.id, admin, "ещё раз")
+    with pytest.raises(BonusError):
+        undo_credit(db, credit_tx.id, hr, "hr не может")
 
 
 def test_manager_undo_expires_and_hr_can_still_undo() -> None:

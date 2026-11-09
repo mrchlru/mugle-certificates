@@ -133,6 +133,9 @@ def status_label(
 def tx_label(tx_type: TxType | str, reversal_of_id: int | None) -> str:
     """Название операции в журнале."""
     if reversal_of_id is not None:
+        key = tx_type.value if isinstance(tx_type, TxType) else tx_type
+        if key == TxType.debit.value:
+            return "Отмена начисления"
         return "Отмена списания"
     labels = {
         TxType.issue.value: "Выпуск",

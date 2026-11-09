@@ -406,12 +406,70 @@ def undo_debit(db: Session, tx_id: int, actor: User, reason: str) -> Transaction
     return reversal
 
 
+def undo_credit(db: Session, tx_id: int, actor: User, reason: str) -> Transaction:
+    """Снимает ошибочное начисление. Только главный администратор."""
+    tx = db.get(Transaction, tx_id)
+    if tx is None or tx.tx_type != TxType.credit:
+        raise BonusError("Начисление не найдено")
+    _ensure_can_undo_credit(db, tx, actor)
+    certificate = db.get(Certificate, tx.certificate_id, with_for_update=True)
+    if certificate is None:
+        raise BonusError("Сертификат не найден")
+    amount = max(0, int(tx.amount))
+    if amount > 0:
+        if tx.part_id is not None:
+            if not change_part_balance(db, tx.part_id, -amount):
+                db.rollback()
+                raise BonusError("Не хватает остатка части для отмены начисления")
+            sync_certificate_totals(db, certificate.id)
+        else:
+            changed = _change_balance(
+                db,
+                certificate.id,
+                -amount,
+                require_active=False,
+            )
+            if not changed:
+                db.rollback()
+                raise BonusError("Не хватает остатка для отмены начисления")
+        db.refresh(certificate)
+    reversal = _add_transaction(
+        db,
+        certificate_id=certificate.id,
+        actor_id=actor.id,
+        tx_type=TxType.debit,
+        amount=amount,
+        balance_after=certificate.balance,
+        comment=(reason or "Отмена начисления").strip()[:300],
+        reversal_of_id=tx.id,
+        part_id=tx.part_id,
+    )
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise BonusError("Это начисление уже отменено") from exc
+    db.refresh(reversal)
+    db.refresh(certificate)
+    _sync_usage(db, certificate)
+    return reversal
+
+
 def reset_part_balance(db: Session, part: CertificatePart, comment: str) -> None:
     """Сжигает остаток части и выставляет её баланс равным номиналу."""
-    certificate = db.get(Certificate, part.certificate_id)
+    locked = db.execute(
+        select(CertificatePart)
+        .where(CertificatePart.id == part.id)
+        .with_for_update()
+    ).scalar_one_or_none()
+    if locked is None:
+        raise BonusError("Часть карты не найдена")
+    part = locked
+    certificate = db.get(Certificate, part.certificate_id, with_for_update=True)
     if certificate is None:
         raise BonusError("Сертификат не найден")
     text = comment.strip()[:300] or "Автоначисление"
+    balance_before = part.balance
     leftover = part.balance
     if leftover > 0:
         if not change_part_balance(db, part.id, -leftover):
@@ -438,16 +496,31 @@ def reset_part_balance(db: Session, part: CertificatePart, comment: str) -> None
             raise BonusError("Не удалось выставить лимит автоначисления")
         sync_certificate_totals(db, certificate.id)
         db.refresh(certificate)
-    _add_transaction(
-        db,
-        certificate_id=certificate.id,
-        actor_id=None,
-        tx_type=TxType.credit,
-        amount=target,
-        balance_after=certificate.balance,
-        comment=text,
-        part_id=part.id,
-    )
+    db.refresh(part)
+    net_credit = max(0, part.balance - balance_before)
+    if net_credit > 0:
+        _add_transaction(
+            db,
+            certificate_id=certificate.id,
+            actor_id=None,
+            tx_type=TxType.credit,
+            amount=net_credit,
+            balance_after=certificate.balance,
+            comment=text,
+            part_id=part.id,
+        )
+    else:
+        # Маркер периода (в т.ч. burn+дозаправка до номинала без чистого прироста).
+        _add_transaction(
+            db,
+            certificate_id=certificate.id,
+            actor_id=None,
+            tx_type=TxType.credit,
+            amount=0,
+            balance_after=certificate.balance,
+            comment=text,
+            part_id=part.id,
+        )
     db.commit()
     db.refresh(certificate)
     _sync_usage(db, certificate)
@@ -463,6 +536,7 @@ def reset_monthly_balance(db: Session, certificate: Certificate, comment: str) -
         reset_part_balance(db, parts[0], comment)
         return
     text = comment.strip()[:300] or "Автоначисление: ежемесячно"
+    balance_before = certificate.balance
     leftover = certificate.balance
     if leftover > 0:
         changed = _change_balance(db, certificate.id, -leftover, require_active=False)
@@ -489,15 +563,27 @@ def reset_monthly_balance(db: Session, certificate: Certificate, comment: str) -
             db.rollback()
             raise BonusError("Не удалось выставить лимит автоначисления")
         db.refresh(certificate)
-    _add_transaction(
-        db,
-        certificate_id=certificate.id,
-        actor_id=None,
-        tx_type=TxType.credit,
-        amount=target,
-        balance_after=certificate.balance,
-        comment=text,
-    )
+    net_credit = max(0, certificate.balance - balance_before)
+    if net_credit > 0:
+        _add_transaction(
+            db,
+            certificate_id=certificate.id,
+            actor_id=None,
+            tx_type=TxType.credit,
+            amount=net_credit,
+            balance_after=certificate.balance,
+            comment=text,
+        )
+    else:
+        _add_transaction(
+            db,
+            certificate_id=certificate.id,
+            actor_id=None,
+            tx_type=TxType.credit,
+            amount=0,
+            balance_after=certificate.balance,
+            comment=text,
+        )
     db.commit()
     db.refresh(certificate)
     _sync_usage(db, certificate)
@@ -505,7 +591,15 @@ def reset_monthly_balance(db: Session, certificate: Certificate, comment: str) -
 
 def burn_part_remainder(db: Session, part: CertificatePart, comment: str) -> None:
     """Обнуляет остаток части (ежедневное сгорание ланча в 23:59 МСК)."""
-    certificate = db.get(Certificate, part.certificate_id)
+    locked = db.execute(
+        select(CertificatePart)
+        .where(CertificatePart.id == part.id)
+        .with_for_update()
+    ).scalar_one_or_none()
+    if locked is None:
+        raise BonusError("Часть карты не найдена")
+    part = locked
+    certificate = db.get(Certificate, part.certificate_id, with_for_update=True)
     if certificate is None:
         raise BonusError("Сертификат не найден")
     text = comment.strip()[:300] or "Сгорание остатка: ежедневно"
@@ -1643,6 +1737,15 @@ def _ensure_can_undo(db: Session, tx: Transaction, actor: User) -> None:
     age = datetime.now(timezone.utc) - as_utc(tx.created_at)
     if age > UNDO_WINDOW:
         raise BonusError("Прошло больше 15 минут — отмену сделает HR")
+
+
+def _ensure_can_undo_credit(db: Session, tx: Transaction, actor: User) -> None:
+    if actor.role != Role.admin:
+        raise BonusError("Отменять начисление может только главный администратор")
+    if tx.reversal_of_id is not None:
+        raise BonusError("Нельзя отменить служебную проводку")
+    if _is_reversed(db, tx.id):
+        raise BonusError("Это начисление уже отменено")
 
 
 def _is_reversed(db: Session, tx_id: int) -> bool:

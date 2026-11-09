@@ -16,6 +16,7 @@ from bonus.parts import PartDraft, list_parts
 from bonus.security import hash_password
 from bonus.services import BonusError, IssueDraft, debit_certificate, issue_certificate
 from bonus.values import MSK
+from sqlalchemy import select
 
 
 @pytest.fixture(autouse=True)
@@ -223,7 +224,6 @@ def test_template_rejects_same_or_single_use_combo() -> None:
 
 
 def select_debits(db, certificate_id: int):
-    from sqlalchemy import select
 
     return select(Transaction).where(
         Transaction.certificate_id == certificate_id,
@@ -249,6 +249,49 @@ def _person(db, login: str, role: Role) -> User:
     db.commit()
     db.refresh(user)
     return user
+
+
+def test_weekly_accrual_second_run_same_week_is_noop() -> None:
+    """Повторный пн 04:00 в ту же неделю не дублирует credit (регрессия двойного начисления)."""
+    db = _db()
+    hr = _person(db, "hr", Role.hr)
+    segment = create_segment(
+        db,
+        "Недельный тест",
+        AccrualPeriod.weekly,
+        accrual_days="5",
+    )
+    issued = issue_certificate(
+        db,
+        IssueDraft(
+            full_name="Дубликат тест",
+            login="",
+            password="",
+            nominal=3650_00,
+            balance=None,
+            note="",
+            expires_on=None,
+            segment_id=segment.id,
+        ),
+        hr,
+        sync_external=False,
+    )
+    issued.certificate.created_at = datetime(2026, 10, 20, 12, 0, tzinfo=MSK)
+    db.commit()
+
+    monday = datetime(2026, 11, 9, 4, 5, tzinfo=MSK)
+    assert apply_weekly_accruals(db, monday) == 1
+    assert apply_weekly_accruals(db, monday) == 0
+
+    credits = db.scalars(
+        select(Transaction).where(
+            Transaction.certificate_id == issued.certificate.id,
+            Transaction.tx_type == TxType.credit,
+            Transaction.comment.like("Автоначисление: еженедельно%"),
+        )
+    ).all()
+    assert len(credits) == 1
+    assert credits[0].amount in (0, 3650_00)
 
 
 def _tiny_png() -> bytes:

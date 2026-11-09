@@ -64,6 +64,7 @@ class Settings(BaseSettings):
     support_telegram: str = "@nkatine"
     login_allow_ips: str = ""
     forwarded_allow_ips: str = "127.0.0.1"
+    accrual_scheduler_enabled: bool = True
 
     def normalized_database_url(self) -> str:
         """Возвращает URL базы в формате SQLAlchemy."""

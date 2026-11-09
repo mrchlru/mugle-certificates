@@ -35,10 +35,9 @@ async def _lifespan(_app: FastAPI):
     (settings.data_path() / "uploads").mkdir(parents=True, exist_ok=True)
     configure_database(settings.normalized_database_url())
     bootstrap(settings)
-    workers = [
-        asyncio.create_task(accrual_worker(), name="bonus-accrual"),
-        asyncio.create_task(sheets_queue_worker(), name="bonus-sheets-queue"),
-    ]
+    workers = [asyncio.create_task(sheets_queue_worker(), name="bonus-sheets-queue")]
+    if settings.accrual_scheduler_enabled:
+        workers.append(asyncio.create_task(accrual_worker(), name="bonus-accrual"))
     try:
         yield
     finally:

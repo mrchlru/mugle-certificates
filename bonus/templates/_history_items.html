@@ -30,6 +30,12 @@
           <input type="hidden" name="next" value="{{ next_path }}">
           <button class="text-link" type="submit">Отменить</button>
         </form>
+        {% elif item.can_undo_credit %}
+        <form method="post" action="/hr/tx/{{ item.id }}/undo-credit">
+          <input type="hidden" name="csrf_token" value="{{ csrf }}">
+          <input type="hidden" name="next" value="{{ next_path }}">
+          <button class="text-link" type="submit">Отменить</button>
+        </form>
         {% elif item.undone %}
         <p class="muted">отменено</p>
         {% endif %}

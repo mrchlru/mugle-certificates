@@ -46,6 +46,7 @@ class TxView:
     reversal_of_id: int | None
     undone: bool
     can_undo: bool
+    can_undo_credit: bool
 
 
 @dataclass(frozen=True)
@@ -829,6 +830,15 @@ def _staff_search_blob(view: StaffView) -> str:
     )
 
 
+def _history_visible_tx_filter() -> ColumnElement[bool]:
+    """Скрывает служебные credit с amount=0 — маркер периода автоначисления."""
+    return or_(
+        Transaction.tx_type != TxType.credit,
+        Transaction.amount != 0,
+        ~Transaction.comment.like("Автоначисление:%"),
+    )
+
+
 def _history(
     db: Session,
     certificate_id: int,
@@ -844,7 +854,10 @@ def _history(
     query = (
         select(Transaction, User.full_name, User.restaurant)
         .outerjoin(User, Transaction.actor_id == User.id)
-        .where(Transaction.certificate_id == certificate_id)
+        .where(
+            Transaction.certificate_id == certificate_id,
+            _history_visible_tx_filter(),
+        )
     )
     if before_id is not None:
         query = query.where(Transaction.id < int(before_id))
@@ -893,6 +906,7 @@ def _tx_view(
         reversal_of_id=tx.reversal_of_id,
         undone=undone,
         can_undo=_can_undo(tx, viewer, undone),
+        can_undo_credit=_can_undo_credit(tx, viewer, undone),
     )
 
 
@@ -1160,12 +1174,23 @@ def _can_spend(certificate: Certificate, available: int | None = None) -> bool:
 def _can_undo(tx: Transaction, viewer: User | None, undone: bool) -> bool:
     if viewer is None or undone or tx.tx_type != TxType.debit:
         return False
+    if tx.reversal_of_id is not None:
+        return False
     if viewer.role in {Role.admin, Role.hr, Role.hrd}:
         return True
     if viewer.role != Role.manager or tx.actor_id != viewer.id:
         return False
     age = datetime.now(timezone.utc) - as_utc(tx.created_at)
     return age <= UNDO_WINDOW
+
+
+def _can_undo_credit(tx: Transaction, viewer: User | None, undone: bool) -> bool:
+    """Отмена начисления в журнале — только главный админ."""
+    if viewer is None or viewer.role != Role.admin or undone:
+        return False
+    if tx.tx_type != TxType.credit or tx.reversal_of_id is not None:
+        return False
+    return True
 
 
 def _undone_ids(db: Session, tx_ids: list[int]) -> set[int]:

@@ -2,7 +2,7 @@
 
 from collections.abc import Iterator
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -34,6 +34,32 @@ def open_session() -> Session:
     if SessionLocal is None:
         raise RuntimeError("База ещё не настроена")
     return SessionLocal()
+
+
+_ACCRUAL_ADVISORY_KEY = 0x424F4E55
+
+
+def try_accrual_cluster_lock(db: Session) -> bool:
+    """PostgreSQL: только один процесс/реплика гоняет автоначисление за раз."""
+    bind = db.get_bind()
+    if bind is None or bind.dialect.name != "postgresql":
+        return True
+    acquired = db.execute(
+        text("SELECT pg_try_advisory_lock(:key)"),
+        {"key": _ACCRUAL_ADVISORY_KEY},
+    ).scalar()
+    return bool(acquired)
+
+
+def release_accrual_cluster_lock(db: Session) -> None:
+    """Снимает advisory lock автоначисления (PostgreSQL)."""
+    bind = db.get_bind()
+    if bind is None or bind.dialect.name != "postgresql":
+        return
+    db.execute(
+        text("SELECT pg_advisory_unlock(:key)"),
+        {"key": _ACCRUAL_ADVISORY_KEY},
+    )
 
 
 def get_db() -> Iterator[Session]:

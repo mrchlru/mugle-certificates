@@ -94,7 +94,7 @@ from bonus.roles import (
     parse_staff_role,
     role_label,
 )
-from bonus.security import flash
+from bonus.security import flash, safe_next
 from bonus.services import (
     BonusError,
     IssueDraft,
@@ -117,6 +117,7 @@ from bonus.services import (
     update_certificate_profile,
     update_holder_profile,
     update_staff,
+    undo_credit,
 )
 from bonus.barcode_draw import barcode_png
 from bonus.catalog import ACCRUAL_NOMINAL_PERIODS, parse_accrual_period
@@ -1641,6 +1642,36 @@ def expires_submit(
 def ledger_page(request: Request, db: Session = Depends(get_db), user: User = Depends(require(Role.admin, Role.hr, Role.hrd))):
     """Журнал списаний и остальных операций."""
     return render(request, "hr_ledger.html", section="ledger", rows=ledger(db, user))
+
+
+@router.post("/hr/tx/{tx_id}/undo-credit")
+def undo_credit_tx(
+    tx_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin)),
+    csrf_token: str = Form(""),
+    next: str = Form("/hr/ledger"),
+):
+    """Отмена ошибочного начисления из журнала или карточки."""
+    target = safe_next(next, "/hr/ledger")
+    try:
+        guard_csrf(request, csrf_token)
+        reversal = undo_credit(db, tx_id, user, "Отмена начисления")
+        write_audit(
+            db,
+            actor=user,
+            action=AuditAction.credit_undo,
+            summary=f"Отмена начисления #{tx_id}",
+            target_type="transaction",
+            target_id=tx_id,
+            detail=format_money(abs(reversal.amount)),
+        )
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+        return RedirectResponse(target, status_code=303)
+    flash(request, "Начисление отменено, баланс скорректирован")
+    return RedirectResponse(target, status_code=303)
 
 
 @router.get("/hr/export")
