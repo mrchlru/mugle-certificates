@@ -2036,6 +2036,127 @@ def settings_cards_export(
     )
 
 
+@router.get("/hr/settings/birthday-import/sample.xlsx")
+def settings_birthday_import_sample(
+    user: User = Depends(require(Role.admin)),
+):
+    """Шаблон Excel для массовой загрузки карт на день рождения."""
+    from bonus.birthday_import import build_sample_workbook
+
+    return Response(
+        content=build_sample_workbook(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": 'attachment; filename="birthday_cards_sample.xlsx"'
+        },
+    )
+
+
+@router.post("/hr/settings/birthday-preview")
+async def settings_birthday_preview(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin)),
+    table: UploadFile = File(...),
+    csrf_token: str = Form(""),
+):
+    """Предпросмотр карт на ДР без записи в БД."""
+    from bonus.birthday_import import preview_birthday_workbook
+
+    try:
+        guard_csrf(request, csrf_token)
+        payload = await table.read()
+        preview = preview_birthday_workbook(
+            db,
+            filename=table.filename or "upload.xlsx",
+            payload=payload,
+        )
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+        return RedirectResponse("/hr/settings#birthday-import", status_code=303)
+    return _render_settings(request, db, birthday_preview=preview)
+
+
+@router.post("/hr/settings/birthday-commit")
+def settings_birthday_commit(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin)),
+    batch_id: str = Form(""),
+    create_duplicates: str = Form("0"),
+    csrf_token: str = Form(""),
+):
+    """Выпуск карт на ДР по предпросмотру."""
+    from bonus.birthday_import import (
+        build_birthday_import_report,
+        commit_birthday_import,
+        save_birthday_import_report,
+    )
+
+    try:
+        guard_csrf(request, csrf_token)
+        results, issued_ids = commit_birthday_import(
+            db,
+            batch_id=batch_id.strip(),
+            actor=user,
+            base_url=public_base(request),
+            create_duplicates=create_duplicates == "1",
+        )
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+        return RedirectResponse("/hr/settings#birthday-import", status_code=303)
+    queued = enqueue_certificates_for_sheets(db, issued_ids) if issued_ids else 0
+    created = sum(1 for row in results if row.status == "создана")
+    skipped = sum(1 for row in results if row.status == "пропущена")
+    failed = sum(1 for row in results if row.status == "ошибка")
+    report_id = save_birthday_import_report(
+        batch_id.strip() or "birthday",
+        build_birthday_import_report(results),
+    )
+    write_audit(
+        db,
+        actor=user,
+        action=AuditAction.import_rows,
+        summary=(
+            f"Карты на ДР batch={batch_id}: создано {created}, "
+            f"пропущено {skipped}, ошибок {failed}; Sheets +{queued}"
+        ),
+        target_type="birthday_import",
+        detail=batch_id.strip(),
+    )
+    return _render_settings(
+        request,
+        db,
+        birthday_result_rows=results,
+        birthday_result_created=created,
+        birthday_result_skipped=skipped,
+        birthday_result_failed=failed,
+        birthday_result_queued=queued,
+        birthday_report_id=report_id,
+    )
+
+
+@router.get("/hr/settings/birthday-report/{report_id}.xlsx")
+def settings_birthday_report(
+    report_id: str,
+    user: User = Depends(require(Role.admin)),
+):
+    """Скачивание отчёта по созданным картам на ДР."""
+    from bonus.birthday_import import load_birthday_import_report
+
+    try:
+        payload = load_birthday_import_report(report_id)
+    except BonusError as exc:
+        return Response(exc.message, status_code=404)
+    return Response(
+        content=payload,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": 'attachment; filename="birthday_cards_report.xlsx"'
+        },
+    )
+
+
 @router.get("/hr/settings/employee-report/{report_id}.xlsx")
 def settings_employee_report(
     report_id: str,

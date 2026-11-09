@@ -189,6 +189,100 @@
     </div>
   </section>
 
+  <section class="design-panel" style="margin-top: 20px;" id="birthday-import">
+    <header class="design-panel-head">
+      <h2>Сертификаты на день рождения</h2>
+    </header>
+    <p class="muted design-hint">
+      Лист «Карты» в Excel. Сегмент и шаблон баннера — <strong>«День рождения»</strong> (должны быть в Оформлении).
+      Обязательны: ФИО, ООО, ресторан, должность, дата рождения, срок действия, номинал.
+    </p>
+    <p>
+      <a class="text-link" href="/hr/settings/birthday-import/sample.xlsx">Скачать шаблон Excel</a>
+    </p>
+
+    {% if birthday_result_rows is defined and birthday_result_rows is not none %}
+    <div class="flash secret">
+      <p>Создано: <strong>{{ birthday_result_created }}</strong> · пропущено: {{ birthday_result_skipped }} · ошибок: {{ birthday_result_failed }}{% if birthday_result_queued %} · в очередь Sheets: {{ birthday_result_queued }}{% endif %}</p>
+      {% if birthday_report_id %}
+      <p><a class="text-link" href="/hr/settings/birthday-report/{{ birthday_report_id }}.xlsx">Скачать таблицу с созданными сертификатами</a></p>
+      {% endif %}
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Строка</th><th>ФИО</th><th>Карта</th><th>Статус</th><th>Причина</th></tr>
+        </thead>
+        <tbody>
+          {% for row in birthday_result_rows %}
+          <tr>
+            <td>{{ row.row_number }}</td>
+            <td>{{ row.full_name }}</td>
+            <td>{% if row.link %}<a class="text-link" href="{{ row.link }}">{{ row.public_number }}</a>{% else %}{{ row.public_number }}{% endif %}</td>
+            <td>{{ row.status }}</td>
+            <td class="muted">{{ row.reason }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p><a class="btn soft" href="/hr/settings#birthday-import">Загрузить ещё файл</a></p>
+
+    {% elif birthday_preview is defined and birthday_preview is not none %}
+    <div class="flash secret">
+      <p>Файл «{{ birthday_preview.filename }}»</p>
+      <p>Строк: {{ birthday_preview.total_rows }} · к созданию: {{ birthday_preview.ok_rows }} · ошибок: {{ birthday_preview.error_rows }} · возможных дублей: {{ birthday_preview.duplicate_rows }}</p>
+    </div>
+    {% if birthday_preview.error_rows or birthday_preview.duplicate_rows %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Строка</th><th>ФИО</th><th>Проблема</th></tr>
+        </thead>
+        <tbody>
+          {% for row in birthday_preview.rows if row.error or row.is_duplicate %}
+          <tr>
+            <td>{{ row.row_number }}</td>
+            <td>{{ row.full_name }}</td>
+            <td class="muted">
+              {% if row.error %}{{ row.error }}{% endif %}
+              {% if row.is_duplicate %}{% if row.error %} · {% endif %}возможный дубль{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+    <form method="post" action="/hr/settings/birthday-commit" class="stack design-create">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <input type="hidden" name="batch_id" value="{{ birthday_preview.batch_id }}">
+      <label class="switch">
+        <input type="checkbox" name="create_duplicates" value="1">
+        <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+        <span class="switch-copy">Создать всё равно (включая возможные дубли)</span>
+      </label>
+      <div class="row-actions">
+        <button class="btn" type="submit" {% if birthday_preview.ok_rows == 0 and birthday_preview.duplicate_rows == 0 %}disabled{% endif %}>Создать сертификаты</button>
+        <a class="btn soft" href="/hr/settings#birthday-import">Отмена</a>
+      </div>
+    </form>
+
+    {% else %}
+    <form method="post" action="/hr/settings/birthday-preview" enctype="multipart/form-data" class="design-create">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <label class="field">Файл .xlsx (до 2 МБ, до 1000 строк)
+        <span class="file-pick">
+          <input type="file" name="table" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
+          <span class="file-pick-btn">Выбрать файл</span>
+          <span class="file-pick-name" data-empty="Файл не выбран">Файл не выбран</span>
+        </span>
+      </label>
+      <button class="btn" type="submit">Показать предпросмотр</button>
+    </form>
+    {% endif %}
+  </section>
+
   <section class="design-panel" style="margin-top: 20px;" id="employee-import">
     <header class="design-panel-head">
       <h2>Карты сотрудников</h2>

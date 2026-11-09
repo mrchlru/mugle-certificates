@@ -55,9 +55,31 @@
 {% endif %}
 {% if cards %}
 <p class="muted summary-count" id="summary-count">Показано {{ cards|length }} из {{ cards_total }}</p>
-<div class="summary-batch-bar">
-  <button type="button" class="btn soft" id="summary-batch-open" disabled>Действие для выбранных…</button>
-  <p class="muted" id="summary-batch-hint">Отметьте строки в таблице.</p>
+<div class="summary-batch-bar" id="summary-batch-root" data-csrf="{{ csrf }}">
+  <div class="summary-batch-actions">
+    <button type="button" class="btn soft" id="summary-batch-open" disabled>Действие для выбранных…</button>
+    <p class="muted" id="summary-batch-hint">Отметьте строки в таблице.</p>
+  </div>
+  <div class="dash-extend summary-extend" id="summary-extend" hidden>
+    <p class="dash-extend-count muted" id="summary-extend-count">Выбрано: 0</p>
+    <div class="dash-extend-chips" role="group" aria-label="Продлить срок на">
+      <button type="button" class="dash-chip" data-days="1">День</button>
+      <button type="button" class="dash-chip" data-days="7">Неделя</button>
+      <button type="button" class="dash-chip" data-days="14">2 недели</button>
+      <button type="button" class="dash-chip" data-days="30">Месяц</button>
+      <button type="button" class="dash-chip" data-days="90">3 месяца</button>
+      <button type="button" class="dash-chip" data-days="360">Год</button>
+    </div>
+    <div class="dash-extend-custom">
+      <span class="muted">Своё</span>
+      <button type="button" class="dash-step" id="summary-days-minus" aria-label="Меньше">−</button>
+      <input type="number" id="summary-days-input" min="1" max="3600" value="30" inputmode="numeric">
+      <button type="button" class="dash-step" id="summary-days-plus" aria-label="Больше">+</button>
+      <span class="dash-days-label" id="summary-days-label">1 мес.</span>
+      <button type="button" class="btn compact" id="summary-extend-apply">Продлить срок</button>
+    </div>
+    <p class="dash-extend-status muted" id="summary-extend-status" hidden></p>
+  </div>
 </div>
 <div class="table-wrap">
   <table>
@@ -197,11 +219,20 @@
     return body.querySelectorAll("input.summary-pick:checked").length;
   }
 
+  var batchRoot = document.getElementById("summary-batch-root");
+  var extendPanel = document.getElementById("summary-extend");
+  var extendCount = document.getElementById("summary-extend-count");
+  var extendStatus = document.getElementById("summary-extend-status");
+  var daysInput = document.getElementById("summary-days-input");
+  var daysLabel = document.getElementById("summary-days-label");
+
   function syncBatchBar() {
     if (!batchOpen || !batchHint) return;
     var n = pickedCount();
     batchOpen.disabled = n === 0;
     batchHint.textContent = n ? ("Выбрано карт: " + n) : "Отметьте строки в таблице.";
+    if (extendPanel) extendPanel.hidden = n === 0;
+    if (extendCount) extendCount.textContent = "Выбрано: " + n;
   }
 
   function syncPickAll() {
@@ -266,6 +297,117 @@
     batchForm.addEventListener("submit", function () {
       batchDialog.close();
     });
+  }
+
+  function pickedIds() {
+    var ids = [];
+    if (!body) return ids;
+    var sel = body.querySelectorAll("input.summary-pick:checked");
+    for (var i = 0; i < sel.length; i++) ids.push(sel[i].value);
+    return ids;
+  }
+
+  function extendDaysLabel(days) {
+    var n = Math.max(1, Math.min(3600, Math.round(Number(days) || 1)));
+    if (n >= 360 && n % 360 === 0) {
+      var y = n / 360;
+      return y === 1 ? "1 г." : y + " г.";
+    }
+    if (n >= 30 && n % 30 === 0) return (n / 30) + " мес.";
+    return n + " дн.";
+  }
+
+  function extendStepSize(days) {
+    var n = Math.max(1, Math.round(Number(days) || 1));
+    if (n >= 360 && n % 360 === 0) return 360;
+    if (n >= 30 && n % 30 === 0) return 30;
+    return 1;
+  }
+
+  function syncExtendDaysLabel() {
+    if (!daysInput || !daysLabel) return;
+    var n = Math.max(1, Math.min(3600, Math.round(Number(daysInput.value) || 1)));
+    daysInput.value = String(n);
+    daysLabel.textContent = extendDaysLabel(n);
+  }
+
+  function showExtendStatus(text, isBad) {
+    if (!extendStatus) return;
+    extendStatus.hidden = false;
+    extendStatus.textContent = text;
+    extendStatus.classList.toggle("is-bad", !!isBad);
+  }
+
+  function extendSelected(days) {
+    var ids = pickedIds();
+    if (!ids.length) return;
+    if (!days || days < 1) {
+      showExtendStatus("Укажите число дней", true);
+      return;
+    }
+    var bodyFd = new FormData();
+    bodyFd.append("csrf_token", (batchRoot && batchRoot.getAttribute("data-csrf")) || "");
+    bodyFd.append("ids", ids.join(","));
+    bodyFd.append("days", String(days));
+    showExtendStatus("Продлеваю…", false);
+    fetch("/hr/dashboard/extend", { method: "POST", body: bodyFd, credentials: "same-origin" })
+      .then(function (response) {
+        return response.json().then(function (data) {
+          return { ok: response.ok, data: data };
+        });
+      })
+      .then(function (result) {
+        if (!result.ok) {
+          showExtendStatus((result.data && result.data.message) || "Не удалось продлить", true);
+          return;
+        }
+        showExtendStatus(result.data.message || "Готово", false);
+        window.setTimeout(function () { window.location.reload(); }, 700);
+      })
+      .catch(function () {
+        showExtendStatus("Ошибка сети", true);
+      });
+  }
+
+  if (batchRoot) {
+    batchRoot.querySelectorAll(".dash-chip").forEach(function (chip) {
+      chip.addEventListener("click", function () {
+        var days = Number(chip.getAttribute("data-days") || 0);
+        if (days > 0) extendSelected(days);
+      });
+    });
+    var minus = document.getElementById("summary-days-minus");
+    var plus = document.getElementById("summary-days-plus");
+    var apply = document.getElementById("summary-extend-apply");
+    if (minus && daysInput) {
+      minus.addEventListener("click", function () {
+        var n = Math.round(Number(daysInput.value) || 1);
+        var step = extendStepSize(n);
+        daysInput.value = String(Math.max(1, n - step));
+        syncExtendDaysLabel();
+      });
+    }
+    if (plus && daysInput) {
+      plus.addEventListener("click", function () {
+        var n = Math.round(Number(daysInput.value) || 1);
+        var step = extendStepSize(n);
+        var next = n + step;
+        if (n < 30 && next > 30) next = 30;
+        else if (n < 360 && n >= 30 && next > 360 && n % 30 === 0) next = 360;
+        daysInput.value = String(Math.min(3600, next));
+        syncExtendDaysLabel();
+      });
+    }
+    if (daysInput) {
+      daysInput.addEventListener("input", syncExtendDaysLabel);
+      daysInput.addEventListener("change", syncExtendDaysLabel);
+    }
+    if (apply) {
+      apply.addEventListener("click", function () {
+        extendSelected(Math.round(Number(daysInput && daysInput.value) || 0));
+      });
+    }
+    syncExtendDaysLabel();
   }
 
   if (!body || !sentinel) return;
