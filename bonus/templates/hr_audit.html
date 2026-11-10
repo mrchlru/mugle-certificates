@@ -6,6 +6,19 @@
     <h1>Контроль</h1>
   </header>
 
+  <form class="search filters" method="get" action="/hr/audit">
+    <input name="q" value="{{ query }}" placeholder="Кто, что сделали, детали">
+    <select name="action" aria-label="Действие">
+      {% for key, label in action_options %}
+      <option value="{{ key }}" {% if action_filter == key %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <button class="btn" type="submit">Найти</button>
+  </form>
+  {% if query or action_filter != 'all' %}
+  <p class="muted">Показано до {{ rows|length }} записей{% if query %} · поиск «{{ query }}»{% endif %}</p>
+  {% endif %}
+
   {% if rows %}
   <div class="table-wrap">
     <table class="audit-table">
@@ -36,7 +49,7 @@
     </table>
   </div>
   {% else %}
-  <p class="muted">Пока записей нет — они появятся после действий сотрудников.</p>
+  <p class="muted">По этому запросу записей нет.</p>
   {% endif %}
 </section>
 {% endblock %}

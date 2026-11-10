@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 from bonus.models import AuditAction, AuditLog, User
 from bonus.values import format_money
 
+AUDIT_LIST_LIMIT = 300
+
 
 @dataclass(frozen=True)
 class AuditView:
@@ -41,6 +43,7 @@ _ACTION_LABELS: dict[str, str] = {
     AuditAction.debit_undo.value: "Отмена списания",
     AuditAction.credit_undo.value: "Отмена начисления",
     AuditAction.accrual_balance_repair.value: "Восстановление остатков автоначисления",
+    AuditAction.accrual_manual_run.value: "Ручной запуск автоначисления",
     AuditAction.import_rows.value: "Импорт карт",
     AuditAction.certificate_delete.value: "Удаление карты",
     AuditAction.template_delete.value: "Удаление шаблона",
@@ -77,13 +80,59 @@ def write_audit(
     return row
 
 
-def list_audit(db: Session, *, limit: int = 300) -> list[AuditView]:
+def audit_action_choices() -> tuple[tuple[str, str], ...]:
+    """Фильтр действия для раздела «Контроль»."""
+    items: list[tuple[str, str]] = [("all", "Все действия")]
+    for action in AuditAction:
+        items.append((action.value, _ACTION_LABELS.get(action.value, action.value)))
+    return tuple(items)
+
+
+def normalize_audit_action_filter(raw: str) -> str:
+    """Допустимое значение фильтра контроля."""
+    cleaned = (raw or "").strip().casefold()
+    if cleaned == "all":
+        return "all"
+    for action in AuditAction:
+        if action.value == cleaned:
+            return cleaned
+    return "all"
+
+
+def list_audit(
+    db: Session,
+    *,
+    query: str = "",
+    action_filter: str = "all",
+    limit: int = AUDIT_LIST_LIMIT,
+) -> list[AuditView]:
     """Последние записи журнала для admin и HRD."""
+    from bonus.present import _text_search_clause
+
+    filters = []
+    action_key = normalize_audit_action_filter(action_filter)
+    if action_key != "all":
+        filters.append(AuditLog.action == action_key)
+    search_clause = _text_search_clause(
+        db,
+        query,
+        (
+            User.full_name,
+            User.login,
+            AuditLog.summary,
+            AuditLog.detail,
+            AuditLog.action,
+            AuditLog.target_type,
+        ),
+    )
+    if search_clause is not None:
+        filters.append(search_clause)
     rows = db.execute(
         select(AuditLog, User.full_name, User.login)
         .outerjoin(User, AuditLog.actor_id == User.id)
+        .where(*filters)
         .order_by(AuditLog.id.desc())
-        .limit(limit)
+        .limit(max(1, min(int(limit), 500)))
     ).all()
     return [
         AuditView(
