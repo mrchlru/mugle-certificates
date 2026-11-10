@@ -17,6 +17,29 @@
     <p><a class="btn soft" href="/hr/settings/cards-export.xlsx">Скачать Excel</a></p>
   </section>
 
+  <section class="design-panel design-wallet-settings" id="accrual-diag">
+    <header class="design-panel-head">
+      <h2>Ежедневное автоначисление</h2>
+    </header>
+  {% if accrual_diag %}
+    <p class="muted design-hint">Сейчас {{ accrual_diag.now_msk }} МСК · день недели ISO {{ accrual_diag.weekday }} · маркер <code>{{ accrual_diag.marker }}</code></p>
+    <ul class="muted design-hint">
+      <li>Планировщик в этом процессе: {% if accrual_diag.scheduler_enabled %}<strong>включён</strong>{% else %}<strong class="bad">выключен</strong> (ACCRUAL_SCHEDULER_ENABLED){% endif %}</li>
+      <li>Дневных частей (активные): {{ accrual_diag.daily_parts_total }}</li>
+      <li>Подходят сегодня: {{ accrual_diag.eligible_today }} · уже начислено с маркером: {{ accrual_diag.credits_with_marker }}</li>
+      <li>Ждут начисления: {% if accrual_diag.pending_accrual %}<strong>{{ accrual_diag.pending_accrual }}</strong>{% else %}0{% endif %}
+        {% if accrual_diag.pending_samples %} — {{ accrual_diag.pending_samples|join(', ') }}{% if accrual_diag.pending_accrual > accrual_diag.pending_samples|length %}…{% endif %}{% endif %}
+      </li>
+      <li>Пропуски: не тот день недели — {{ accrual_diag.skip_weekday }}, просрочены — {{ accrual_diag.skip_expired }}, выпущены сегодня — {{ accrual_diag.skip_issued_today }}</li>
+    </ul>
+    <form method="post" action="/hr/settings/run-scheduled-accruals" class="design-create">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <button class="btn soft" type="submit">Запустить планировщик сейчас</button>
+    </form>
+    <p class="muted design-hint">Безопасно для повторного нажатия: уже начисленные карты пропускаются по маркеру дня.</p>
+  {% endif %}
+  </section>
+
   <section class="design-panel design-wallet-settings" id="accrual-repair">
     <header class="design-panel-head">
       <h2>Восстановление автоначислений</h2>

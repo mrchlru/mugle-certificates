@@ -35,9 +35,11 @@ from bonus.app_settings import (
 )
 from bonus.audit import (
     accrual_nominal_audit_detail,
+    audit_action_choices,
     credit_audit_detail,
     debit_audit_detail,
     list_audit,
+    normalize_audit_action_filter,
     write_audit,
 )
 from bonus.db import get_db
@@ -76,8 +78,10 @@ from bonus.present import (
     admin_dashboard,
     dashboard_stats,
     ledger,
+    ledger_tx_choices,
     list_staff,
     load_card,
+    normalize_ledger_tx_filter,
     normalize_sort,
     normalize_status_filter,
     parse_summary_template_filter,
@@ -1639,9 +1643,30 @@ def expires_submit(
 
 
 @router.get("/hr/ledger")
-def ledger_page(request: Request, db: Session = Depends(get_db), user: User = Depends(require(Role.admin, Role.hr, Role.hrd))):
+def ledger_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin, Role.hr, Role.hrd)),
+    q: str = "",
+    tx: str = "all",
+):
     """Журнал списаний и остальных операций."""
-    return render(request, "hr_ledger.html", section="ledger", rows=ledger(db, user))
+    from urllib.parse import urlencode
+
+    tx_key = normalize_ledger_tx_filter(tx)
+    ledger_return = "/hr/ledger"
+    if (q or "").strip() or tx_key != "all":
+        ledger_return = f"/hr/ledger?{urlencode({'q': q, 'tx': tx_key})}"
+    return render(
+        request,
+        "hr_ledger.html",
+        section="ledger",
+        rows=ledger(db, user, query=q, tx_filter=tx_key),
+        query=q,
+        tx_filter=tx_key,
+        tx_options=ledger_tx_choices(),
+        ledger_return=ledger_return,
+    )
 
 
 @router.post("/hr/tx/{tx_id}/undo-credit")
@@ -1672,6 +1697,36 @@ def undo_credit_tx(
         return RedirectResponse(target, status_code=303)
     flash(request, "Начисление отменено, баланс скорректирован")
     return RedirectResponse(target, status_code=303)
+
+
+@router.post("/hr/settings/run-scheduled-accruals")
+def settings_run_scheduled_accruals(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin)),
+    csrf_token: str = Form(""),
+):
+    """Ручной запуск планировщика автоначислений (догон за сегодня)."""
+    from bonus.accrual import run_scheduled_accruals
+
+    try:
+        guard_csrf(request, csrf_token)
+        total, lock_acquired = run_scheduled_accruals()
+        if not lock_acquired:
+            flash(request, "Другой процесс уже выполняет автоначисление — повторите через минуту", "bad")
+            return RedirectResponse("/hr/settings#accrual-diag", status_code=303)
+        write_audit(
+            db,
+            actor=user,
+            action=AuditAction.accrual_manual_run,
+            summary=f"Ручной запуск автоначисления: {total} операций",
+            target_type="accrual",
+        )
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+        return RedirectResponse("/hr/settings#accrual-diag", status_code=303)
+    flash(request, f"Планировщик выполнен: {total} операций")
+    return RedirectResponse("/hr/settings#accrual-diag", status_code=303)
 
 
 @router.post("/hr/settings/repair-accrual-balances")
@@ -1862,6 +1917,7 @@ def export_unmark(
 
 def _render_settings(request: Request, db: Session, **extra):
     """Общий рендер страницы Настройки (кошельки, импорты, Sheets)."""
+    from bonus.accrual_diag import daily_accrual_diagnostic
     from bonus.iiko_monitor import build_settings_kassy_summary
     from bonus.login_guard import list_blocked_attempts
     from bonus.sheets_queue import queue_stats
@@ -1877,6 +1933,7 @@ def _render_settings(request: Request, db: Session, **extra):
         sheets_queue=queue_stats(db),
         sheets_credentials_error=sheets_credentials_error(),
         blocked_logins=list_blocked_attempts(db),
+        accrual_diag=daily_accrual_diagnostic(db),
         **extra,
     )
 
@@ -2487,13 +2544,19 @@ def audit_page(
     request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(require(*AUDIT_ROLES)),
+    q: str = "",
+    action: str = "all",
 ):
     """Журнал действий сотрудников для admin и HRD."""
+    action_key = normalize_audit_action_filter(action)
     return render(
         request,
         "hr_audit.html",
         section="audit",
-        rows=list_audit(db),
+        rows=list_audit(db, query=q, action_filter=action_key),
+        query=q,
+        action_filter=action_key,
+        action_options=audit_action_choices(),
     )
 
 

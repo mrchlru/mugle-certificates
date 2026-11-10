@@ -50,6 +50,7 @@ class AuditAction(str, enum.Enum):
     debit_undo = "debit_undo"
     credit_undo = "credit_undo"
     accrual_balance_repair = "accrual_balance_repair"
+    accrual_manual_run = "accrual_manual_run"
     import_rows = "import_rows"
     certificate_delete = "certificate_delete"
     template_delete = "template_delete"

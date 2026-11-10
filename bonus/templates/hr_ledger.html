@@ -2,7 +2,19 @@
 {% block title %}Журнал{% endblock %}
 {% block content %}
 <h1>Журнал</h1>
-{% set next_path = '/hr/ledger' %}
+<form class="search filters" method="get" action="/hr/ledger">
+  <input name="q" value="{{ query }}" placeholder="Карта, сотрудник, комментарий, ресторан, чек">
+  <select name="tx" aria-label="Тип операции">
+    {% for key, label in tx_options %}
+    <option value="{{ key }}" {% if tx_filter == key %}selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+  </select>
+  <button class="btn" type="submit">Найти</button>
+</form>
+{% if query or tx_filter != 'all' %}
+<p class="muted">Показано до {{ rows|length }} записей{% if query %} · поиск «{{ query }}»{% endif %}{% if tx_filter != 'all' %} · фильтр{% endif %}</p>
+{% endif %}
+{% set next_path = ledger_return|default('/hr/ledger') %}
 {% set show_holder = true %}
 {% with items=rows %}
   {% include "_history.html" %}

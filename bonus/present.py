@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import ColumnElement, case, exists, func, literal, or_, select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, aliased, selectinload
 
 from bonus.catalog import media_url
 from bonus.models import (
@@ -25,6 +25,18 @@ from bonus.values import MSK, as_utc, format_short_code, today_msk
 
 UNDO_WINDOW = timedelta(minutes=15)
 HISTORY_PAGE_SIZE = 10
+LEDGER_LIST_LIMIT = 200
+_LEDGER_TX_CHOICES: tuple[tuple[str, str], ...] = (
+    ("all", "Все операции"),
+    ("credit", "Начисления"),
+    ("debit", "Списания"),
+    ("burn", "Сгорание"),
+    ("issue", "Выпуск"),
+    ("expire", "По сроку"),
+    ("block", "Блокировка"),
+    ("unblock", "Разблокировка"),
+    ("migrate", "Перенос"),
+)
 
 
 @dataclass(frozen=True)
@@ -542,32 +554,50 @@ def _summary_filters(
     return filters
 
 
-def _summary_search_clause(db: Session, query: str):
-    """LIKE по тем же полям, что искал Python casefold; пустой запрос — None."""
+def _text_search_clause(db: Session, query: str, fields: tuple[ColumnElement, ...]):
+    """Нечёткий поиск по нескольким колонкам; пустой запрос — None."""
     needle = " ".join(query.split()).casefold()
     if not needle:
         return None
-    escaped = (
-        needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    )
+    escaped = needle.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     pattern = f"%{escaped}%"
-    fields = (
-        User.full_name,
-        User.department,
-        User.job_title,
-        User.phone,
-        Certificate.public_number,
-        Certificate.short_code,
-        Certificate.note,
-        Segment.name,
-        CardTemplate.name,
-    )
     return or_(
         *(
             _ci(db, func.coalesce(column, "")).like(pattern, escape="\\")
             for column in fields
         )
     )
+
+
+def _summary_search_clause(db: Session, query: str):
+    """LIKE по тем же полям, что искал Python casefold; пустой запрос — None."""
+    return _text_search_clause(
+        db,
+        query,
+        (
+            User.full_name,
+            User.department,
+            User.job_title,
+            User.phone,
+            Certificate.public_number,
+            Certificate.short_code,
+            Certificate.note,
+            Segment.name,
+            CardTemplate.name,
+        ),
+    )
+
+
+def ledger_tx_choices() -> tuple[tuple[str, str], ...]:
+    """Фильтр типа операции для журнала."""
+    return _LEDGER_TX_CHOICES
+
+
+def normalize_ledger_tx_filter(raw: str) -> str:
+    """Допустимый фильтр журнала; иначе все операции."""
+    cleaned = (raw or "").strip().casefold()
+    allowed = {key for key, _label in _LEDGER_TX_CHOICES}
+    return cleaned if cleaned in allowed else "all"
 
 
 def _summary_balance_expr():
@@ -751,14 +781,45 @@ def admin_dashboard(db: Session) -> AdminDashboard:
     )
 
 
-def ledger(db: Session, actor: User, limit: int = 200) -> list[TxView]:
-    """Журнал операций, новые сверху."""
+def ledger(
+    db: Session,
+    actor: User,
+    query: str = "",
+    tx_filter: str = "all",
+    limit: int = LEDGER_LIST_LIMIT,
+) -> list[TxView]:
+    """Журнал операций, новые сверху; поиск и фильтр по типу."""
+    holder = aliased(User)
+    tx_actor = aliased(User)
+    filters: list[ColumnElement] = []
+    tx_key = normalize_ledger_tx_filter(tx_filter)
+    if tx_key != "all":
+        filters.append(Transaction.tx_type == TxType(tx_key))
+    search_clause = _text_search_clause(
+        db,
+        query,
+        (
+            Certificate.public_number,
+            Certificate.short_code,
+            holder.full_name,
+            holder.phone,
+            holder.department,
+            tx_actor.full_name,
+            Transaction.comment,
+            Transaction.restaurant,
+            Transaction.order_ref,
+        ),
+    )
+    if search_clause is not None:
+        filters.append(search_clause)
     rows = db.execute(
-        select(Transaction, Certificate.public_number, User.full_name)
+        select(Transaction, Certificate.public_number, holder.full_name)
         .join(Certificate, Transaction.certificate_id == Certificate.id)
-        .join(User, Certificate.holder_id == User.id)
+        .join(holder, Certificate.holder_id == holder.id)
+        .outerjoin(tx_actor, Transaction.actor_id == tx_actor.id)
+        .where(*filters)
         .order_by(Transaction.id.desc())
-        .limit(limit)
+        .limit(max(1, min(int(limit), 500)))
     ).all()
     actor_ids = {row[0].actor_id for row in rows if row[0].actor_id is not None}
     names = _user_names(db, actor_ids)

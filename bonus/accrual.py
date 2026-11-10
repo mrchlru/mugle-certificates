@@ -31,13 +31,17 @@ _DAILY_BURN_PREFIX = "Сгорание остатка: ежедневно"
 _WEEKLY_BURN_PREFIX = "Сгорание остатка: еженедельно"
 
 
-def run_scheduled_accruals() -> int:
-    """Окно 04:00 — начисления; с 23:59 — сгорание daily/weekly остатка."""
+def run_scheduled_accruals() -> tuple[int, bool]:
+    """Окно 04:00 — начисления; с 23:59 — сгорание daily/weekly остатка.
+
+    Returns:
+        (число обработанных частей/операций, удалось ли взять cluster lock).
+    """
     db = open_session()
     try:
         if not try_accrual_cluster_lock(db):
             logger.info("Автоначисление: другой процесс уже выполняет задание")
-            return 0
+            return 0, False
         try:
             now = datetime.now(MSK)
             total = 0
@@ -51,7 +55,7 @@ def run_scheduled_accruals() -> int:
             elif _weekly_burn_catchup_open(now):
                 # После дня сгорания догоняем пропущенный 23:59 до пн.
                 total += apply_weekly_burns(db, now)
-            return total
+            return total, True
         finally:
             release_accrual_cluster_lock(db)
     finally:
@@ -239,12 +243,16 @@ def apply_monthly_accruals(db: Session, now: datetime | None = None) -> int:
 async def accrual_worker() -> None:
     """Фоновый цикл: догон, затем сон до ближайших 04:00 или 23:59 МСК."""
     while True:
+        lock_acquired = True
         try:
-            await asyncio.to_thread(run_scheduled_accruals)
+            _total, lock_acquired = await asyncio.to_thread(run_scheduled_accruals)
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.exception("Сбой автоначисления")
+        if not lock_acquired:
+            await asyncio.sleep(60.0)
+            continue
         await asyncio.sleep(_seconds_until_next_job())
 
 
