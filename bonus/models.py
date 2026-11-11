@@ -304,6 +304,7 @@ class IikoTerminal(Base):
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: _utcnow())
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: _utcnow())
     last_ip: Mapped[str] = mapped_column(String(64), default="")
+    debit_blocked: Mapped[bool] = mapped_column(default=False)
 
 
 class IikoExpectedRestaurant(Base):

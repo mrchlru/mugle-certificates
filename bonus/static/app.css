@@ -3019,3 +3019,40 @@ body.partners-dialog-open {
   background: #f1f3f4;
   color: #5f6368;
 }
+
+.kassy-lock-cell {
+  text-align: center;
+  vertical-align: middle;
+}
+
+.kassy-lock {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  background: transparent;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.kassy-lock.is-open {
+  color: #137333;
+  background: #e6f4ea;
+}
+
+.kassy-lock.is-open:hover {
+  background: #ceead6;
+}
+
+.kassy-lock.is-locked {
+  color: #c5221f;
+  background: #fce8e6;
+}
+
+.kassy-lock.is-locked:hover {
+  background: #f9d3cf;
+}

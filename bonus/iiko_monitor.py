@@ -76,6 +76,42 @@ def upsert_heartbeat(db: Session, payload: dict[str, Any], client_ip: str) -> No
     db.commit()
 
 
+DEBIT_BLOCKED_MESSAGE = "Списание бонусов на этой кассе отключено администратором"
+
+
+def resolve_terminal(
+    db: Session,
+    *,
+    terminal_id: str = "",
+    restaurant: str = "",
+) -> IikoTerminal | None:
+    """Находит кассу по guid из плагина или по названию ресторана (как в debit 1.1.0)."""
+    tid = (terminal_id or "").strip()
+    if tid:
+        return db.scalar(select(IikoTerminal).where(IikoTerminal.terminal_id == tid))
+    matches = _terminals_by_restaurant_name(db, restaurant)
+    if not matches:
+        return None
+    _sort_by_last_seen(matches)
+    return matches[0]
+
+
+def terminal_debit_blocked(db: Session, *, terminal_id: str = "", restaurant: str = "") -> bool:
+    """True, если для этой кассы запрещено списание бонусов."""
+    row = resolve_terminal(db, terminal_id=terminal_id, restaurant=restaurant)
+    return bool(row and row.debit_blocked)
+
+
+def set_terminal_debit_blocked(db: Session, terminal_db_id: int, blocked: bool) -> bool:
+    """Включает или снимает блокировку списания на кассе."""
+    row = db.get(IikoTerminal, terminal_db_id)
+    if row is None:
+        return False
+    row.debit_blocked = blocked
+    db.commit()
+    return True
+
+
 def forget_terminal(db: Session, terminal_id: int) -> bool:
     """Удаляет запись кассы из мониторинга."""
     row = db.get(IikoTerminal, terminal_id)
@@ -226,10 +262,31 @@ def _terminal_row(
         "last_seen_exact": last_seen.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         "pending_ops": terminal.pending_ops,
         "debit_code_supported": terminal_supports_debit_code(terminal),
+        "debit_blocked": bool(terminal.debit_blocked),
         "last_error": terminal.last_error or "",
         "license_ok": terminal.license_ok,
         "payment_type_bound": terminal.payment_type_bound,
     }
+
+
+def _terminals_by_restaurant_name(db: Session, restaurant: str) -> list[IikoTerminal]:
+    """Все кассы с тем же нормализованным именем ресторана, что в теле debit."""
+    norm = normalize_restaurant(restaurant)
+    if not norm:
+        return []
+    return [
+        row
+        for row in db.scalars(select(IikoTerminal)).all()
+        if normalize_restaurant(row.restaurant) == norm
+    ]
+
+
+def _sort_by_last_seen(terminals: list[IikoTerminal]) -> None:
+    """Сортирует по убыванию last_seen — актуальная запись первой."""
+    terminals.sort(
+        key=lambda row: _aware(row.last_seen_at),
+        reverse=True,
+    )
 
 
 def _relative_last_seen(last_seen: datetime, now: datetime) -> str:
