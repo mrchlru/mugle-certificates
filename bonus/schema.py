@@ -224,10 +224,19 @@ def ensure_schema(engine: Engine) -> None:
                 last_error_at TIMESTAMP,
                 first_seen_at TIMESTAMP,
                 last_seen_at TIMESTAMP,
-                last_ip VARCHAR(64) DEFAULT ''
+                last_ip VARCHAR(64) DEFAULT '',
+                debit_blocked BOOLEAN DEFAULT 0
             )
             """
         )
+    elif "iiko_terminals" in tables:
+        term_cols = {column["name"] for column in inspector.get_columns("iiko_terminals")}
+        if "debit_blocked" not in term_cols:
+            dialect = engine.dialect.name
+            default = "FALSE" if dialect == "postgresql" else "0"
+            statements.append(
+                f"ALTER TABLE iiko_terminals ADD COLUMN debit_blocked BOOLEAN DEFAULT {default}"
+            )
     if "iiko_expected_restaurants" not in tables:
         statements.append(
             """

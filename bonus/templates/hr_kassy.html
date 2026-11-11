@@ -5,6 +5,24 @@
 document.addEventListener("DOMContentLoaded", function () {
   var table = document.getElementById("kassy-table-body");
   var summary = document.getElementById("kassy-summary");
+  function lockButton(row) {
+    if (!row.terminal_db_id) return "—";
+    var blocked = !!row.debit_blocked;
+    var next = blocked ? "0" : "1";
+    var cls = blocked ? "is-locked" : "is-open";
+    var title = blocked
+      ? "Списание заблокировано. Нажмите, чтобы разрешить."
+      : "Списание разрешено. Нажмите, чтобы заблокировать.";
+    return '<form method="post" action="/hr/kassy/terminals/' + row.terminal_db_id + '/debit-block" class="inline kassy-lock-form">' +
+      '<input type="hidden" name="csrf_token" value="{{ csrf }}">' +
+      '<input type="hidden" name="blocked" value="' + next + '">' +
+      '<button type="submit" class="kassy-lock ' + cls + '" title="' + title + '" aria-label="' + title + '">' +
+      '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">' +
+      (blocked
+        ? '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>'
+        : '<path d="M7 11V8a5 5 0 0 1 9.9-1"/><rect x="5" y="11" width="14" height="10" rx="2"/>') +
+      "</svg></button></form>";
+  }
   function refresh() {
     fetch("/hr/kassy/data", { credentials: "same-origin" })
       .then(function (r) { return r.json(); })
@@ -36,6 +54,7 @@ document.addEventListener("DOMContentLoaded", function () {
             '<td title="' + (row.last_seen_exact || "") + '">' + row.last_seen_label + "</td>" +
             "<td>" + row.pending_ops + "</td>" +
             "<td>" + code + "</td>" +
+            '<td class="kassy-lock-cell">' + lockButton(row) + "</td>" +
             "<td>" + (row.last_error || "—") + "</td>" +
             "<td>" + actions + "</td></tr>";
         }).join("");
@@ -58,6 +77,7 @@ document.addEventListener("DOMContentLoaded", function () {
 <p class="muted">
   Ресторан и касса появляются сами, когда плагин Teams Bonus на iikoFront впервые отправит heartbeat
   (название ресторана берётся из iiko). Актуальная версия плагина: {{ dashboard.latest_plugin_version }}.
+  Замок: зелёный — бонусы разрешены, красный — списание отключено. С плагином 1.1.0 касса определяется по названию ресторана из iiko.
 </p>
 
 <table class="data-table">
@@ -70,6 +90,7 @@ document.addEventListener("DOMContentLoaded", function () {
       <th>Последний сигнал</th>
       <th>Очередь</th>
       <th>Код списания</th>
+      <th>Бонусы</th>
       <th>Ошибка</th>
       <th></th>
     </tr>
@@ -90,6 +111,28 @@ document.addEventListener("DOMContentLoaded", function () {
       <td title="{{ row.last_seen_exact }}">{{ row.last_seen_label }}</td>
       <td>{{ row.pending_ops }}</td>
       <td>{% if row.debit_code_supported %}да{% else %}нет{% endif %}</td>
+      <td class="kassy-lock-cell">
+        {% if row.terminal_db_id %}
+        <form method="post" action="/hr/kassy/terminals/{{ row.terminal_db_id }}/debit-block" class="inline kassy-lock-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf }}">
+          <input type="hidden" name="blocked" value="{% if row.debit_blocked %}0{% else %}1{% endif %}">
+          <button type="submit"
+            class="kassy-lock {% if row.debit_blocked %}is-locked{% else %}is-open{% endif %}"
+            title="{% if row.debit_blocked %}Списание заблокировано. Нажмите, чтобы разрешить.{% else %}Списание разрешено. Нажмите, чтобы заблокировать.{% endif %}"
+            aria-label="{% if row.debit_blocked %}Разблокировать списание бонусов{% else %}Заблокировать списание бонусов{% endif %}">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              {% if row.debit_blocked %}
+              <rect x="5" y="11" width="14" height="10" rx="2"/>
+              <path d="M8 11V8a4 4 0 0 1 8 0v3"/>
+              {% else %}
+              <path d="M7 11V8a5 5 0 0 1 9.9-1"/>
+              <rect x="5" y="11" width="14" height="10" rx="2"/>
+              {% endif %}
+            </svg>
+          </button>
+        </form>
+        {% else %}—{% endif %}
+      </td>
       <td>{{ row.last_error or "—" }}</td>
       <td>
         {% if row.terminal_db_id %}
@@ -101,7 +144,7 @@ document.addEventListener("DOMContentLoaded", function () {
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="9" class="muted">Пока нет касс — установите плагин на iikoFront и перезапустите кассу.</td></tr>
+    <tr><td colspan="10" class="muted">Пока нет касс — установите плагин на iikoFront и перезапустите кассу.</td></tr>
     {% endfor %}
   </tbody>
 </table>

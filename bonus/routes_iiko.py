@@ -20,7 +20,11 @@ from bonus.debit_code import (
     handle_iiko_debit,
     resend_challenge_code,
 )
-from bonus.iiko_monitor import upsert_heartbeat
+from bonus.iiko_monitor import (
+    DEBIT_BLOCKED_MESSAGE,
+    terminal_debit_blocked,
+    upsert_heartbeat,
+)
 from bonus.services import (
     BonusError,
     IikoDebitResult,
@@ -64,6 +68,7 @@ class DebitBody(BaseModel):
     cheque_detail: str = ""
     challenge_id: str = ""
     debit_code: str = Field(default="", max_length=8, description="4 цифры подтверждения")
+    terminal_id: str = Field(default="", max_length=80, description="Guid кассы из плагина")
 
 
 class HeartbeatBody(BaseModel):
@@ -202,12 +207,18 @@ def iiko_lookup(
 @router.post("/debit")
 def iiko_debit(
     body: DebitBody,
+    request: Request,
     db: Session = Depends(get_db),
     _: None = Depends(require_iiko_key),
     x_plugin_features: Annotated[str, Header(alias="X-Plugin-Features")] = "",
+    x_terminal_id: Annotated[str, Header(alias="X-Terminal-Id")] = "",
 ) -> Any:
     """Списывает бонусы (целиком или часть); remainder — доплата картой/налом."""
     from bonus.values import MoneyError, format_money, parse_money
+
+    terminal_key = _resolve_terminal_id(body.terminal_id, x_terminal_id)
+    if terminal_debit_blocked(db, terminal_id=terminal_key, restaurant=body.restaurant):
+        raise HTTPException(status_code=403, detail=DEBIT_BLOCKED_MESSAGE)
 
     try:
         amount = parse_money(body.amount_rub)
@@ -320,6 +331,14 @@ def iiko_refund(
         refunded=tx.amount,
         refunded_rub=format_money(tx.amount),
     )
+
+
+def _resolve_terminal_id(body_value: str, header_value: str) -> str:
+    """Guid кассы: заголовок X-Terminal-Id или поле тела."""
+    header = (header_value or "").strip()
+    if header:
+        return header
+    return (body_value or "").strip()
 
 
 def _cheque_text(body: DebitBody) -> str:
