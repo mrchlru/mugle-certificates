@@ -10,14 +10,24 @@ import zipfile
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
-from urllib.request import Request, urlopen
 
 from PIL import Image
 
+from bonus.catalog import template_logo_is_custom
 from bonus.config import Settings, get_settings
 from bonus.models import Certificate, User
-from bonus.storage import public_media_url, read_template_bytes
-from bonus.values import format_short_code
+from bonus.pkpass_fields import face_store_card_apple, wallet_date_layout
+from bonus.pkpass_images import (
+    default_pkpass_logo,
+    default_pkpass_strip,
+    load_pkpass_media,
+    pkpass_organization_name,
+    png_icon_apple,
+    png_logo_apple,
+    png_strip_apple,
+)
+from bonus.values import format_short_code, format_wallet_balance_rubles
+from bonus.wallet_payload import _expiration_rfc3339
 
 logger = logging.getLogger("bonus.apple_wallet")
 
@@ -136,30 +146,43 @@ def _build_pass_json(
     base_url: str,
     settings: Settings,
 ) -> dict[str, Any]:
-    """Собирает pass.json storeCard из сертификата и шаблона."""
+    """Собирает pass.json storeCard для .pkpass."""
     template = getattr(certificate, "template", None)
-    program = ""
-    if template is not None:
-        program = str(getattr(template, "name", "") or "").strip()
-    if not program:
-        program = (settings.apple_pass_description or "Бонус").strip() or "Бонус"
-    org = (settings.apple_organization_name or "Mugle Rest").strip() or "Mugle Rest"
-    if org.lower() in {"teams bonus", "teamsbonus"}:
-        org = "Mugle Rest"
-    color = _normalize_hex(certificate.color or getattr(template, "color", None) or "#00B596")
+    description = (settings.apple_pass_description or "Бонусная карта").strip() or "Бонусная карта"
+    org = pkpass_organization_name(settings)
+    color = _normalize_hex(certificate.color or getattr(template, "color", None) or "#00A8A8")
     rgb = _hex_to_rgb(color)
-    name = (holder.full_name if holder is not None else "") or "Сотрудник"
     rubles = max(0, int(certificate.balance)) // 100
     short = (certificate.short_code or "").replace("-", "").replace(" ", "")
     serial = certificate.public_number or str(certificate.id)
+    discount = int(getattr(certificate, "discount_percent", 0) or 0)
+    if template is not None and getattr(template, "discount_percent", None):
+        discount = int(template.discount_percent)
+    date_layout = wallet_date_layout(settings)
+    face = face_store_card_apple(
+        certificate,
+        holder,
+        discount_percent=discount,
+        date_layout=date_layout,
+    )
+    store: dict[str, Any] = {
+        "headerFields": [
+            {
+                "key": "balance",
+                "label": "БАЛАНС",
+                "value": format_wallet_balance_rubles(rubles),
+            }
+        ],
+        "backFields": _back_fields(certificate, base_url),
+    }
+    store.update(face)
     body: dict[str, Any] = {
         "formatVersion": 1,
         "passTypeIdentifier": settings.apple_pass_type_id.strip(),
         "serialNumber": serial,
         "teamIdentifier": settings.apple_team_id.strip(),
         "organizationName": org,
-        "description": program,
-        "logoText": program,
+        "description": description,
         "foregroundColor": "rgb(255, 255, 255)",
         "backgroundColor": f"rgb({rgb[0]}, {rgb[1]}, {rgb[2]})",
         "labelColor": "rgb(255, 255, 255)",
@@ -167,63 +190,27 @@ def _build_pass_json(
             "format": "PKBarcodeFormatCode128",
             "message": short,
             "messageEncoding": "iso-8859-1",
-            "altText": format_short_code(short),
+            "altText": format_short_code(certificate.short_code or short),
         },
         "barcodes": [
             {
                 "format": "PKBarcodeFormatCode128",
                 "message": short,
                 "messageEncoding": "iso-8859-1",
-                "altText": format_short_code(short),
+                "altText": format_short_code(certificate.short_code or short),
             }
         ],
-        "storeCard": {
-            "primaryFields": [
-                {
-                    "key": "balance",
-                    "label": "БАЛАНС",
-                    "value": f"{rubles} ₽",
-                }
-            ],
-            "secondaryFields": [
-                {
-                    "key": "holder",
-                    "label": "ВЛАДЕЛЕЦ",
-                    "value": name,
-                }
-            ],
-            "auxiliaryFields": _auxiliary_fields(certificate),
-            "backFields": _back_fields(certificate, base_url),
-        },
+        "storeCard": store,
     }
+    exp = _expiration_rfc3339(certificate.expires_on)
+    if exp:
+        body["expirationDate"] = exp
     web = (settings.apple_pass_web_service_url or "").strip().rstrip("/")
     auth = (settings.apple_pass_auth_token or "").strip()
     if web and auth:
         body["webServiceURL"] = web
         body["authenticationToken"] = auth
     return body
-
-
-def _auxiliary_fields(certificate: Certificate) -> list[dict[str, str]]:
-    fields: list[dict[str, str]] = []
-    segment = getattr(certificate, "segment", None)
-    if segment is not None and getattr(segment, "name", None):
-        fields.append(
-            {
-                "key": "segment",
-                "label": "ТИП",
-                "value": str(segment.name).strip(),
-            }
-        )
-    if certificate.discount_percent:
-        fields.append(
-            {
-                "key": "discount",
-                "label": "СКИДКА",
-                "value": f"{certificate.discount_percent}%",
-            }
-        )
-    return fields
 
 
 def _back_fields(certificate: Certificate, base_url: str) -> list[dict[str, str]]:
@@ -256,50 +243,31 @@ def _back_fields(certificate: Certificate, base_url: str) -> list[dict[str, str]
 
 
 def _pass_images(certificate: Certificate, *, base_url: str) -> dict[str, bytes]:
-    """icon/logo/strip из шаблона или дефолтного wallet-logo."""
+    """icon/logo/strip внутри .pkpass."""
     template = getattr(certificate, "template", None)
-    logo_src = _load_media_bytes(getattr(template, "logo_path", None) or "", base_url)
-    strip_src = _load_media_bytes(getattr(template, "image_path", None) or "", base_url)
-    fallback = (_STATIC_DIR / "wallet-logo.png").read_bytes()
-    logo = logo_src or fallback
-    icon = _resize_png(logo, (58, 58))
-    icon2x = _resize_png(logo, (87, 87))
-    logo_img = _resize_png(logo, (160, 50), contain=True)
-    logo2x = _resize_png(logo, (320, 100), contain=True)
-    images = {
+    custom_logo = template_logo_is_custom(template)
+    logo_path = (getattr(template, "logo_path", None) or "") if custom_logo else ""
+    strip_path = (getattr(template, "image_path", None) or "") if template else ""
+    if custom_logo and logo_path:
+        logo_raw = load_pkpass_media(logo_path, base_url=base_url) or default_pkpass_logo(white=False)
+    else:
+        logo_raw = default_pkpass_logo(white=True)
+    strip_raw = load_pkpass_media(strip_path, base_url=base_url) if strip_path else default_pkpass_strip()
+    logo_raw = logo_raw or default_pkpass_logo(white=not custom_logo)
+    icon = png_icon_apple(logo_raw, (58, 58))
+    icon2x = png_icon_apple(logo_raw, (87, 87))
+    logo_img = png_logo_apple(logo_raw, (160, 50))
+    logo2x = png_logo_apple(logo_raw, (320, 100))
+    images: dict[str, bytes] = {
         "icon.png": icon,
-        "paula.r@example.org": icon2x,
+        "icon@2x.png": icon2x,
         "logo.png": logo_img,
-        "paula.r@example.org": logo2x,
+        "logo@2x.png": logo2x,
     }
-    if strip_src:
-        images["strip.png"] = _resize_png(strip_src, (375, 123), cover=True)
-        images["david.c@example.com"] = _resize_png(strip_src, (750, 246), cover=True)
+    if strip_raw:
+        images["strip.png"] = png_strip_apple(strip_raw, (375, 123))
+        images["strip@2x.png"] = png_strip_apple(strip_raw, (750, 246))
     return images
-
-
-def _load_media_bytes(image_path: str, base_url: str) -> bytes | None:
-    path = (image_path or "").strip()
-    if not path:
-        return None
-    local = read_template_bytes(path)
-    if local:
-        return local
-    url = public_media_url(path)
-    if url.startswith("/"):
-        root = (base_url or get_settings().app_public_url or "").strip().rstrip("/")
-        if not root:
-            return None
-        url = f"{root}{url}"
-    if not url.startswith("https://") and not url.startswith("http://"):
-        return None
-    try:
-        request = Request(url, headers={"User-Agent": "TeamsBonus-pkpass/1.0"})
-        with urlopen(request, timeout=15) as response:  # noqa: S310 — публичные обложки
-            return response.read()
-    except Exception:
-        logger.warning("Не удалось скачать картинку для pkpass: %s", url)
-        return None
 
 
 def _resize_png(

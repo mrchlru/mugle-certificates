@@ -142,7 +142,10 @@ def test_build_walletwallet_body_barcode_short_code() -> None:
     assert body["logoURL"].startswith("data:image/png;base64,")
     assert "stripURL" in body
     assert "color" in body
-    assert body["logoText"] == "Teams Bonus"
+    assert body["title"] == "Карта"
+    assert "logoText" not in body
+    assert "Тип" not in labels
+    assert body["footerFields"][0]["label"] == "Действует до"
     assert body["color"] == "#00A8A8"
 
 
@@ -171,7 +174,8 @@ def test_build_walletwallet_body_basic_branding() -> None:
             notify_on_change=False,
             branding_pro=False,
         )
-    assert body["logoText"] == "Teams Bonus"
+    assert body["title"] == "Карта"
+    assert "logoText" not in body
     assert body["colorPreset"] == "green"
     assert body["headerFields"][0]["value"] == "100"
     assert "₽" not in body["headerFields"][0]["value"]

@@ -1,4 +1,4 @@
-"""Подготовка картинок pass: resize, кеш, PNG data URI для WalletWallet."""
+"""Картинки pkpass для WalletWallet: data URI и кеш."""
 
 from __future__ import annotations
 
@@ -7,27 +7,24 @@ import hashlib
 import logging
 from dataclasses import dataclass
 from io import BytesIO
-from pathlib import Path
 
-import httpx
-from PIL import Image, ImageOps
+from PIL import Image
 from sqlalchemy.orm import Session
 
 from bonus.config import get_settings
 from bonus.models import Certificate
-from bonus.storage import read_template_bytes
+from bonus.pkpass_images import (
+    default_pkpass_logo,
+    default_pkpass_strip,
+    load_pkpass_media,
+    png_icon_walletwallet,
+    png_logo_walletwallet,
+    png_strip_walletwallet,
+)
 from bonus.wallet_context import WalletCardContext, resolve_wallet_card_context
 
 logger = logging.getLogger("bonus.wallet_assets")
 
-_STATIC_ROOT = Path(__file__).resolve().parent / "static"
-_DEFAULT_LOGO = _STATIC_ROOT / "wallet" / "logo.png"
-_DEFAULT_STRIP = _STATIC_ROOT / "wallet" / "strip.png"
-_DEFAULT_ICON = _STATIC_ROOT / "wallet" / "icon.png"
-
-_LOGO_BOX = (480, 150)
-_STRIP_BOX = (1125, 432)
-_ICON_BOX = (114, 114)
 _MAX_IMAGE_BYTES = 1_000_000
 
 
@@ -44,13 +41,15 @@ class WalletBranding:
 def prepare_wallet_branding(
     db: Session,
     certificate: Certificate,
+    *,
+    base_url: str = "",
 ) -> WalletBranding | None:
-    """Картинки и цвет из карты; при ошибке — None (fallback на пресет)."""
+    """Картинки pkpass из шаблона карты."""
     ctx = resolve_wallet_card_context(db, certificate)
     try:
-        logo = _prepare_logo(ctx.logo_source)
-        strip = _prepare_strip(ctx.strip_source)
-        icon = _prepare_icon(ctx.logo_source if ctx.logo_custom else "")
+        logo = _prepare_logo(ctx, base_url=base_url)
+        strip = _prepare_strip(ctx.strip_source, base_url=base_url)
+        icon = _prepare_icon(ctx, base_url=base_url)
         if not logo or not strip or not icon:
             return None
         return WalletBranding(
@@ -81,25 +80,38 @@ def branding_source_digest(ctx: WalletCardContext) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
 
-def _prepare_logo(source: str) -> bytes:
-    raw = _load_media_bytes(source) if source else _read_default(_DEFAULT_LOGO)
+def _prepare_logo(ctx: WalletCardContext, *, base_url: str) -> bytes:
+    if ctx.logo_custom and ctx.logo_source:
+        raw = load_pkpass_media(ctx.logo_source, base_url=base_url)
+    else:
+        raw = default_pkpass_logo(white=True)
     if raw is None:
-        raw = _read_default(_DEFAULT_LOGO)
-    return _cached_process(raw, "logo", _fit_logo)
+        raw = default_pkpass_logo(white=True)
+    kind = "logo_custom" if ctx.logo_custom else "logo_white"
+    return _cached_process(raw, kind, png_logo_walletwallet)
 
 
-def _prepare_strip(source: str) -> bytes:
-    raw = _load_media_bytes(source) if source else _read_default(_DEFAULT_STRIP)
+def _prepare_strip(source: str, *, base_url: str) -> bytes:
+    raw = load_pkpass_media(source, base_url=base_url) if source else None
+    if raw is None and source:
+        logger.warning("Wallet strip missing for source=%s", source[:120])
     if raw is None:
-        raw = _read_default(_DEFAULT_STRIP)
-    return _cached_process(raw, "strip", _fit_strip)
-
-
-def _prepare_icon(logo_source: str) -> bytes:
-    raw = _load_media_bytes(logo_source) if logo_source else _read_default(_DEFAULT_ICON)
+        raw = default_pkpass_strip()
     if raw is None:
-        raw = _read_default(_DEFAULT_ICON)
-    return _cached_process(raw, "icon", _fit_icon)
+        raise ValueError("default strip missing")
+    return _cached_process(raw, "strip", png_strip_walletwallet)
+
+
+def _prepare_icon(ctx: WalletCardContext, *, base_url: str) -> bytes:
+    if ctx.logo_custom and ctx.logo_source:
+        raw = load_pkpass_media(ctx.logo_source, base_url=base_url)
+        kind = "icon"
+    else:
+        raw = default_pkpass_logo(white=True)
+        kind = "icon_white"
+    if raw is None:
+        raw = default_pkpass_logo(white=True)
+    return _cached_process(raw, kind, png_icon_walletwallet)
 
 
 def _cached_process(raw: bytes, kind: str, transform) -> bytes:
@@ -115,28 +127,6 @@ def _cached_process(raw: bytes, kind: str, transform) -> bytes:
     png = _shrink_png(transform(raw))
     cache_path.write_bytes(png)
     return png
-
-
-def _fit_logo(raw: bytes) -> bytes:
-    img = Image.open(BytesIO(raw)).convert("RGBA")
-    contained = ImageOps.contain(img, _LOGO_BOX, Image.Resampling.LANCZOS)
-    canvas = Image.new("RGBA", _LOGO_BOX, (0, 0, 0, 0))
-    ox = (_LOGO_BOX[0] - contained.width) // 2
-    oy = (_LOGO_BOX[1] - contained.height) // 2
-    canvas.paste(contained, (ox, oy), contained)
-    return _image_to_png(canvas)
-
-
-def _fit_strip(raw: bytes) -> bytes:
-    img = Image.open(BytesIO(raw)).convert("RGB")
-    fitted = ImageOps.fit(img, _STRIP_BOX, Image.Resampling.LANCZOS)
-    return _image_to_png(fitted)
-
-
-def _fit_icon(raw: bytes) -> bytes:
-    img = Image.open(BytesIO(raw)).convert("RGBA")
-    fitted = ImageOps.fit(img, _ICON_BOX, Image.Resampling.LANCZOS)
-    return _image_to_png(fitted)
 
 
 def _shrink_png(png: bytes) -> bytes:
@@ -158,50 +148,5 @@ def _shrink_png(png: bytes) -> bytes:
     return png[:_MAX_IMAGE_BYTES]
 
 
-def _image_to_png(img: Image.Image) -> bytes:
-    buf = BytesIO()
-    img.save(buf, format="PNG", optimize=True)
-    return buf.getvalue()
-
-
 def _png_data_uri(png: bytes) -> str:
     return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
-
-
-def _read_default(path: Path) -> bytes | None:
-    if path.is_file():
-        return path.read_bytes()
-    return None
-
-
-def _load_media_bytes(source: str) -> bytes | None:
-    """Локальный шаблон, /static/… или HTTP(S) CDN."""
-    cleaned = (source or "").strip()
-    if not cleaned:
-        return None
-    if cleaned.startswith(("http://", "https://")):
-        try:
-            with httpx.Client(timeout=25.0, follow_redirects=True) as client:
-                response = client.get(cleaned)
-            if response.status_code < 400 and response.content:
-                return response.content
-        except httpx.HTTPError:
-            return None
-        return None
-    if cleaned.startswith("/static/"):
-        path = _STATIC_ROOT / cleaned.removeprefix("/static/").lstrip("/")
-        if path.is_file():
-            return path.read_bytes()
-        return None
-    raw = read_template_bytes(cleaned)
-    if raw is not None:
-        return raw
-    if cleaned.lower().endswith((".svg",)):
-        return None
-    try:
-        path = Path(cleaned)
-        if path.is_file():
-            return path.read_bytes()
-    except OSError:
-        pass
-    return None

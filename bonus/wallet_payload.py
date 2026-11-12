@@ -15,10 +15,16 @@ from bonus.partners import partner_cities
 from bonus.parts import list_parts
 from bonus.present import _use_days_caption
 from bonus.values import MSK, format_short_code, format_wallet_balance_rubles, today_msk
+from bonus.pkpass_fields import (
+    PKPASS_API_TITLE,
+    apply_walletwallet_expiry,
+    face_secondary_walletwallet,
+    wallet_date_layout,
+)
+from bonus.pkpass_images import pkpass_organization_name
 from bonus.wallet_assets import WalletBranding, prepare_wallet_branding
-from bonus.wallet_context import resolve_wallet_card_context, wallet_holder_display_name
+from bonus.wallet_context import resolve_wallet_card_context
 
-ORG_NAME = "Teams Bonus"
 _WALLET_MAX_EXPIRY_YEARS = 10
 
 
@@ -38,17 +44,26 @@ def build_walletwallet_body(
         raise ValueError("empty barcode")
     ctx = resolve_wallet_card_context(db, certificate)
     rubles = _display_balance_rubles(db, certificate)
+    settings = get_settings()
+    date_layout = wallet_date_layout(settings)
     body: dict[str, Any] = {
-        "organizationName": ORG_NAME[:64],
-        "description": "Карта Teams Bonus",
+        "organizationName": pkpass_organization_name(settings),
+        "description": (settings.apple_pass_description or "Бонусная карта")[:64],
         "sharingProhibited": True,
+        "title": PKPASS_API_TITLE,
         "barcodeValue": barcode_label[:1024],
         "barcodeFormat": "Code128",
         "barcodeAltText": barcode_label[:128],
-        "secondaryFields": _secondary_fields(db, certificate, holder, ctx),
+        "secondaryFields": face_secondary_walletwallet(
+            certificate,
+            holder,
+            discount_percent=ctx.discount_percent,
+            date_layout=date_layout,
+        ),
         "backFields": _back_fields(db, certificate, holder, base_url=base_url, show_balance=show_balance),
     }
-    _apply_branding(db, certificate, body, branding_pro=branding_pro)
+    apply_walletwallet_expiry(body, certificate, date_layout=date_layout)
+    _apply_branding(db, certificate, body, branding_pro=branding_pro, base_url=base_url)
     if show_balance and rubles >= 0:
         balance_field: dict[str, str] = {
             "label": "Баланс",
@@ -75,19 +90,21 @@ def _apply_branding(
     body: dict[str, Any],
     *,
     branding_pro: bool,
+    base_url: str,
 ) -> None:
     """Pro: data URI картинок и цвет карты; иначе пресет."""
     if branding_pro:
-        branding: WalletBranding | None = prepare_wallet_branding(db, certificate)
+        branding: WalletBranding | None = prepare_wallet_branding(
+            db,
+            certificate,
+            base_url=base_url,
+        )
         if branding is not None:
             body["color"] = branding.color
             body["logoURL"] = branding.logo_data_uri
             body["stripURL"] = branding.strip_data_uri
             body["iconURL"] = branding.icon_data_uri
-            # WalletWallet: хотя бы одно из title, primaryFields, logoText.
-            body["logoText"] = ORG_NAME
             return
-    body["logoText"] = ORG_NAME
     body["colorPreset"] = "green"
 
 
@@ -103,28 +120,6 @@ def _display_balance_rubles(db: Session, certificate: Certificate) -> int:
     else:
         total = max(0, int(certificate.balance))
     return total // 100
-
-
-def _secondary_fields(
-    db: Session,
-    certificate: Certificate,
-    holder: User | None,
-    ctx,
-) -> list[dict[str, str]]:
-    fields: list[dict[str, str]] = []
-    owner = wallet_holder_display_name(holder)
-    if owner:
-        fields.append({"label": "Владелец карты", "value": owner})
-    if ctx.segment_label:
-        fields.append({"label": "Тип", "value": ctx.segment_label[:128]})
-    if certificate.expires_on is not None:
-        fields.append(
-            {"label": "Срок", "value": certificate.expires_on.strftime("%d.%m.%Y")},
-        )
-    discount = ctx.discount_percent or int(certificate.discount_percent or 0)
-    if discount:
-        fields.append({"label": "Скидка", "value": f"{discount}%"})
-    return fields
 
 
 def _back_fields(
