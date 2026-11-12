@@ -72,7 +72,11 @@ def build_walletwallet_body(
         card_color=ctx.color,
     )
     apply_walletwallet_api_minimum(body)
-    apply_walletwallet_pass_colors(body)
+    apply_walletwallet_pass_colors(
+        body,
+        card_color=ctx.color,
+        allow_pro_color=branding_pro,
+    )
     if show_balance and rubles >= 0:
         balance_field: dict[str, str] = {
             "label": "Баланс",
@@ -115,6 +119,8 @@ def _apply_branding(
             body["stripURL"] = branding.strip_data_uri
             body["iconURL"] = branding.icon_data_uri
             return
+    if not branding_pro:
+        return
     cleaned = (card_color or "").strip()
     if cleaned.startswith("#"):
         body["color"] = cleaned[:7].upper()

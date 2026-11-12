@@ -147,7 +147,8 @@ def test_build_walletwallet_body_barcode_short_code() -> None:
     assert "backgroundColor" not in body
     assert "title" not in body
     assert body["logoText"] == "\u200b"
-    assert body["labelColor"] == "rgb(255, 255, 255)"
+    assert "foregroundColor" not in body
+    assert "labelColor" not in body
     assert "Тип" not in labels
     assert "footerFields" not in body
 
@@ -179,7 +180,7 @@ def test_build_walletwallet_body_basic_branding() -> None:
         )
     assert "title" not in body
     assert body["logoText"] == "\u200b"
-    assert body["color"] == "#00A8A8"
+    assert "color" not in body
     assert body["colorPreset"] == "green"
     assert body["headerFields"][0]["value"] == "100"
     assert "₽" not in body["headerFields"][0]["value"]

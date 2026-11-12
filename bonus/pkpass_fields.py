@@ -148,21 +148,27 @@ def resolve_walletwallet_background_hex(body: dict[str, Any]) -> str:
     return _PRESET_BG.get(preset, "#00A8A8")
 
 
-def apply_walletwallet_pass_colors(body: dict[str, Any]) -> None:
-    """Белые подписи при сохранении Pro `color` (#hex) для точного фона.
+def apply_walletwallet_pass_colors(
+    body: dict[str, Any],
+    *,
+    card_color: str = "",
+    allow_pro_color: bool = True,
+) -> None:
+    """Тема pass по доке WalletWallet: только `color` (Pro) и `colorPreset`.
 
-    API WalletWallet задаёт фон через `color`, не `backgroundColor`; при снятии `color`
-    уходит чёрный `dark`. Явные foreground/label в rgb дополняют пресет.
+    Дефолт API — `colorPreset: dark` (чёрный фон), если оба поля пусты.
+    PassKit-поля backgroundColor/foregroundColor/labelColor в их API не описаны.
     """
     body.pop("backgroundColor", None)
-    white = "rgb(255, 255, 255)"
-    body["foregroundColor"] = white
-    body["labelColor"] = white
-    hex_bg = resolve_walletwallet_background_hex(body)
-    preset = walletwallet_preset_for_hex(hex_bg)
+    body.pop("foregroundColor", None)
+    body.pop("labelColor", None)
+    if not allow_pro_color:
+        body.pop("color", None)
+    hex_src = (body.get("color") or card_color or "").strip()
+    preset = walletwallet_preset_for_hex(hex_src)
     if preset:
         body["colorPreset"] = preset
-    elif not body.get("color") and not body.get("colorPreset"):
+    elif not body.get("colorPreset"):
         body["colorPreset"] = "green"
 
 
