@@ -14,6 +14,7 @@ from bonus.values import MSK, format_short_code, today_msk
 from bonus.weekdays import WEEKDAY_CHOICES
 
 ORG_NAME = "Teams Bonus"
+_WALLET_MAX_EXPIRY_YEARS = 10
 
 
 def build_walletwallet_body(
@@ -126,10 +127,21 @@ def _use_days_label(certificate: Certificate) -> str:
 
 
 def _expiration_rfc3339(expires_on: date | None) -> str:
-    """Конец срока карты в UTC (23:59:59 МСК в день expires_on)."""
+    """Конец срока карты в UTC (23:59:59 МСК). WalletWallet: не дальше 10 лет."""
     if expires_on is None:
         return ""
-    if expires_on < today_msk():
+    today = today_msk()
+    if expires_on < today:
         return ""
-    end_local = datetime.combine(expires_on, time(23, 59, 59), tzinfo=MSK)
+    effective = min(expires_on, _walletwallet_max_expiry_date(today))
+    end_local = datetime.combine(effective, time(23, 59, 59), tzinfo=MSK)
     return end_local.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _walletwallet_max_expiry_date(today: date) -> date:
+    """Верхняя граница expirationDate для API WalletWallet."""
+    try:
+        return today.replace(year=today.year + _WALLET_MAX_EXPIRY_YEARS)
+    except ValueError:
+        # 29 февраля → 28.02
+        return today.replace(year=today.year + _WALLET_MAX_EXPIRY_YEARS, month=2, day=28)

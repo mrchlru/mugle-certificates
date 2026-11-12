@@ -18,7 +18,7 @@ from bonus.main import create_app
 from bonus.models import Base, Certificate, WalletPass
 from bonus.security import hash_password
 from bonus.services import IssueDraft, issue_certificate
-from bonus.wallet_payload import build_walletwallet_body
+from bonus.wallet_payload import _expiration_rfc3339, build_walletwallet_body
 from bonus.wallet_provider import CreatePassResult, WalletProviderError, WalletWalletProvider
 from bonus.wallet_service import certificate_wallet_visible, serve_wallet_pass
 
@@ -66,6 +66,15 @@ def _issue_card(db: Session) -> Certificate:
         sync_external=False,
     )
     return issued.certificate
+
+
+def test_expiration_rfc3339_caps_at_ten_years(monkeypatch: pytest.MonkeyPatch) -> None:
+    anchor = date(2026, 3, 12)
+    monkeypatch.setattr("bonus.wallet_payload.today_msk", lambda: anchor)
+    capped = _expiration_rfc3339(date(2040, 1, 1))
+    within = _expiration_rfc3339(date(2027, 6, 1))
+    assert capped.startswith("2036-03-12")
+    assert within.startswith("2027-06-01")
 
 
 def test_build_walletwallet_body_barcode_short_code() -> None:
