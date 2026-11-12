@@ -67,7 +67,7 @@ class Settings(BaseSettings):
     wallet_fetch_per_ip_per_day: int = 40
     wallet_pass_color: str = "#00A8A8"
     wallet_asset_version: str = "1"
-    wallet_date_layout: str = "footer"
+    wallet_date_layout: str = "owner_label"
     support_telegram: str = "@nkatine"
     login_allow_ips: str = ""
     forwarded_allow_ips: str = "127.0.0.1"

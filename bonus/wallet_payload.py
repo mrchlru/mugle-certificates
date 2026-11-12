@@ -16,10 +16,11 @@ from bonus.parts import list_parts
 from bonus.present import _use_days_caption
 from bonus.values import MSK, format_short_code, format_wallet_balance_rubles, today_msk
 from bonus.pkpass_fields import (
-    PKPASS_API_TITLE,
+    apply_walletwallet_api_minimum,
     apply_walletwallet_expiry,
     face_secondary_walletwallet,
     wallet_date_layout,
+    walletwallet_text_colors,
 )
 from bonus.pkpass_images import pkpass_organization_name
 from bonus.wallet_assets import WalletBranding, prepare_wallet_branding
@@ -50,7 +51,7 @@ def build_walletwallet_body(
         "organizationName": pkpass_organization_name(settings),
         "description": (settings.apple_pass_description or "Бонусная карта")[:64],
         "sharingProhibited": True,
-        "title": PKPASS_API_TITLE,
+        **walletwallet_text_colors(),
         "barcodeValue": barcode_label[:1024],
         "barcodeFormat": "Code128",
         "barcodeAltText": barcode_label[:128],
@@ -64,6 +65,7 @@ def build_walletwallet_body(
     }
     apply_walletwallet_expiry(body, certificate, date_layout=date_layout)
     _apply_branding(db, certificate, body, branding_pro=branding_pro, base_url=base_url)
+    apply_walletwallet_api_minimum(body)
     if show_balance and rubles >= 0:
         balance_field: dict[str, str] = {
             "label": "Баланс",

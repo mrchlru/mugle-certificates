@@ -136,16 +136,17 @@ def test_build_walletwallet_body_barcode_short_code() -> None:
     assert "headerFields" not in body
     assert "primaryFields" not in body
     labels = [f.get("label") for f in body["secondaryFields"]]
-    assert labels[0] == "Владелец карты"
+    assert labels[0] == "Владелец карты · до 31.12.2026"
     assert not any(f.get("label") == "Номер" for f in body["secondaryFields"])
     assert "logoURL" in body
     assert body["logoURL"].startswith("data:image/png;base64,")
     assert "stripURL" in body
     assert "color" in body
-    assert body["title"] == "Карта"
-    assert "logoText" not in body
+    assert "title" not in body
+    assert body["logoText"] == "\u200b"
+    assert body["labelColor"] == "#FFFFFF"
     assert "Тип" not in labels
-    assert body["footerFields"][0]["label"] == "Действует до"
+    assert "footerFields" not in body
     assert body["color"] == "#00A8A8"
 
 
@@ -174,8 +175,8 @@ def test_build_walletwallet_body_basic_branding() -> None:
             notify_on_change=False,
             branding_pro=False,
         )
-    assert body["title"] == "Карта"
-    assert "logoText" not in body
+    assert "title" not in body
+    assert body["logoText"] == "\u200b"
     assert body["colorPreset"] == "green"
     assert body["headerFields"][0]["value"] == "100"
     assert "₽" not in body["headerFields"][0]["value"]

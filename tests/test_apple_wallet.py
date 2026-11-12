@@ -49,7 +49,8 @@ def test_build_pass_json_from_template() -> None:
     assert body["passTypeIdentifier"] == "pass.com.mugle.bonus"
     assert body["teamIdentifier"] == "TEAM123"
     assert body["organizationName"] == "Mugle Rest"
-    assert body["logoText"] == "Кухня"
+    assert "logoText" not in body
     assert body["backgroundColor"] == "rgb(0, 181, 150)"
-    assert body["storeCard"]["primaryFields"][0]["value"] == "2500 ₽"
+    assert body["storeCard"]["headerFields"][0]["value"].replace("\u00a0", " ") == "2 500"
+    assert "₽" not in body["storeCard"]["headerFields"][0]["value"]
     assert body["barcode"]["message"] == "12345678"
