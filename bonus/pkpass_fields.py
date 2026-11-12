@@ -101,12 +101,67 @@ def face_store_card_apple(
     return {"secondaryFields": secondary, "auxiliaryFields": auxiliary}
 
 
-def walletwallet_text_colors() -> dict[str, str]:
-    """Подписи полей и значения на цветном фоне pass."""
+def _hex_to_rgb(color: str) -> tuple[int, int, int]:
+    cleaned = (color or "").strip().lstrip("#")
+    if len(cleaned) != 6:
+        return 255, 90, 0
+    return int(cleaned[0:2], 16), int(cleaned[2:4], 16), int(cleaned[4:6], 16)
+
+
+def _rgb_css(rgb: tuple[int, int, int]) -> str:
+    return f"rgb({rgb[0]}, {rgb[1]}, {rgb[2]})"
+
+
+_PRESET_BG = {
+    "green": "#00A8A8",
+    "blue": "#1D4ED8",
+    "orange": "#FF5A00",
+}
+
+
+def resolve_walletwallet_background_hex(body: dict[str, Any]) -> str:
+    """Фон pass из Pro color или colorPreset."""
+    raw = (body.get("color") or "").strip()
+    if raw.startswith("#") and len(raw) >= 7:
+        return raw[:7].upper()
+    preset = (body.get("colorPreset") or "green").strip().casefold()
+    return _PRESET_BG.get(preset, "#00A8A8")
+
+
+def walletwallet_pass_colors(background_hex: str) -> dict[str, str]:
+    """Apple/WalletWallet: цвета только в формате rgb(...), не #hex."""
+    bg = _rgb_css(_hex_to_rgb(background_hex))
+    white = "rgb(255, 255, 255)"
     return {
-        "foregroundColor": "#FFFFFF",
-        "labelColor": "#FFFFFF",
+        "backgroundColor": bg,
+        "foregroundColor": white,
+        "labelColor": white,
     }
+
+
+def apply_walletwallet_pass_colors(body: dict[str, Any]) -> None:
+    """Задаёт фон и белый текст после Pro color / preset."""
+    colors = walletwallet_pass_colors(resolve_walletwallet_background_hex(body))
+    body.update(colors)
+
+
+def _inline_label_fields(fields: list[dict[str, str]]) -> None:
+    """Без label — весь текст рисуется foregroundColor (обход серых подписей)."""
+    for field in fields:
+        label = (field.pop("label", "") or "").strip()
+        value = (field.get("value") or "").strip()
+        if label and value:
+            field["value"] = f"{label}\n{value}"
+        elif label:
+            field["value"] = label
+
+
+def apply_walletwallet_inline_field_labels(body: dict[str, Any]) -> None:
+    """Подпись + значение в одном value (белый текст на ярком фоне)."""
+    for key in ("headerFields", "secondaryFields", "footerFields"):
+        block = body.get(key)
+        if isinstance(block, list):
+            _inline_label_fields(block)
 
 
 def apply_walletwallet_api_minimum(body: dict[str, Any]) -> None:

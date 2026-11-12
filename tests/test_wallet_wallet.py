@@ -135,8 +135,10 @@ def test_build_walletwallet_body_barcode_short_code() -> None:
     assert body["barcodeValue"] != cert.token
     assert "headerFields" not in body
     assert "primaryFields" not in body
-    labels = [f.get("label") for f in body["secondaryFields"]]
-    assert labels[0] == "Владелец карты · до 31.12.2026"
+    owner_field = body["secondaryFields"][0]
+    assert "label" not in owner_field
+    assert "Владелец карты · до 31.12.2026" in owner_field["value"]
+    assert "Иван Тестов" in owner_field["value"]
     assert not any(f.get("label") == "Номер" for f in body["secondaryFields"])
     assert "logoURL" in body
     assert body["logoURL"].startswith("data:image/png;base64,")
@@ -144,8 +146,9 @@ def test_build_walletwallet_body_barcode_short_code() -> None:
     assert "color" in body
     assert "title" not in body
     assert body["logoText"] == "\u200b"
-    assert body["labelColor"] == "#FFFFFF"
-    assert "Тип" not in labels
+    assert body["labelColor"] == "rgb(255, 255, 255)"
+    assert body["backgroundColor"].startswith("rgb(")
+    assert "Тип" not in owner_field["value"]
     assert "footerFields" not in body
     assert body["color"] == "#00A8A8"
 
