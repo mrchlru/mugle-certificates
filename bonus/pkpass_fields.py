@@ -116,7 +116,27 @@ _PRESET_BG = {
     "green": "#00A8A8",
     "blue": "#1D4ED8",
     "orange": "#FF5A00",
+    "red": "#B91C1C",
+    "purple": "#7C3AED",
+    "dark": "#111111",
 }
+
+_HEX_TO_PRESET = {
+    "#00A8A8": "green",
+    "#FF5A00": "orange",
+    "#B91C1C": "red",
+    "#1D4ED8": "blue",
+    "#111111": "dark",
+    "#7C3AED": "purple",
+}
+
+
+def walletwallet_preset_for_hex(hex_color: str) -> str | None:
+    """Пресет WalletWallet для типовых цветов карты (влияет на контраст текста)."""
+    cleaned = (hex_color or "").strip().upper()
+    if len(cleaned) == 7 and cleaned.startswith("#"):
+        return _HEX_TO_PRESET.get(cleaned)
+    return None
 
 
 def resolve_walletwallet_background_hex(body: dict[str, Any]) -> str:
@@ -128,27 +148,22 @@ def resolve_walletwallet_background_hex(body: dict[str, Any]) -> str:
     return _PRESET_BG.get(preset, "#00A8A8")
 
 
-def walletwallet_pass_colors(background_hex: str) -> dict[str, str]:
-    """Apple/WalletWallet: цвета только в формате rgb(...), не #hex."""
-    bg = _rgb_css(_hex_to_rgb(background_hex))
-    white = "rgb(255, 255, 255)"
-    return {
-        "backgroundColor": bg,
-        "foregroundColor": white,
-        "labelColor": white,
-    }
-
-
 def apply_walletwallet_pass_colors(body: dict[str, Any]) -> None:
-    """Фон и белые label/value как в локальном pass.json (Statix).
+    """Белые подписи при сохранении Pro `color` (#hex) для точного фона.
 
-    WalletWallet при `color: #hex` сам считает labelColor по яркости — серый.
-    Явные rgb + без `color`/`colorPreset` дают белые подписи.
+    API WalletWallet задаёт фон через `color`, не `backgroundColor`; при снятии `color`
+    уходит чёрный `dark`. Явные foreground/label в rgb дополняют пресет.
     """
-    colors = walletwallet_pass_colors(resolve_walletwallet_background_hex(body))
-    body.update(colors)
-    body.pop("color", None)
-    body.pop("colorPreset", None)
+    body.pop("backgroundColor", None)
+    white = "rgb(255, 255, 255)"
+    body["foregroundColor"] = white
+    body["labelColor"] = white
+    hex_bg = resolve_walletwallet_background_hex(body)
+    preset = walletwallet_preset_for_hex(hex_bg)
+    if preset:
+        body["colorPreset"] = preset
+    elif not body.get("color") and not body.get("colorPreset"):
+        body["colorPreset"] = "green"
 
 
 def apply_walletwallet_api_minimum(body: dict[str, Any]) -> None:

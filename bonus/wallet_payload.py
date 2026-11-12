@@ -63,7 +63,14 @@ def build_walletwallet_body(
         "backFields": _back_fields(db, certificate, holder, base_url=base_url, show_balance=show_balance),
     }
     apply_walletwallet_expiry(body, certificate, date_layout=date_layout)
-    _apply_branding(db, certificate, body, branding_pro=branding_pro, base_url=base_url)
+    _apply_branding(
+        db,
+        certificate,
+        body,
+        branding_pro=branding_pro,
+        base_url=base_url,
+        card_color=ctx.color,
+    )
     apply_walletwallet_api_minimum(body)
     apply_walletwallet_pass_colors(body)
     if show_balance and rubles >= 0:
@@ -93,8 +100,9 @@ def _apply_branding(
     *,
     branding_pro: bool,
     base_url: str,
+    card_color: str,
 ) -> None:
-    """Pro: data URI картинок и цвет карты; иначе пресет."""
+    """Pro: data URI картинок и цвет карты; иначе hex цвета из карты."""
     if branding_pro:
         branding: WalletBranding | None = prepare_wallet_branding(
             db,
@@ -107,7 +115,9 @@ def _apply_branding(
             body["stripURL"] = branding.strip_data_uri
             body["iconURL"] = branding.icon_data_uri
             return
-    body["colorPreset"] = "green"
+    cleaned = (card_color or "").strip()
+    if cleaned.startswith("#"):
+        body["color"] = cleaned[:7].upper()
 
 
 def _barcode_label(certificate: Certificate) -> str:
