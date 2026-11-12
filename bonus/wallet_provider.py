@@ -15,7 +15,7 @@ from bonus.config import Settings, get_settings
 from bonus.app_settings import set_wallet_branding_degraded, wallet_branding_degraded
 from bonus.audit import write_audit
 from bonus.models import AuditAction, Certificate, User
-from bonus.wallet_payload import build_walletwallet_body
+from bonus.wallet_payload import build_walletwallet_body, wallet_body_fingerprint
 
 logger = logging.getLogger("bonus.wallet_provider")
 
@@ -31,6 +31,7 @@ class CreatePassResult:
     share_url: str
     google_save_url: str
     pkpass: bytes
+    payload_hash: str = ""
 
 
 class WalletProviderError(Exception):
@@ -75,8 +76,8 @@ class WalletProvider(Protocol):
         base_url: str,
         show_balance: bool,
         notify_on_change: bool,
-    ) -> bool:
-        """Обновляет pass; True если тело изменилось."""
+    ) -> tuple[bool, str]:
+        """Обновляет pass; (изменилось, хэш отправленного тела)."""
 
     def revoke_pass(self, serial: str) -> None:
         """Отзывает pass по serial."""
@@ -148,7 +149,7 @@ class WalletWalletProvider:
         show_balance: bool,
         notify_on_change: bool,
     ) -> CreatePassResult:
-        data = _post_passes(
+        data, payload_hash = _post_passes(
             db,
             certificate,
             holder,
@@ -169,6 +170,7 @@ class WalletWalletProvider:
                     share_url=share,
                     google_save_url=google,
                     pkpass=b"",
+                    payload_hash=payload_hash,
                 )
             raise WalletProviderError(USER_ERROR)
         try:
@@ -181,6 +183,7 @@ class WalletWalletProvider:
                     share_url=share,
                     google_save_url=google,
                     pkpass=b"",
+                    payload_hash=payload_hash,
                 )
             raise WalletProviderError(USER_ERROR) from exc
         return CreatePassResult(
@@ -188,6 +191,7 @@ class WalletWalletProvider:
             share_url=share,
             google_save_url=google,
             pkpass=pkpass,
+            payload_hash=payload_hash,
         )
 
     def update_pass(
@@ -200,9 +204,10 @@ class WalletWalletProvider:
         base_url: str,
         show_balance: bool,
         notify_on_change: bool,
-    ) -> bool:
+        payload_hash: str = "",
+    ) -> tuple[bool, str]:
         path = f"/api/passes/{serial}"
-        data = _put_pass(
+        data, new_hash = _put_pass(
             db,
             certificate,
             holder,
@@ -210,8 +215,11 @@ class WalletWalletProvider:
             base_url=base_url,
             show_balance=show_balance,
             notify_on_change=notify_on_change,
+            known_hash=payload_hash,
         )
-        return not bool(data.get("unchanged"))
+        if not data:
+            return False, new_hash
+        return (not bool(data.get("unchanged")), new_hash)
 
     def revoke_pass(self, serial: str) -> None:
         cleaned = (serial or "").strip()
@@ -258,7 +266,7 @@ class LocalPkpassProvider:
         base_url: str,
         show_balance: bool,
         notify_on_change: bool,
-    ) -> bool:
+    ) -> tuple[bool, str]:
         del db, certificate, holder, serial, base_url, show_balance, notify_on_change
         raise NotImplementedError("Локальное обновление pass пока не реализовано")
 
@@ -295,7 +303,7 @@ def _post_passes(
     base_url: str,
     show_balance: bool,
     notify_on_change: bool,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], str]:
     """POST /api/passes с откатом Pro-полей при 403."""
     kwargs = dict(
         db=db,
@@ -305,16 +313,19 @@ def _post_passes(
         show_balance=show_balance,
         notify_on_change=notify_on_change,
     )
+    body = build_walletwallet_body(**kwargs, branding_pro=True)
     try:
-        data = _post_json("/api/passes", build_walletwallet_body(**kwargs, branding_pro=True))
+        data = _post_json("/api/passes", body)
         _clear_branding_degraded(db)
-        return data
+        return data, wallet_body_fingerprint(body)
     except WalletProviderError as exc:
         if exc.status_code != 403:
             raise
         logger.warning("WalletWallet POST /api/passes Pro → 403, fallback без logoURL/stripURL/color")
         _record_branding_fallback(db)
-        return _post_json("/api/passes", build_walletwallet_body(**kwargs, branding_pro=False))
+        body = build_walletwallet_body(**kwargs, branding_pro=False)
+        data = _post_json("/api/passes", body)
+        return data, wallet_body_fingerprint(body)
 
 
 def _put_pass(
@@ -326,7 +337,8 @@ def _put_pass(
     base_url: str,
     show_balance: bool,
     notify_on_change: bool,
-) -> dict[str, Any]:
+    known_hash: str = "",
+) -> tuple[dict[str, Any], str]:
     """PUT /api/passes/<serial> с откатом Pro-полей при 403."""
     kwargs = dict(
         db=db,
@@ -336,16 +348,25 @@ def _put_pass(
         show_balance=show_balance,
         notify_on_change=notify_on_change,
     )
+    body = build_walletwallet_body(**kwargs, branding_pro=True)
+    fingerprint = wallet_body_fingerprint(body)
+    if known_hash and known_hash == fingerprint:
+        return {}, fingerprint
     try:
-        data = _put_json(path, build_walletwallet_body(**kwargs, branding_pro=True))
+        data = _put_json(path, body)
         _clear_branding_degraded(db)
-        return data
+        return data, fingerprint
     except WalletProviderError as exc:
         if exc.status_code != 403:
             raise
         logger.warning("WalletWallet PUT %s Pro → 403, fallback без logoURL/stripURL/color", path)
         _record_branding_fallback(db)
-        return _put_json(path, build_walletwallet_body(**kwargs, branding_pro=False))
+        body = build_walletwallet_body(**kwargs, branding_pro=False)
+        fingerprint = wallet_body_fingerprint(body)
+        if known_hash and known_hash == fingerprint:
+            return {}, fingerprint
+        data = _put_json(path, body)
+        return data, fingerprint
 
 
 def _record_branding_fallback(db: Session) -> None:

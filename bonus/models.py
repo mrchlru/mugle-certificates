@@ -388,6 +388,7 @@ class WalletPass(Base):
         nullable=True,
     )
     sync_error: Mapped[str] = mapped_column(String(300), default="")
+    payload_hash: Mapped[str] = mapped_column(String(64), default="")
 
 
 class WalletSyncJob(Base):

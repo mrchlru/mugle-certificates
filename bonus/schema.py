@@ -239,10 +239,17 @@ def ensure_schema(engine: Engine) -> None:
                 created_at TIMESTAMP,
                 last_pushed_at TIMESTAMP,
                 revoked_at TIMESTAMP,
-                sync_error VARCHAR(300) DEFAULT ''
+                sync_error VARCHAR(300) DEFAULT '',
+                payload_hash VARCHAR(64) DEFAULT ''
             )
             """
         )
+    else:
+        pass_cols = {c["name"] for c in inspector.get_columns("wallet_passes")}
+        if "payload_hash" not in pass_cols:
+            statements.append(
+                "ALTER TABLE wallet_passes ADD COLUMN payload_hash VARCHAR(64) DEFAULT ''"
+            )
     if "wallet_sync_jobs" not in tables:
         statements.append(
             """

@@ -18,6 +18,8 @@ from bonus.main import create_app
 from bonus.models import Base, Certificate, WalletPass
 from bonus.security import hash_password
 from bonus.services import IssueDraft, issue_certificate
+from bonus.wallet_assets import WalletBranding
+from bonus.wallet_context import wallet_holder_display_name
 from bonus.wallet_payload import _expiration_rfc3339, build_walletwallet_body
 from bonus.wallet_provider import CreatePassResult, WalletProviderError, WalletWalletProvider
 from bonus.wallet_service import certificate_wallet_visible, serve_wallet_pass
@@ -77,6 +79,18 @@ def test_expiration_rfc3339_caps_at_ten_years(monkeypatch: pytest.MonkeyPatch) -
     assert within.startswith("2027-06-01")
 
 
+def _fake_branding() -> WalletBranding:
+    tiny = "data:image/png;base64,iVBORw0KGgo="
+    return WalletBranding(color="#00A8A8", logo_data_uri=tiny, strip_data_uri=tiny, icon_data_uri=tiny)
+
+
+def test_wallet_holder_shortens_patronymic() -> None:
+    from types import SimpleNamespace
+
+    holder = SimpleNamespace(full_name="Иванов Иван Иванович")
+    assert wallet_holder_display_name(holder) == "Иванов Иван"
+
+
 def test_build_walletwallet_body_barcode_short_code() -> None:
     db = MagicMock()
     cert = SimpleNamespace(
@@ -92,7 +106,20 @@ def test_build_walletwallet_body_barcode_short_code() -> None:
         use_days="1234567",
         id=1,
     )
-    with patch("bonus.wallet_payload.list_parts", return_value=[]):
+    with (
+        patch("bonus.wallet_payload.list_parts", return_value=[]),
+        patch("bonus.wallet_payload.prepare_wallet_branding", return_value=_fake_branding()),
+        patch(
+            "bonus.wallet_context._resolve_template",
+            return_value=SimpleNamespace(
+                name="",
+                color="",
+                image_path="",
+                logo_path="",
+                discount_percent=30,
+            ),
+        ),
+    ):
         holder = SimpleNamespace(full_name="Иван Тестов")
         body = build_walletwallet_body(
             db,
@@ -107,9 +134,12 @@ def test_build_walletwallet_body_barcode_short_code() -> None:
     assert body["barcodeFormat"] == "Code128"
     assert body["barcodeValue"] != cert.token
     assert "headerFields" not in body
-    assert body["primaryFields"][0]["label"] == "Владелец карты"
+    assert "primaryFields" not in body
+    labels = [f.get("label") for f in body["secondaryFields"]]
+    assert labels[0] == "Владелец карты"
     assert not any(f.get("label") == "Номер" for f in body["secondaryFields"])
     assert "logoURL" in body
+    assert body["logoURL"].startswith("data:image/png;base64,")
     assert "stripURL" in body
     assert "color" in body
     assert "logoText" not in body
@@ -238,6 +268,7 @@ def test_wallet_provider_share_url_without_pkpass() -> None:
         with (
             patch("bonus.wallet_provider.get_settings", return_value=settings),
             patch("bonus.wallet_payload.list_parts", return_value=[]),
+            patch("bonus.wallet_payload.prepare_wallet_branding", return_value=_fake_branding()),
         ):
             result = provider.create_pass(
                 MagicMock(),
@@ -285,6 +316,7 @@ def test_wallet_provider_pro_403_fallback() -> None:
         with (
             patch("bonus.wallet_provider.get_settings", return_value=settings),
             patch("bonus.wallet_payload.list_parts", return_value=[]),
+            patch("bonus.wallet_payload.prepare_wallet_branding", return_value=_fake_branding()),
             patch("bonus.wallet_provider.set_wallet_branding_degraded") as mark,
             patch("bonus.wallet_provider.write_audit"),
         ):
@@ -325,7 +357,10 @@ def test_wallet_provider_error_status() -> None:
             use_days="1234567",
             id=2,
         )
-        with patch("bonus.wallet_payload.list_parts", return_value=[]):
+        with (
+            patch("bonus.wallet_payload.list_parts", return_value=[]),
+            patch("bonus.wallet_payload.prepare_wallet_branding", return_value=_fake_branding()),
+        ):
             with pytest.raises(WalletProviderError) as exc:
                 provider.create_pass(
                     MagicMock(),

@@ -22,13 +22,23 @@ _SLEEP_ON_ERROR_SEC = 25.0
 
 
 def enqueue_wallet_update(db: Session, certificate_id: int) -> None:
-    """Ставит карту в очередь PUT, если включён баланс на pass и доступ выдан."""
+    """Ставит карту в очередь PUT при wallet_allowed и активном pass."""
     if not certificate_id:
         return
-    if not app_settings_module.wallet_show_balance(db):
+    if not app_settings_module.wallet_enabled(db):
         return
     cert = db.get(Certificate, certificate_id)
     if cert is None or not app_settings_module.certificate_wallet_allowed(cert):
+        return
+    has_pass = db.scalar(
+        select(WalletPass.id)
+        .where(
+            WalletPass.certificate_id == certificate_id,
+            WalletPass.revoked_at.is_(None),
+        )
+        .limit(1)
+    )
+    if has_pass is None:
         return
     job = db.scalar(select(WalletSyncJob).where(WalletSyncJob.certificate_id == certificate_id))
     now = _utcnow()
@@ -51,6 +61,25 @@ def enqueue_wallet_update(db: Session, certificate_id: int) -> None:
     db.commit()
 
 
+def enqueue_wallet_updates_for_template(db: Session, template_id: int) -> int:
+    """После смены шаблона — обновить все выданные pass с этим оформлением."""
+    if template_id <= 0:
+        return 0
+    cert_ids = list(
+        db.scalars(
+            select(Certificate.id).where(
+                Certificate.template_id == template_id,
+                Certificate.is_deleted.is_(False),
+            )
+        )
+    )
+    count = 0
+    for cert_id in cert_ids:
+        enqueue_wallet_update(db, cert_id)
+        count += 1
+    return count
+
+
 async def wallet_queue_worker() -> None:
     """Воркер PUT /api/passes."""
     while True:
@@ -68,7 +97,7 @@ async def wallet_queue_worker() -> None:
 def _run_one_job() -> bool:
     db = open_session()
     try:
-        if not app_settings_module.wallet_show_balance(db):
+        if not app_settings_module.wallet_enabled(db):
             return False
         job = db.scalar(
             select(WalletSyncJob)
@@ -110,7 +139,7 @@ def _run_one_job() -> bool:
         notify = app_settings_module.wallet_notify_on_change(db)
         provider = get_wallet_provider()
         try:
-            changed = provider.update_pass(
+            changed, new_hash = provider.update_pass(
                 db,
                 certificate,
                 certificate.holder,
@@ -118,9 +147,11 @@ def _run_one_job() -> bool:
                 base_url=base_url,
                 show_balance=show_bal,
                 notify_on_change=notify,
+                payload_hash=pass_row.payload_hash or "",
             )
             pass_row.last_pushed_at = _utcnow()
             pass_row.sync_error = ""
+            pass_row.payload_hash = new_hash
             job.status = "done"
             job.updated_at = _utcnow()
             if not changed:

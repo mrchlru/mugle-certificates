@@ -336,6 +336,7 @@ def _store_wallet_pass_row(
             created_at=stamp,
             last_pushed_at=stamp,
             sync_error="",
+            payload_hash=(created.payload_hash or "")[:64],
         )
     )
 

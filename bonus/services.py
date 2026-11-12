@@ -2282,7 +2282,7 @@ def _sync_usage(
 
 
 def _maybe_enqueue_wallet(db: Session, certificate: Certificate) -> None:
-    """Обновление pass в Wallet, если разрешено и включён баланс на pass."""
+    """Обновление pass в Wallet при wallet_allowed и активном пилоте."""
     from bonus.wallet_queue import enqueue_wallet_update
 
     enqueue_wallet_update(db, certificate.id)

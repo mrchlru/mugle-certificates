@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import date, datetime, time, timezone
 from typing import Any
 
@@ -9,10 +11,12 @@ from sqlalchemy.orm import Session
 
 from bonus.config import get_settings
 from bonus.models import Certificate, User
+from bonus.partners import partner_cities
 from bonus.parts import list_parts
+from bonus.present import _use_days_caption
 from bonus.values import MSK, format_short_code, format_wallet_balance_rubles, today_msk
-from bonus.wallet_assets import wallet_asset_urls, wallet_branding_ready
-from bonus.weekdays import WEEKDAY_CHOICES
+from bonus.wallet_assets import WalletBranding, prepare_wallet_branding
+from bonus.wallet_context import resolve_wallet_card_context, wallet_holder_display_name
 
 ORG_NAME = "Teams Bonus"
 _WALLET_MAX_EXPIRY_YEARS = 10
@@ -30,7 +34,9 @@ def build_walletwallet_body(
 ) -> dict[str, Any]:
     """Собирает JSON для POST/PUT /api/passes."""
     barcode_label = _barcode_label(certificate)
-    name = (holder.full_name if holder is not None else "") or "Сотрудник"
+    if not barcode_label:
+        raise ValueError("empty barcode")
+    ctx = resolve_wallet_card_context(db, certificate)
     rubles = _display_balance_rubles(db, certificate)
     body: dict[str, Any] = {
         "organizationName": ORG_NAME[:64],
@@ -39,12 +45,11 @@ def build_walletwallet_body(
         "barcodeValue": barcode_label[:1024],
         "barcodeFormat": "Code128",
         "barcodeAltText": barcode_label[:128],
-        "primaryFields": [{"label": "Владелец карты", "value": name}],
-        "secondaryFields": _secondary_fields(certificate),
+        "secondaryFields": _secondary_fields(db, certificate, holder, ctx),
         "backFields": _back_fields(db, certificate, holder, base_url=base_url, show_balance=show_balance),
     }
-    _apply_branding(body, base_url=base_url, branding_pro=branding_pro)
-    if show_balance:
+    _apply_branding(db, certificate, body, branding_pro=branding_pro)
+    if show_balance and rubles >= 0:
         balance_field: dict[str, str] = {
             "label": "Баланс",
             "value": format_wallet_balance_rubles(rubles),
@@ -58,17 +63,27 @@ def build_walletwallet_body(
     return body
 
 
-def _apply_branding(body: dict[str, Any], *, base_url: str, branding_pro: bool) -> None:
-    """Pro: logoURL, stripURL, color; иначе пресет green и logoText."""
-    use_pro = branding_pro and wallet_branding_ready(base_url)
-    if use_pro:
-        settings = get_settings()
-        urls = wallet_asset_urls(base_url, settings)
-        if urls:
-            body["color"] = (settings.wallet_pass_color or "#00A8A8").strip()[:32]
-            body["logoURL"] = urls["logo"]
-            body["stripURL"] = urls["strip"]
-            body["iconURL"] = urls["icon"]
+def wallet_body_fingerprint(body: dict[str, Any]) -> str:
+    """Хэш тела для пропуска лишних PUT."""
+    payload = json.dumps(body, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _apply_branding(
+    db: Session,
+    certificate: Certificate,
+    body: dict[str, Any],
+    *,
+    branding_pro: bool,
+) -> None:
+    """Pro: data URI картинок и цвет карты; иначе пресет."""
+    if branding_pro:
+        branding: WalletBranding | None = prepare_wallet_branding(db, certificate)
+        if branding is not None:
+            body["color"] = branding.color
+            body["logoURL"] = branding.logo_data_uri
+            body["stripURL"] = branding.strip_data_uri
+            body["iconURL"] = branding.icon_data_uri
             return
     body["logoText"] = ORG_NAME
     body["colorPreset"] = "green"
@@ -88,17 +103,25 @@ def _display_balance_rubles(db: Session, certificate: Certificate) -> int:
     return total // 100
 
 
-def _secondary_fields(certificate: Certificate) -> list[dict[str, str]]:
+def _secondary_fields(
+    db: Session,
+    certificate: Certificate,
+    holder: User | None,
+    ctx,
+) -> list[dict[str, str]]:
     fields: list[dict[str, str]] = []
-    segment = getattr(certificate, "segment", None)
-    if segment is not None and getattr(segment, "name", None):
-        fields.append({"label": "Тип", "value": str(segment.name).strip()})
+    owner = wallet_holder_display_name(holder)
+    if owner:
+        fields.append({"label": "Владелец карты", "value": owner})
+    if ctx.segment_label:
+        fields.append({"label": "Тип", "value": ctx.segment_label[:128]})
     if certificate.expires_on is not None:
         fields.append(
             {"label": "Срок", "value": certificate.expires_on.strftime("%d.%m.%Y")},
         )
-    if certificate.discount_percent:
-        fields.append({"label": "Скидка", "value": f"{certificate.discount_percent}%"})
+    discount = ctx.discount_percent or int(certificate.discount_percent or 0)
+    if discount:
+        fields.append({"label": "Скидка", "value": f"{discount}%"})
     return fields
 
 
@@ -111,47 +134,75 @@ def _back_fields(
     show_balance: bool,
 ) -> list[dict[str, str]]:
     fields: list[dict[str, str]] = []
-    root = (base_url or get_settings().app_public_url or "").strip().rstrip("/")
-    token = (certificate.token or "").strip()
-    card_url = f"{root}/c/{token}" if root and token else ""
+    fields.append(
+        {
+            "label": "Новости",
+            "value": " ",
+            "changeMessage": "%@",
+        }
+    )
     if not show_balance:
+        root = (base_url or get_settings().app_public_url or "").strip().rstrip("/")
+        token = (certificate.token or "").strip()
+        card_url = f"{root}/c/{token}" if root and token else ""
         value = (
             f"Актуальный баланс — на странице карты: {card_url}"
             if card_url
             else "Актуальный баланс — на странице карты в Teams Bonus."
         )
         fields.append({"label": "Баланс", "value": value[:400]})
+    note = (certificate.note or "").strip()
+    if note:
+        fields.append({"label": "Правила и условия", "value": note[:400]})
+    when = _use_days_caption(certificate)
+    if when:
+        fields.append({"label": "Когда действует", "value": when[:200]})
+    partners = _partners_blurb(base_url)
+    if partners:
+        fields.append({"label": "Где действует", "value": partners[:400]})
+    settings = get_settings()
+    contacts = _contact_blurb(settings)
+    if contacts:
+        fields.append({"label": "Контакты", "value": contacts[:300]})
+    company = (certificate.company or "").strip()
+    if company:
+        fields.append({"label": "Юридическое лицо", "value": company[:200]})
     number = (certificate.public_number or "").strip()
     if number:
         fields.append({"label": "Номер карты", "value": number[:128]})
-    days_label = _use_days_label(certificate)
-    if days_label:
-        fields.append({"label": "Дни использования", "value": days_label})
-    note = (certificate.note or "").strip()
-    if note:
-        fields.append({"label": "Правила", "value": note[:400]})
-    company = (certificate.company or "").strip()
-    if company:
-        fields.append({"label": "Юрлицо", "value": company[:200]})
-    settings = get_settings()
-    support = (settings.support_telegram or "").strip()
-    if support:
-        fields.append({"label": "Поддержка", "value": support[:128]})
-    fields.append(
-        {
-            "label": "Партнёры",
-            "value": "Список ресторанов — на странице карты в браузере.",
-        }
-    )
-    if card_url:
-        fields.append({"label": "Карта в браузере", "value": card_url[:400]})
     return fields
 
 
-def _use_days_label(certificate: Certificate) -> str:
-    mask = (certificate.use_days or "1234567").strip()
-    active = [label for digit, label in WEEKDAY_CHOICES if digit in mask]
-    return ", ".join(active) if active else ""
+def _partners_blurb(base_url: str) -> str:
+    root = (base_url or get_settings().app_public_url or "").strip().rstrip("/")
+    names: list[str] = []
+    for city in partner_cities():
+        for place in city.places:
+            if place.name and place.name not in names:
+                names.append(place.name)
+            if len(names) >= 12:
+                break
+        if len(names) >= 12:
+            break
+    if names:
+        return ", ".join(names)
+    if root:
+        return "Список ресторанов — в разделе «Партнёры» на странице карты."
+    return "Список ресторанов-партнёров — на странице карты в браузере."
+
+
+def _contact_blurb(settings) -> str:
+    parts: list[str] = []
+    support = (settings.support_telegram or "").strip()
+    if support:
+        if support.startswith("@"):
+            parts.append(f"Telegram {support}")
+        else:
+            parts.append(support)
+    public = (settings.app_public_url or "").strip()
+    if public:
+        parts.append(public)
+    return " · ".join(parts)
 
 
 def _expiration_rfc3339(expires_on: date | None) -> str:

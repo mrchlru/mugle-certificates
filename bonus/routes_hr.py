@@ -1176,6 +1176,9 @@ async def template_update(
             logo_payload=logo_payload,
             logo_content_type=logo_content_type,
         )
+        from bonus.wallet_queue import enqueue_wallet_updates_for_template
+
+        enqueue_wallet_updates_for_template(db, template_id)
     except BonusError as exc:
         flash(request, exc.message, "bad")
     else:
