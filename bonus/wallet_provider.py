@@ -157,13 +157,29 @@ class WalletWalletProvider:
         serial = str(data.get("serialNumber") or "").strip()
         share = str(data.get("shareUrl") or "").strip()
         google = str(data.get("googleSaveUrl") or "").strip()
-        raw_b64 = str(data.get("applePass") or "").strip()
-        if not serial or not raw_b64:
+        raw_b64 = _apple_pass_b64(data.get("applePass"))
+        if not serial:
+            raise WalletProviderError(USER_ERROR)
+        if not raw_b64:
+            if share:
+                return CreatePassResult(
+                    serial=serial,
+                    share_url=share,
+                    google_save_url=google,
+                    pkpass=b"",
+                )
             raise WalletProviderError(USER_ERROR)
         try:
-            pkpass = base64.b64decode(raw_b64, validate=True)
+            pkpass = _decode_pkpass_bytes(raw_b64)
         except Exception as exc:
             logger.warning("WalletWallet applePass decode failed: %s", type(exc).__name__)
+            if share:
+                return CreatePassResult(
+                    serial=serial,
+                    share_url=share,
+                    google_save_url=google,
+                    pkpass=b"",
+                )
             raise WalletProviderError(USER_ERROR) from exc
         return CreatePassResult(
             serial=serial,
@@ -246,6 +262,27 @@ class LocalPkpassProvider:
 
     def revoke_pass(self, serial: str) -> None:
         del serial
+
+
+def _apple_pass_b64(raw: object) -> str:
+    """Тело applePass из JSON: только строка base64."""
+    if raw is None:
+        return ""
+    if isinstance(raw, bytes):
+        return raw.decode("ascii", errors="ignore").strip()
+    if not isinstance(raw, str):
+        return ""
+    return raw.strip()
+
+
+def _decode_pkpass_bytes(raw_b64: str) -> bytes:
+    """Декодирует applePass: обычный и urlsafe base64."""
+    cleaned = "".join(raw_b64.split())
+    try:
+        return base64.b64decode(cleaned, validate=True)
+    except Exception:
+        padded = cleaned + "=" * (-len(cleaned) % 4)
+        return base64.urlsafe_b64decode(padded)
 
 
 def _normalize_api_key(raw: str) -> str:

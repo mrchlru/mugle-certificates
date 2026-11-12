@@ -168,6 +168,49 @@ def test_wallet_endpoint_pkpass_when_allowed(mock_factory: MagicMock, client: Te
     provider.create_pass.assert_called_once()
 
 
+def test_wallet_provider_share_url_without_pkpass() -> None:
+    settings = Settings(walletwallet_api_key="ww_live_" + "a" * 32)
+    provider = WalletWalletProvider(settings)
+    with patch("bonus.wallet_provider.httpx.Client") as client_cls:
+        mock_client = MagicMock()
+        client_cls.return_value.__enter__.return_value = mock_client
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = b'{"serialNumber":"s1","shareUrl":"https://pass.example/p/s1"}'
+        mock_response.json.return_value = {
+            "serialNumber": "s1",
+            "shareUrl": "https://pass.example/p/s1",
+        }
+        mock_client.post.return_value = mock_response
+        cert = SimpleNamespace(
+            short_code="12345678",
+            public_number="MR-1",
+            balance=0,
+            discount_percent=0,
+            expires_on=None,
+            segment=None,
+            token="tok",
+            note="",
+            company="",
+            use_days="1234567",
+            id=2,
+        )
+        with (
+            patch("bonus.wallet_provider.get_settings", return_value=settings),
+            patch("bonus.wallet_payload.list_parts", return_value=[]),
+        ):
+            result = provider.create_pass(
+                MagicMock(),
+                cert,
+                None,
+                base_url="https://x.test",
+                show_balance=False,
+                notify_on_change=False,
+            )
+        assert result.share_url.startswith("https://")
+        assert result.pkpass == b""
+
+
 def test_wallet_provider_error_status() -> None:
     settings = Settings(walletwallet_api_key="ww_live_" + "a" * 32)
     provider = WalletWalletProvider(settings)

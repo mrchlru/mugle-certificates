@@ -8,12 +8,18 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi.responses import RedirectResponse, Response
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from bonus.audit import write_audit
 from bonus.config import get_settings
 from bonus.models import AuditAction, Certificate, CertificateStatus, WalletFetchLog, WalletPass
-from bonus.wallet_provider import WalletProviderError, get_wallet_provider, wallet_provider_ready
+from bonus.wallet_provider import (
+    CreatePassResult,
+    WalletProviderError,
+    get_wallet_provider,
+    wallet_provider_ready,
+)
 
 from bonus import app_settings as app_settings_module
 from bonus.values import today_msk
@@ -125,19 +131,61 @@ def serve_wallet_pass(
             show_balance=show_bal,
             notify_on_change=notify,
         )
+        share = (created.share_url or "").strip()
+        if not created.pkpass and share:
+            try:
+                _store_wallet_pass_row(db, certificate.id, created)
+                db.commit()
+            except SQLAlchemyError:
+                db.rollback()
+            _audit_issue(db, certificate, "redirect", actor_id)
+            _rate_limit_record(db, certificate.id, client_key)
+            return RedirectResponse(share, status_code=302)
         now = _utcnow()
-        db.add(
-            WalletPass(
-                certificate_id=certificate.id,
-                serial=created.serial,
-                share_url=created.share_url,
-                google_save_url=created.google_save_url,
-                created_at=now,
-                last_pushed_at=now,
-                sync_error="",
+        try:
+            _store_wallet_pass_row(db, certificate.id, created, now=now)
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            row = db.scalar(
+                select(WalletPass).where(WalletPass.certificate_id == certificate.id)
             )
-        )
-        db.commit()
+            existing_share = (row.share_url if row else "") or ""
+            if existing_share.strip():
+                _audit_issue(db, certificate, "redirect", actor_id)
+                _rate_limit_record(db, certificate.id, client_key)
+                return RedirectResponse(existing_share.strip(), status_code=302)
+            logger.warning(
+                "Wallet pass row conflict cert=%s",
+                certificate.public_number or certificate.id,
+            )
+            return Response(
+                content=USER_ERROR,
+                status_code=503,
+                media_type="text/plain; charset=utf-8",
+            )
+        except SQLAlchemyError as exc:
+            db.rollback()
+            logger.exception(
+                "Wallet pass DB save failed cert=%s: %s",
+                certificate.public_number or certificate.id,
+                type(exc).__name__,
+            )
+            if created.pkpass:
+                return Response(
+                    content=created.pkpass,
+                    media_type="application/vnd.apple.pkpass",
+                    headers={
+                        "Content-Disposition": f'attachment; filename="{PKPASS_NAME}"',
+                    },
+                )
+            if share:
+                return RedirectResponse(share, status_code=302)
+            return Response(
+                content=USER_ERROR,
+                status_code=503,
+                media_type="text/plain; charset=utf-8",
+            )
         _audit_issue(db, certificate, "created", actor_id)
         _rate_limit_record(db, certificate.id, client_key)
         logger.info(
@@ -268,6 +316,28 @@ def _use_ip_rate_limit(client_key: str) -> bool:
     if raw.startswith("172.") or raw.startswith("10.") or raw.startswith("192.168."):
         return False
     return True
+
+
+def _store_wallet_pass_row(
+    db: Session,
+    certificate_id: int,
+    created: CreatePassResult,
+    *,
+    now: datetime | None = None,
+) -> None:
+    """Сохраняет pass в wallet_passes с обрезкой под VARCHAR."""
+    stamp = now or _utcnow()
+    db.add(
+        WalletPass(
+            certificate_id=certificate_id,
+            serial=(created.serial or "")[:80],
+            share_url=(created.share_url or "")[:500],
+            google_save_url=(created.google_save_url or "")[:500],
+            created_at=stamp,
+            last_pushed_at=stamp,
+            sync_error="",
+        )
+    )
 
 
 def _hash_client(client_key: str) -> str:

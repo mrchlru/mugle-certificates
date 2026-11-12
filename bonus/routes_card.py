@@ -214,12 +214,23 @@ def public_wallet_pass(token: str, request: Request, db: Session = Depends(get_d
     if certificate is None:
         return Response(status_code=404)
     base = public_base(request)
-    response = serve_wallet_pass(
-        db,
-        certificate,
-        base_url=base,
-        client_key=client_ip(request),
-    )
+    try:
+        response = serve_wallet_pass(
+            db,
+            certificate,
+            base_url=base,
+            client_key=client_ip(request),
+        )
+    except Exception:
+        logger.exception(
+            "GET /c/*/wallet unhandled cert=%s",
+            certificate.public_number or certificate.id,
+        )
+        return Response(
+            content="Не получилось подготовить карту, попробуйте позже",
+            status_code=503,
+            media_type="text/plain; charset=utf-8",
+        )
     logger.info(
         "GET /c/*/wallet cert=%s status=%s",
         certificate.public_number or certificate.id,
