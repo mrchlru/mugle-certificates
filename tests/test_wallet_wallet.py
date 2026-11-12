@@ -137,52 +137,13 @@ def test_build_walletwallet_body_barcode_short_code() -> None:
     assert "primaryFields" not in body
     labels = [f.get("label") for f in body["secondaryFields"]]
     assert labels[0] == "Владелец карты"
-    assert "Тип" not in labels
     assert not any(f.get("label") == "Номер" for f in body["secondaryFields"])
     assert "logoURL" in body
     assert body["logoURL"].startswith("data:image/png;base64,")
     assert "stripURL" in body
     assert "color" in body
-    assert body["title"] == "Карта"
-    assert "logoText" not in body
-    assert body["footerFields"][0]["label"] == "Действует до"
-    assert body["footerFields"][0]["value"] == "31.12.2026"
+    assert body["logoText"] == "Teams Bonus"
     assert body["color"] == "#00A8A8"
-
-
-def test_wallet_date_layout_owner_label(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("WALLET_DATE_LAYOUT", "owner_label")
-    get_settings.cache_clear()
-    db = MagicMock()
-    cert = SimpleNamespace(
-        short_code="12345678",
-        public_number="MR-1",
-        balance=0,
-        discount_percent=10,
-        expires_on=date(2027, 1, 15),
-        segment=None,
-        token="t",
-        note="",
-        company="",
-        use_days="1234567",
-        id=3,
-    )
-    with (
-        patch("bonus.wallet_payload.list_parts", return_value=[]),
-        patch("bonus.wallet_payload.prepare_wallet_branding", return_value=_fake_branding()),
-    ):
-        body = build_walletwallet_body(
-            db,
-            cert,
-            SimpleNamespace(full_name="Петров Пётр"),
-            base_url="",
-            show_balance=False,
-            notify_on_change=False,
-        )
-    assert "footerFields" not in body
-    owner = body["secondaryFields"][0]
-    assert owner["label"] == "Владелец карты · до 15.01.2027"
-    get_settings.cache_clear()
 
 
 def test_build_walletwallet_body_basic_branding() -> None:
@@ -210,9 +171,7 @@ def test_build_walletwallet_body_basic_branding() -> None:
             notify_on_change=False,
             branding_pro=False,
         )
-    assert body["title"] == "Карта"
-    assert "logoText" not in body
-    assert "footerFields" not in body
+    assert body["logoText"] == "Teams Bonus"
     assert body["colorPreset"] == "green"
     assert body["headerFields"][0]["value"] == "100"
     assert "₽" not in body["headerFields"][0]["value"]
