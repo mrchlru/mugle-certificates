@@ -287,6 +287,7 @@ class AppSettings(Base):
         DateTime(timezone=True),
         nullable=True,
     )
+    wallet_branding_degraded: Mapped[bool] = mapped_column(default=False)
     debit_code_enabled: Mapped[bool] = mapped_column(default=False)
     debit_code_scope: Mapped[str] = mapped_column(String(16), default="marked")
     debit_code_min_amount: Mapped[int] = mapped_column(Integer, default=0)

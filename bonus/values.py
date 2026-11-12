@@ -42,6 +42,13 @@ def parse_money(value: object, *, blank_as_none: bool = False) -> int | None:
     return _guard_kopecks(int((amount * 100).quantize(Decimal("1"))))
 
 
+def format_wallet_balance_rubles(rubles: int) -> str:
+    """Баланс для Apple Wallet: без «₽», тысячи — неразрывным пробелом."""
+    sign = "−" if rubles < 0 else ""
+    grouped = f"{abs(int(rubles)):,}".replace(",", "\u00a0")
+    return f"{sign}{grouped}"
+
+
 def format_money_plain(kopecks: int) -> str:
     """Форматирует копейки как рубли без символа валюты: 12 500 или 12 500,50."""
     sign = "−" if kopecks < 0 else ""

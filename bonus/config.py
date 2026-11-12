@@ -65,6 +65,8 @@ class Settings(BaseSettings):
     walletwallet_api_key: str = ""
     wallet_fetch_per_card_per_day: int = 10
     wallet_fetch_per_ip_per_day: int = 40
+    wallet_pass_color: str = "#00A8A8"
+    wallet_asset_version: str = "1"
     support_telegram: str = "@nkatine"
     login_allow_ips: str = ""
     forwarded_allow_ips: str = "127.0.0.1"

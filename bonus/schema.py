@@ -223,6 +223,10 @@ def ensure_schema(engine: Engine) -> None:
             statements.append(
                 "ALTER TABLE app_settings ADD COLUMN wallet_provider_paused_until TIMESTAMP"
             )
+        if "wallet_branding_degraded" not in settings_cols:
+            statements.append(
+                "ALTER TABLE app_settings ADD COLUMN wallet_branding_degraded BOOLEAN DEFAULT FALSE"
+            )
     if "wallet_passes" not in tables:
         statements.append(
             """
@@ -487,6 +491,7 @@ def _ensure_app_settings_row(engine: Engine) -> None:
                     wallet_enabled,
                     wallet_show_balance,
                     wallet_notify_on_change,
+                    wallet_branding_degraded,
                     debit_code_enabled,
                     debit_code_scope,
                     debit_code_min_amount,
@@ -494,7 +499,7 @@ def _ensure_app_settings_row(engine: Engine) -> None:
                     debit_code_max_attempts,
                     debit_code_on_failure
                 )
-                SELECT 1, FALSE, FALSE, FALSE, FALSE, FALSE, 'marked', 0, 120, 3, 'deny'
+                SELECT 1, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, 'marked', 0, 120, 3, 'deny'
                 WHERE NOT EXISTS (SELECT 1 FROM app_settings WHERE id = 1)
                 """
             )

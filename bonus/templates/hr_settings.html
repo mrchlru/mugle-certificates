@@ -76,6 +76,9 @@
         {% if app_settings.wallet_provider_paused_until %}
         <li>Пауза после 429: до {{ app_settings.wallet_provider_paused_until }} UTC</li>
         {% endif %}
+        {% if wallet_provider_diag.branding_pro_degraded|default(false) %}
+        <li class="bad">Wallet работает без брендинга: нужен тариф Pro (logo, баннер, цвет).</li>
+        {% endif %}
       </ul>
       {% endif %}
       <label class="switch">

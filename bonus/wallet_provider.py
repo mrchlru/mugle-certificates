@@ -12,7 +12,9 @@ from sqlalchemy.orm import Session
 
 from bonus.apple_wallet import build_pkpass
 from bonus.config import Settings, get_settings
-from bonus.models import Certificate, User
+from bonus.app_settings import set_wallet_branding_degraded, wallet_branding_degraded
+from bonus.audit import write_audit
+from bonus.models import AuditAction, Certificate, User
 from bonus.wallet_payload import build_walletwallet_body
 
 logger = logging.getLogger("bonus.wallet_provider")
@@ -100,7 +102,7 @@ def wallet_provider_ready(settings: Settings | None = None) -> bool:
     return bool(_normalize_api_key(cfg.walletwallet_api_key))
 
 
-def wallet_provider_diagnostics() -> dict[str, bool | str]:
+def wallet_provider_diagnostics(db: Session | None = None) -> dict[str, bool | str]:
     """Для админки: без значения ключа."""
     settings = get_settings()
     key = _normalize_api_key(settings.walletwallet_api_key)
@@ -108,6 +110,7 @@ def wallet_provider_diagnostics() -> dict[str, bool | str]:
         "provider": (settings.wallet_provider or "walletwallet").strip() or "walletwallet",
         "key_configured": bool(key),
         "key_prefix_ok": key.startswith("ww_live_"),
+        "branding_pro_degraded": wallet_branding_degraded(db) if db is not None else False,
     }
 
 
@@ -145,7 +148,7 @@ class WalletWalletProvider:
         show_balance: bool,
         notify_on_change: bool,
     ) -> CreatePassResult:
-        body = build_walletwallet_body(
+        data = _post_passes(
             db,
             certificate,
             holder,
@@ -153,7 +156,6 @@ class WalletWalletProvider:
             show_balance=show_balance,
             notify_on_change=notify_on_change,
         )
-        data = _post_json("/api/passes", body)
         serial = str(data.get("serialNumber") or "").strip()
         share = str(data.get("shareUrl") or "").strip()
         google = str(data.get("googleSaveUrl") or "").strip()
@@ -199,16 +201,16 @@ class WalletWalletProvider:
         show_balance: bool,
         notify_on_change: bool,
     ) -> bool:
-        body = build_walletwallet_body(
+        path = f"/api/passes/{serial}"
+        data = _put_pass(
             db,
             certificate,
             holder,
+            path=path,
             base_url=base_url,
             show_balance=show_balance,
             notify_on_change=notify_on_change,
         )
-        path = f"/api/passes/{serial}"
-        data = _put_json(path, body)
         return not bool(data.get("unchanged"))
 
     def revoke_pass(self, serial: str) -> None:
@@ -283,6 +285,87 @@ def _decode_pkpass_bytes(raw_b64: str) -> bytes:
     except Exception:
         padded = cleaned + "=" * (-len(cleaned) % 4)
         return base64.urlsafe_b64decode(padded)
+
+
+def _post_passes(
+    db: Session,
+    certificate: Certificate,
+    holder: User | None,
+    *,
+    base_url: str,
+    show_balance: bool,
+    notify_on_change: bool,
+) -> dict[str, Any]:
+    """POST /api/passes с откатом Pro-полей при 403."""
+    kwargs = dict(
+        db=db,
+        certificate=certificate,
+        holder=holder,
+        base_url=base_url,
+        show_balance=show_balance,
+        notify_on_change=notify_on_change,
+    )
+    try:
+        data = _post_json("/api/passes", build_walletwallet_body(**kwargs, branding_pro=True))
+        _clear_branding_degraded(db)
+        return data
+    except WalletProviderError as exc:
+        if exc.status_code != 403:
+            raise
+        logger.warning("WalletWallet POST /api/passes Pro → 403, fallback без logoURL/stripURL/color")
+        _record_branding_fallback(db)
+        return _post_json("/api/passes", build_walletwallet_body(**kwargs, branding_pro=False))
+
+
+def _put_pass(
+    db: Session,
+    certificate: Certificate,
+    holder: User | None,
+    *,
+    path: str,
+    base_url: str,
+    show_balance: bool,
+    notify_on_change: bool,
+) -> dict[str, Any]:
+    """PUT /api/passes/<serial> с откатом Pro-полей при 403."""
+    kwargs = dict(
+        db=db,
+        certificate=certificate,
+        holder=holder,
+        base_url=base_url,
+        show_balance=show_balance,
+        notify_on_change=notify_on_change,
+    )
+    try:
+        data = _put_json(path, build_walletwallet_body(**kwargs, branding_pro=True))
+        _clear_branding_degraded(db)
+        return data
+    except WalletProviderError as exc:
+        if exc.status_code != 403:
+            raise
+        logger.warning("WalletWallet PUT %s Pro → 403, fallback без logoURL/stripURL/color", path)
+        _record_branding_fallback(db)
+        return _put_json(path, build_walletwallet_body(**kwargs, branding_pro=False))
+
+
+def _record_branding_fallback(db: Session) -> None:
+    """Помечает пилот как работающий без тарифа Pro."""
+    set_wallet_branding_degraded(db, True)
+    write_audit(
+        db,
+        actor=None,
+        action=AuditAction.wallet_settings,
+        summary="Wallet: брендинг Pro недоступен",
+        target_type="app_settings",
+        target_id=1,
+        detail="Wallet работает без брендинга: нужен тариф Pro",
+    )
+
+
+def _clear_branding_degraded(db: Session) -> None:
+    """Сбрасывает предупреждение после успешного Pro-запроса."""
+    if wallet_branding_degraded(db):
+        set_wallet_branding_degraded(db, False)
 
 
 def _normalize_api_key(raw: str) -> str:

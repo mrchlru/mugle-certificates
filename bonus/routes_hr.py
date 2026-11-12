@@ -2073,7 +2073,7 @@ def _render_settings(request: Request, db: Session, **extra):
         sheets_credentials_error=sheets_credentials_error(),
         blocked_logins=list_blocked_attempts(db),
         accrual_diag=daily_accrual_diagnostic(db),
-        wallet_provider_diag=wallet_provider_diagnostics(),
+        wallet_provider_diag=wallet_provider_diagnostics(db),
         **extra,
     )
 

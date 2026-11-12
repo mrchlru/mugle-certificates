@@ -102,10 +102,50 @@ def test_build_walletwallet_body_barcode_short_code() -> None:
             show_balance=False,
             notify_on_change=False,
         )
-    assert body["barcodeValue"] == "87654321"
+    assert body["barcodeValue"] == "8765-4321"
+    assert body["barcodeAltText"] == "8765-4321"
     assert body["barcodeFormat"] == "Code128"
     assert body["barcodeValue"] != cert.token
     assert "headerFields" not in body
+    assert body["primaryFields"][0]["label"] == "Владелец карты"
+    assert not any(f.get("label") == "Номер" for f in body["secondaryFields"])
+    assert "logoURL" in body
+    assert "stripURL" in body
+    assert "color" in body
+    assert "logoText" not in body
+    assert body["color"] == "#00A8A8"
+
+
+def test_build_walletwallet_body_basic_branding() -> None:
+    db = MagicMock()
+    cert = SimpleNamespace(
+        short_code="12345678",
+        public_number="MR-00001",
+        balance=10000,
+        discount_percent=0,
+        expires_on=None,
+        segment=None,
+        token="secret",
+        note="",
+        company="",
+        use_days="1234567",
+        id=1,
+    )
+    with patch("bonus.wallet_payload.list_parts", return_value=[]):
+        body = build_walletwallet_body(
+            db,
+            cert,
+            None,
+            base_url="",
+            show_balance=True,
+            notify_on_change=False,
+            branding_pro=False,
+        )
+    assert body["logoText"] == "Teams Bonus"
+    assert body["colorPreset"] == "green"
+    assert body["headerFields"][0]["value"] == "100"
+    assert "₽" not in body["headerFields"][0]["value"]
+    assert "\u00a0" not in body["headerFields"][0]["value"] or body["headerFields"][0]["value"] == "100"
 
 
 def test_certificate_wallet_visible_requires_flags(client: TestClient) -> None:
@@ -209,6 +249,56 @@ def test_wallet_provider_share_url_without_pkpass() -> None:
             )
         assert result.share_url.startswith("https://")
         assert result.pkpass == b""
+
+
+def test_wallet_provider_pro_403_fallback() -> None:
+    settings = Settings(walletwallet_api_key="ww_live_" + "a" * 32)
+    provider = WalletWalletProvider(settings)
+    cert = SimpleNamespace(
+        short_code="12345678",
+        public_number="MR-1",
+        balance=0,
+        discount_percent=0,
+        expires_on=None,
+        segment=None,
+        token="tok",
+        note="",
+        company="",
+        use_days="1234567",
+        id=2,
+    )
+    ok = MagicMock()
+    ok.status_code = 200
+    ok.content = b'{"serialNumber":"s1","shareUrl":"https://pass.example/p/s1","applePass":""}'
+    ok.json.return_value = {"serialNumber": "s1", "shareUrl": "https://pass.example/p/s1"}
+
+    forbidden = MagicMock()
+    forbidden.status_code = 403
+    forbidden.content = b'{"error":"pro only"}'
+    forbidden.json.return_value = {"error": "pro only"}
+
+    with patch("bonus.wallet_provider.httpx.Client") as client_cls:
+        mock_client = MagicMock()
+        client_cls.return_value.__enter__.return_value = mock_client
+        mock_client.post.side_effect = [forbidden, ok]
+        db = MagicMock()
+        with (
+            patch("bonus.wallet_provider.get_settings", return_value=settings),
+            patch("bonus.wallet_payload.list_parts", return_value=[]),
+            patch("bonus.wallet_provider.set_wallet_branding_degraded") as mark,
+            patch("bonus.wallet_provider.write_audit"),
+        ):
+            result = provider.create_pass(
+                db,
+                cert,
+                None,
+                base_url="https://example.test",
+                show_balance=False,
+                notify_on_change=False,
+            )
+        assert result.share_url.startswith("https://")
+        mark.assert_called_once()
+        assert mock_client.post.call_count == 2
 
 
 def test_wallet_provider_error_status() -> None:

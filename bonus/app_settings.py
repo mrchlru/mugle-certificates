@@ -106,6 +106,20 @@ def certificate_wallet_allowed(certificate: Certificate) -> bool:
     return bool(getattr(certificate, "wallet_allowed", False))
 
 
+def wallet_branding_degraded(db: Session) -> bool:
+    """Pass выпускается без Pro-картинок (после 403 от WalletWallet)."""
+    return bool(get_app_settings(db).wallet_branding_degraded)
+
+
+def set_wallet_branding_degraded(db: Session, degraded: bool) -> AppSettings:
+    """Фиксирует, что брендинг Pro недоступен на тарифе WalletWallet."""
+    row = get_app_settings(db)
+    row.wallet_branding_degraded = degraded
+    db.commit()
+    db.refresh(row)
+    return row
+
+
 def update_debit_code_settings(
     db: Session,
     *,

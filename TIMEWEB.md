@@ -47,6 +47,9 @@
 | `APPLE_WWDR_PEM` / `APPLE_WWDR_FILE` | Apple WWDR intermediate (желательно) |
 | `WALLET_PROVIDER` | `walletwallet` (пилот) или `local` (своя подпись Apple) |
 | `WALLETWALLET_API_KEY` | Ключ WalletWallet (`ww_live_…` или 32 hex). Без него кнопка Wallet не показывается |
+| `APP_PUBLIC_URL` | Обязателен для брендинга pass: публичные `logoURL` / `stripURL` на этом домене |
+| `WALLET_PASS_COLOR` | Цвет pass (по умолчанию `#00A8A8`) |
+| `WALLET_ASSET_VERSION` | Версия в query (`?v=`) для смены картинок в `/static/wallet/` без деплоя кода |
 
 `DATA_DIR` нужен только для SQLite и локальных загрузок без S3. Файл базы тогда должен жить на постоянном диске, смонтированном в `/data`. Иначе при следующем деплое сертификаты исчезнут. Для боевого запуска берите PostgreSQL.
 
