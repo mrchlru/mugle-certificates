@@ -66,6 +66,18 @@
         <span class="switch-copy">Пилот Apple Wallet через WalletWallet</span>
       </label>
       <p class="muted design-hint">По умолчанию выключено. Кнопка на карте появится только у карт с выданным доступом в сводке.</p>
+      {% if wallet_provider_diag %}
+      <ul class="muted design-hint">
+        <li>Провайдер: <code>{{ wallet_provider_diag.provider }}</code></li>
+        <li>Ключ WalletWallet в окружении: {% if wallet_provider_diag.key_configured %}<strong>задан</strong>{% else %}<strong class="bad">нет — добавьте WALLETWALLET_API_KEY в Timeweb</strong>{% endif %}</li>
+        {% if wallet_provider_diag.key_configured and not wallet_provider_diag.key_prefix_ok %}
+        <li>Формат ключа: ожидается <code>ww_live_…</code> (можно только 32 hex — сервер допишет префикс).</li>
+        {% endif %}
+        {% if app_settings.wallet_provider_paused_until %}
+        <li>Пауза после 429: до {{ app_settings.wallet_provider_paused_until }} UTC</li>
+        {% endif %}
+      </ul>
+      {% endif %}
       <label class="switch">
         <input type="checkbox" name="show_balance" value="1" {% if app_settings.wallet_show_balance|default(false) %}checked{% endif %}>
         <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>

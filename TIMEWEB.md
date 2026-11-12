@@ -45,6 +45,8 @@
 | `APPLE_ORGANIZATION_NAME` | organizationName в pass (Mugle Rest) |
 | `APPLE_PASS_CERT_PEM` / `APPLE_PASS_KEY_PEM` | PEM сертификата Pass Type ID и ключа (или `*_FILE` / `APPLE_PASS_P12_FILE`) |
 | `APPLE_WWDR_PEM` / `APPLE_WWDR_FILE` | Apple WWDR intermediate (желательно) |
+| `WALLET_PROVIDER` | `walletwallet` (пилот) или `local` (своя подпись Apple) |
+| `WALLETWALLET_API_KEY` | Ключ WalletWallet (`ww_live_…` или 32 hex). Без него кнопка Wallet не показывается |
 
 `DATA_DIR` нужен только для SQLite и локальных загрузок без S3. Файл базы тогда должен жить на постоянном диске, смонтированном в `/data`. Иначе при следующем деплое сертификаты исчезнут. Для боевого запуска берите PostgreSQL.
 

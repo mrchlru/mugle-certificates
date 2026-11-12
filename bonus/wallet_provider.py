@@ -81,6 +81,28 @@ def get_wallet_provider(settings: Settings | None = None) -> WalletProvider:
     return WalletWalletProvider(cfg)
 
 
+def wallet_provider_ready(settings: Settings | None = None) -> bool:
+    """Можно ли вызывать WalletWallet / локальную подпись."""
+    cfg = settings or get_settings()
+    mode = (cfg.wallet_provider or "walletwallet").strip().casefold()
+    if mode == "local":
+        from bonus.apple_wallet import apple_wallet_enabled
+
+        return apple_wallet_enabled(cfg)
+    return bool(_normalize_api_key(cfg.walletwallet_api_key))
+
+
+def wallet_provider_diagnostics() -> dict[str, bool | str]:
+    """Для админки: без значения ключа."""
+    settings = get_settings()
+    key = _normalize_api_key(settings.walletwallet_api_key)
+    return {
+        "provider": (settings.wallet_provider or "walletwallet").strip() or "walletwallet",
+        "key_configured": bool(key),
+        "key_prefix_ok": key.startswith("ww_live_"),
+    }
+
+
 def log_wallet_provider_status() -> None:
     """Сообщение при старте приложения."""
     settings = get_settings()
@@ -93,8 +115,7 @@ def log_wallet_provider_status() -> None:
         else:
             print("Teams Bonus: Wallet local — подпись Apple не настроена", flush=True)
         return
-    key = (settings.walletwallet_api_key or "").strip()
-    if not key:
+    if not wallet_provider_ready(settings):
         print("Teams Bonus: WalletWallet выключен — нет WALLETWALLET_API_KEY", flush=True)
         return
     print("Teams Bonus: WalletWallet провайдер готов", flush=True)
@@ -219,17 +240,32 @@ class LocalPkpassProvider:
         del serial
 
 
+def _normalize_api_key(raw: str) -> str:
+    """Ключ без Bearer; дописывает ww_live_ если передали только 32 hex."""
+    key = (raw or "").strip()
+    if not key:
+        return ""
+    if key.lower().startswith("bearer "):
+        key = key[7:].strip()
+    if not key.startswith("ww_live_"):
+        compact = key.replace("-", "")
+        if len(compact) == 32 and all(ch in "0123456789abcdefABCDEF" for ch in compact):
+            key = f"ww_live_{compact.lower()}"
+    return key
+
+
 def _auth_header(settings: Settings) -> str:
-    key = (settings.walletwallet_api_key or "").strip()
+    key = _normalize_api_key(settings.walletwallet_api_key)
     if not key:
         raise WalletProviderError(USER_ERROR, status_code=401)
-    if key.lower().startswith("bearer "):
-        return key
     return f"Bearer {key}"
 
 
-def _log_api_error(method: str, path: str, status: int) -> None:
-    logger.warning("WalletWallet %s %s → HTTP %s", method, path, status)
+def _log_api_error(method: str, path: str, status: int, hint: str = "") -> None:
+    if hint:
+        logger.warning("WalletWallet %s %s → HTTP %s (%s)", method, path, status, hint)
+    else:
+        logger.warning("WalletWallet %s %s → HTTP %s", method, path, status)
 
 
 def _handle_response(response: httpx.Response, method: str, path: str) -> dict[str, Any]:
@@ -242,11 +278,26 @@ def _handle_response(response: httpx.Response, method: str, path: str) -> dict[s
             return data if isinstance(data, dict) else {}
         except Exception:
             return {}
-    _log_api_error(method, path, status)
+    hint = _response_error_hint(response)
+    _log_api_error(method, path, status, hint)
     quota = status == 429
     if status in {400, 401, 403, 404, 429, 500}:
         raise WalletProviderError(USER_ERROR, status_code=status, quota_exceeded=quota)
     raise WalletProviderError(USER_ERROR, status_code=status, quota_exceeded=quota)
+
+
+def _response_error_hint(response: httpx.Response) -> str:
+    """Краткая подсказка из JSON ошибки без тела pass."""
+    try:
+        data = response.json()
+        if isinstance(data, dict):
+            for key in ("error", "message", "detail"):
+                text = str(data.get(key) or "").strip()
+                if text:
+                    return text[:160]
+    except Exception:
+        pass
+    return ""
 
 
 def _post_json(path: str, body: dict[str, Any]) -> dict[str, Any]:

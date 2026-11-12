@@ -2059,6 +2059,7 @@ def _render_settings(request: Request, db: Session, **extra):
     from bonus.login_guard import list_blocked_attempts
     from bonus.sheets_queue import queue_stats
     from bonus.sheets_sync import sheets_credentials_error
+    from bonus.wallet_provider import wallet_provider_diagnostics
 
     return render(
         request,
@@ -2072,6 +2073,7 @@ def _render_settings(request: Request, db: Session, **extra):
         sheets_credentials_error=sheets_credentials_error(),
         blocked_logins=list_blocked_attempts(db),
         accrual_diag=daily_accrual_diagnostic(db),
+        wallet_provider_diag=wallet_provider_diagnostics(),
         **extra,
     )
 

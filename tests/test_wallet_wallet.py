@@ -27,6 +27,7 @@ from bonus.wallet_service import certificate_wallet_visible, serve_wallet_pass
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
     monkeypatch.setenv("SEED_DEMO", "false")
+    monkeypatch.setenv("WALLETWALLET_API_KEY", "ww_live_" + "a" * 32)
     get_settings.cache_clear()
     database.configure_database("sqlite:///:memory:")
     Base.metadata.create_all(database.engine)

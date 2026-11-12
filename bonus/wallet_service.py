@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from bonus.audit import write_audit
 from bonus.config import get_settings
 from bonus.models import AuditAction, Certificate, CertificateStatus, WalletFetchLog, WalletPass
-from bonus.wallet_provider import WalletProviderError, get_wallet_provider
+from bonus.wallet_provider import WalletProviderError, get_wallet_provider, wallet_provider_ready
 
 from bonus import app_settings as app_settings_module
 from bonus.values import today_msk
@@ -26,6 +26,8 @@ PKPASS_NAME = "teams-bonus.pkpass"
 
 def certificate_wallet_visible(db: Session, certificate: Certificate) -> bool:
     """Кнопка Apple Wallet на странице карты."""
+    if not wallet_provider_ready():
+        return False
     if not app_settings_module.wallet_feature_enabled(db):
         return False
     if not bool(getattr(certificate, "wallet_allowed", False)):
@@ -90,6 +92,16 @@ def serve_wallet_pass(
             status_code=503,
             media_type="text/plain; charset=utf-8",
         )
+    if not wallet_provider_ready():
+        logger.warning(
+            "Wallet issue skipped: WALLETWALLET_API_KEY not set (cert %s)",
+            certificate.public_number or certificate.id,
+        )
+        return Response(
+            content=USER_ERROR,
+            status_code=503,
+            media_type="text/plain; charset=utf-8",
+        )
     show_bal = app_settings_module.wallet_show_balance(db)
     notify = app_settings_module.wallet_notify_on_change(db)
     holder = certificate.holder
@@ -136,6 +148,12 @@ def serve_wallet_pass(
                 target_id=1,
                 detail="Кнопка Wallet приостановлена на 1 час",
             )
+        logger.warning(
+            "Wallet issue failed cert=%s http=%s quota=%s",
+            certificate.public_number or certificate.id,
+            exc.status_code,
+            exc.quota_exceeded,
+        )
         _audit_issue(db, certificate, "error", actor_id)
         if exc.status_code == 429:
             return Response(

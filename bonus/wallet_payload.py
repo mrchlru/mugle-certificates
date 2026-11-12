@@ -90,14 +90,11 @@ def _back_fields(
     show_balance: bool,
 ) -> list[dict[str, str]]:
     fields: list[dict[str, str]] = []
-    root = (base_url or get_settings().app_public_url or "").strip().rstrip("/")
-    token = (certificate.token or "").strip()
-    card_url = f"{root}/c/{token}" if root and token else ""
-    if not show_balance and card_url:
+    if not show_balance:
         fields.append(
             {
                 "label": "Баланс",
-                "value": f"Актуальный баланс — на странице карты: {card_url}",
+                "value": "Актуальный баланс — на странице карты в Teams Bonus.",
             }
         )
     days_label = _use_days_label(certificate)
@@ -119,8 +116,6 @@ def _back_fields(
             "value": "Список ресторанов — на странице карты в браузере.",
         }
     )
-    if card_url:
-        fields.append({"label": "Карта в браузере", "value": card_url})
     return fields
 
 
