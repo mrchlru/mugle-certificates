@@ -140,28 +140,15 @@ def walletwallet_pass_colors(background_hex: str) -> dict[str, str]:
 
 
 def apply_walletwallet_pass_colors(body: dict[str, Any]) -> None:
-    """Задаёт фон и белый текст после Pro color / preset."""
+    """Фон и белые label/value как в локальном pass.json (Statix).
+
+    WalletWallet при `color: #hex` сам считает labelColor по яркости — серый.
+    Явные rgb + без `color`/`colorPreset` дают белые подписи.
+    """
     colors = walletwallet_pass_colors(resolve_walletwallet_background_hex(body))
     body.update(colors)
-
-
-def _inline_label_fields(fields: list[dict[str, str]]) -> None:
-    """Без label — весь текст рисуется foregroundColor (обход серых подписей)."""
-    for field in fields:
-        label = (field.pop("label", "") or "").strip()
-        value = (field.get("value") or "").strip()
-        if label and value:
-            field["value"] = f"{label}\n{value}"
-        elif label:
-            field["value"] = label
-
-
-def apply_walletwallet_inline_field_labels(body: dict[str, Any]) -> None:
-    """Подпись + значение в одном value (белый текст на ярком фоне)."""
-    for key in ("headerFields", "secondaryFields", "footerFields"):
-        block = body.get(key)
-        if isinstance(block, list):
-            _inline_label_fields(block)
+    body.pop("color", None)
+    body.pop("colorPreset", None)
 
 
 def apply_walletwallet_api_minimum(body: dict[str, Any]) -> None:

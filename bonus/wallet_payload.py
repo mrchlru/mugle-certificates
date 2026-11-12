@@ -18,7 +18,6 @@ from bonus.values import MSK, format_short_code, format_wallet_balance_rubles, t
 from bonus.pkpass_fields import (
     apply_walletwallet_api_minimum,
     apply_walletwallet_expiry,
-    apply_walletwallet_inline_field_labels,
     apply_walletwallet_pass_colors,
     face_secondary_walletwallet,
     wallet_date_layout,
@@ -67,7 +66,6 @@ def build_walletwallet_body(
     _apply_branding(db, certificate, body, branding_pro=branding_pro, base_url=base_url)
     apply_walletwallet_api_minimum(body)
     apply_walletwallet_pass_colors(body)
-    apply_walletwallet_inline_field_labels(body)
     if show_balance and rubles >= 0:
         balance_field: dict[str, str] = {
             "label": "Баланс",
