@@ -73,7 +73,12 @@ def serve_wallet_pass(
     """GET /c/{token}/wallet — pkpass, редирект или ошибка."""
     if not certificate_wallet_visible(db, certificate):
         return Response(status_code=404)
-    if not _rate_limit_ok(db, certificate.id, client_key):
+    if not _rate_limit_allows(db, certificate.id, client_key):
+        logger.warning(
+            "Wallet rate limit cert=%s client=%s",
+            certificate.public_number or certificate.id,
+            _hash_client(client_key)[:8],
+        )
         return Response(
             content="Слишком много запросов, попробуйте завтра.",
             status_code=429,
@@ -82,10 +87,15 @@ def serve_wallet_pass(
     row = db.scalar(select(WalletPass).where(WalletPass.certificate_id == certificate.id))
     if row is not None and row.revoked_at is not None:
         row = None
+    if row is not None and not (row.share_url or "").strip():
+        db.delete(row)
+        db.commit()
+        row = None
     if row is not None:
         share = (row.share_url or "").strip()
         if share:
             _audit_issue(db, certificate, "redirect", actor_id)
+            _rate_limit_record(db, certificate.id, client_key)
             return RedirectResponse(share, status_code=302)
         return Response(
             content=USER_ERROR,
@@ -129,6 +139,13 @@ def serve_wallet_pass(
         )
         db.commit()
         _audit_issue(db, certificate, "created", actor_id)
+        _rate_limit_record(db, certificate.id, client_key)
+        logger.info(
+            "Wallet pass created cert=%s serial_len=%s pkpass_bytes=%s",
+            certificate.public_number or certificate.id,
+            len(created.serial or ""),
+            len(created.pkpass),
+        )
         return Response(
             content=created.pkpass,
             media_type="application/vnd.apple.pkpass",
@@ -195,11 +212,11 @@ def _unavailable(certificate: Certificate) -> bool:
     return False
 
 
-def _rate_limit_ok(db: Session, certificate_id: int, client_key: str) -> bool:
+def _rate_limit_allows(db: Session, certificate_id: int, client_key: str) -> bool:
+    """Проверка лимитов без записи (неудачные попытки не съедают квоту)."""
     settings = get_settings()
     since = _utcnow() - timedelta(days=1)
     per_card = settings.wallet_fetch_per_card_per_day
-    per_ip = settings.wallet_fetch_per_ip_per_day
     card_count = db.scalar(
         select(func.count())
         .select_from(WalletFetchLog)
@@ -210,25 +227,41 @@ def _rate_limit_ok(db: Session, certificate_id: int, client_key: str) -> bool:
     )
     if (card_count or 0) >= per_card:
         return False
-    ip_key = _hash_client(client_key)
-    ip_count = db.scalar(
-        select(func.count())
-        .select_from(WalletFetchLog)
-        .where(
-            WalletFetchLog.client_key == ip_key,
-            WalletFetchLog.created_at >= since,
+    if _use_ip_rate_limit(client_key):
+        per_ip = settings.wallet_fetch_per_ip_per_day
+        ip_key = _hash_client(client_key)
+        ip_count = db.scalar(
+            select(func.count())
+            .select_from(WalletFetchLog)
+            .where(
+                WalletFetchLog.client_key == ip_key,
+                WalletFetchLog.created_at >= since,
+            )
         )
-    )
-    if (ip_count or 0) >= per_ip:
-        return False
+        if (ip_count or 0) >= per_ip:
+            return False
+    return True
+
+
+def _rate_limit_record(db: Session, certificate_id: int, client_key: str) -> None:
+    """Фиксирует успешную выдачу для лимитов."""
     db.add(
         WalletFetchLog(
             certificate_id=certificate_id,
-            client_key=ip_key,
+            client_key=_hash_client(client_key),
             created_at=_utcnow(),
         )
     )
     db.commit()
+
+
+def _use_ip_rate_limit(client_key: str) -> bool:
+    """За Docker-прокси все запросы с 172.x — не душим весь сайт одним лимитом."""
+    raw = (client_key or "").strip()
+    if not raw or raw == "local":
+        return False
+    if raw.startswith("172.") or raw.startswith("10.") or raw.startswith("192.168."):
+        return False
     return True
 
 

@@ -1,9 +1,11 @@
 """Карточка сотрудника с QR-кодом."""
 
+import logging
 from dataclasses import replace
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Request
+from sqlalchemy.orm import joinedload
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
 
@@ -14,6 +16,9 @@ from bonus.wallet_service import serve_wallet_pass, wallet_ui_context
 from bonus.db import get_db
 from bonus.http import public_base, render, require, templates
 from bonus.models import Certificate, CertificateStatus, Role, User
+from sqlalchemy import select
+
+logger = logging.getLogger("bonus.wallet_route")
 from bonus.partners import partner_cities
 from bonus.present import HISTORY_PAGE_SIZE, TxView, load_card, load_cards, load_history_page
 from bonus.services import find_certificate, repair_iiko_part_balance_drift
@@ -198,16 +203,29 @@ def _empty_wallet_ui() -> dict:
 @router.get("/c/{token}/wallet")
 def public_wallet_pass(token: str, request: Request, db: Session = Depends(get_db)):
     """Выдаёт .pkpass через WalletWallet или редирект на shareUrl."""
-    certificate = find_certificate(db, token)
+    found = find_certificate(db, token)
+    if found is None:
+        return Response(status_code=404)
+    certificate = db.scalar(
+        select(Certificate)
+        .where(Certificate.id == found.id)
+        .options(joinedload(Certificate.holder), joinedload(Certificate.segment))
+    )
     if certificate is None:
         return Response(status_code=404)
     base = public_base(request)
-    return serve_wallet_pass(
+    response = serve_wallet_pass(
         db,
         certificate,
         base_url=base,
         client_key=client_ip(request),
     )
+    logger.info(
+        "GET /c/*/wallet cert=%s status=%s",
+        certificate.public_number or certificate.id,
+        getattr(response, "status_code", 0),
+    )
+    return response
 
 
 def _parse_before(raw: str) -> int | None:
