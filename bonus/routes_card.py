@@ -7,13 +7,10 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
 
-from bonus.apple_wallet import (
-    apple_wallet_enabled,
-    build_pkpass,
-    pkpass_download_url,
-    walletpasses_url,
-)
+from bonus.apple_wallet import apple_wallet_enabled, build_pkpass
 from bonus.app_settings import certificate_shows_wallet_buttons
+from bonus.security import client_ip
+from bonus.wallet_service import serve_wallet_pass, wallet_ui_context
 from bonus.db import get_db
 from bonus.http import public_base, render, require, templates
 from bonus.models import Certificate, CertificateStatus, Role, User
@@ -35,21 +32,21 @@ def _card_page_extras() -> dict:
 
 
 def _wallet_ui(db: Session, certificate: Certificate, base: str) -> dict:
-    """Флаги и ссылки Apple Wallet / Wallet Passes (Google Wallet отключён)."""
+    """Кнопка Apple Wallet (WalletWallet) или legacy local pkpass."""
+    pilot = wallet_ui_context(db, certificate)
+    if pilot.get("apple_wallet_enabled"):
+        return pilot
     if not certificate_shows_wallet_buttons(db, certificate):
-        return {
-            "apple_wallet_enabled": False,
-            "apple_wallet_href": "",
-            "walletpasses_enabled": False,
-            "walletpasses_href": "",
-        }
-    apple_on = apple_wallet_enabled()
-    pkpass_url = pkpass_download_url(certificate, base) if apple_on else ""
+        return _empty_wallet_ui()
+    if not apple_wallet_enabled():
+        return _empty_wallet_ui()
     return {
-        "apple_wallet_enabled": apple_on,
-        "apple_wallet_href": f"/c/{certificate.token}/apple-wallet.pkpass" if apple_on else "",
-        "walletpasses_enabled": apple_on and bool(pkpass_url),
-        "walletpasses_href": walletpasses_url(pkpass_url) if pkpass_url else "",
+        "apple_wallet_enabled": True,
+        "apple_wallet_href": f"/c/{certificate.token}/apple-wallet.pkpass",
+        "wallet_show_balance_on_pass": False,
+        "wallet_hint": "",
+        "walletpasses_enabled": False,
+        "walletpasses_href": "",
     }
 
 
@@ -191,9 +188,26 @@ def _empty_wallet_ui() -> dict:
     return {
         "apple_wallet_enabled": False,
         "apple_wallet_href": "",
+        "wallet_show_balance_on_pass": False,
+        "wallet_hint": "",
         "walletpasses_enabled": False,
         "walletpasses_href": "",
     }
+
+
+@router.get("/c/{token}/wallet")
+def public_wallet_pass(token: str, request: Request, db: Session = Depends(get_db)):
+    """Выдаёт .pkpass через WalletWallet или редирект на shareUrl."""
+    certificate = find_certificate(db, token)
+    if certificate is None:
+        return Response(status_code=404)
+    base = public_base(request)
+    return serve_wallet_pass(
+        db,
+        certificate,
+        base_url=base,
+        client_key=client_ip(request),
+    )
 
 
 def _parse_before(raw: str) -> int | None:

@@ -28,9 +28,11 @@ def bootstrap(settings: Settings) -> None:
         )
     from bonus.apple_wallet import log_apple_wallet_status
     from bonus.sheets_sync import log_sheets_status
+    from bonus.wallet_provider import log_wallet_provider_status
 
     log_sheets_status()
     log_apple_wallet_status()
+    log_wallet_provider_status()
     db = open_session()
     try:
         ensure_default_segments(db)

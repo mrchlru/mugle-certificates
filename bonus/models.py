@@ -60,6 +60,11 @@ class AuditAction(str, enum.Enum):
     login_unblock = "login_unblock"
     sheets_dedupe = "sheets_dedupe"
     debit_code_settings = "debit_code_settings"
+    wallet_access_grant = "wallet_access_grant"
+    wallet_access_revoke = "wallet_access_revoke"
+    wallet_issue = "wallet_issue"
+    wallet_provider_quota = "wallet_provider_quota"
+    wallet_settings = "wallet_settings"
 
 
 class CertificateStatus(str, enum.Enum):
@@ -216,6 +221,8 @@ class Certificate(Base):
     gift_opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Тестовая карта: кнопки кошелька видны даже при выключенной глобальной настройке.
     show_wallet_buttons: Mapped[bool] = mapped_column(default=False)
+    # Доступ к Apple Wallet через WalletWallet (пилот).
+    wallet_allowed: Mapped[bool] = mapped_column(default=False)
     require_debit_code: Mapped[bool] = mapped_column(default=False)
     issued_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: _utcnow())
@@ -273,6 +280,13 @@ class AppSettings(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     wallet_buttons_enabled: Mapped[bool] = mapped_column(default=False)
+    wallet_enabled: Mapped[bool] = mapped_column(default=False)
+    wallet_show_balance: Mapped[bool] = mapped_column(default=False)
+    wallet_notify_on_change: Mapped[bool] = mapped_column(default=False)
+    wallet_provider_paused_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     debit_code_enabled: Mapped[bool] = mapped_column(default=False)
     debit_code_scope: Mapped[str] = mapped_column(String(16), default="marked")
     debit_code_min_amount: Mapped[int] = mapped_column(Integer, default=0)
@@ -347,6 +361,68 @@ class DebitChallenge(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: _utcnow())
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class WalletPass(Base):
+    """Связь карты с pass в WalletWallet (serial и ссылка установки)."""
+
+    __tablename__ = "wallet_passes"
+    __table_args__ = (UniqueConstraint("certificate_id", name="uq_wallet_pass_cert"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    certificate_id: Mapped[int] = mapped_column(ForeignKey("certificates.id"), index=True)
+    serial: Mapped[str] = mapped_column(String(80), index=True)
+    share_url: Mapped[str] = mapped_column(String(500), default="")
+    google_save_url: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: _utcnow(),
+    )
+    last_pushed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    sync_error: Mapped[str] = mapped_column(String(300), default="")
+
+
+class WalletSyncJob(Base):
+    """Очередь PUT в WalletWallet после изменения баланса."""
+
+    __tablename__ = "wallet_sync_jobs"
+    __table_args__ = (UniqueConstraint("certificate_id", name="uq_wallet_sync_cert"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    certificate_id: Mapped[int] = mapped_column(ForeignKey("certificates.id"), index=True)
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: _utcnow(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: _utcnow(),
+    )
+
+
+class WalletFetchLog(Base):
+    """Счётчик запросов GET /c/.../wallet для rate limit."""
+
+    __tablename__ = "wallet_fetch_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    certificate_id: Mapped[int] = mapped_column(ForeignKey("certificates.id"), index=True)
+    client_key: Mapped[str] = mapped_column(String(80), default="", index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: _utcnow(),
+        index=True,
+    )
 
 
 class SheetsSyncJob(Base):

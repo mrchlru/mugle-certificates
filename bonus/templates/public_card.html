@@ -35,11 +35,14 @@
 {% if not card_is_expired %}
 {% if apple_wallet_enabled|default(false) and apple_wallet_href|default('')
    or walletpasses_enabled|default(false) and walletpasses_href|default('') %}
-<p class="wallet-actions">
+<p class="wallet-actions wallet-actions-ios" id="wallet-actions" hidden>
   {% if apple_wallet_enabled|default(false) and apple_wallet_href|default('') %}
   <a class="apple-wallet-btn" href="{{ apple_wallet_href }}" rel="noopener">
-    Добавить в Apple Wallet
+    <img src="/static/apple-add-to-wallet.svg" alt="Add to Apple Wallet" width="151" height="48">
   </a>
+  {% if wallet_hint|default('') %}
+  <span class="wallet-actions-note muted">{{ wallet_hint }}</span>
+  {% endif %}
   {% endif %}
   {% if walletpasses_enabled|default(false) and walletpasses_href|default('') %}
   <a class="walletpasses-btn" href="{{ walletpasses_href }}" rel="noopener">
@@ -58,6 +61,17 @@
 {% endif %}
 {% endblock %}
 {% block scripts %}
+{% if not card_is_expired and apple_wallet_enabled|default(false) %}
+<script>
+(function () {
+  var box = document.getElementById("wallet-actions");
+  if (!box) return;
+  var ua = navigator.userAgent || "";
+  var ios = /iP(hone|od|ad)/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  if (ios) box.hidden = false;
+})();
+</script>
+{% endif %}
 {% if card_is_expired %}
 <script src="/static/expired/card-expired.js?v={{ asset_v|default('1') }}"></script>
 <script>

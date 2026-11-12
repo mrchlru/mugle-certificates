@@ -55,6 +55,10 @@ def ensure_schema(engine: Engine) -> None:
             statements.append(
                 "ALTER TABLE certificates ADD COLUMN require_debit_code BOOLEAN DEFAULT FALSE"
             )
+        if "wallet_allowed" not in columns:
+            statements.append(
+                "ALTER TABLE certificates ADD COLUMN wallet_allowed BOOLEAN DEFAULT FALSE"
+            )
     if "app_settings" not in tables:
         statements.append(
             """
@@ -203,6 +207,63 @@ def ensure_schema(engine: Engine) -> None:
             statements.append(
                 "ALTER TABLE app_settings ADD COLUMN debit_code_on_failure VARCHAR(16) DEFAULT 'deny'"
             )
+        if "wallet_enabled" not in settings_cols:
+            statements.append(
+                "ALTER TABLE app_settings ADD COLUMN wallet_enabled BOOLEAN DEFAULT FALSE"
+            )
+        if "wallet_show_balance" not in settings_cols:
+            statements.append(
+                "ALTER TABLE app_settings ADD COLUMN wallet_show_balance BOOLEAN DEFAULT FALSE"
+            )
+        if "wallet_notify_on_change" not in settings_cols:
+            statements.append(
+                "ALTER TABLE app_settings ADD COLUMN wallet_notify_on_change BOOLEAN DEFAULT FALSE"
+            )
+        if "wallet_provider_paused_until" not in settings_cols:
+            statements.append(
+                "ALTER TABLE app_settings ADD COLUMN wallet_provider_paused_until TIMESTAMP"
+            )
+    if "wallet_passes" not in tables:
+        statements.append(
+            """
+            CREATE TABLE wallet_passes (
+                id INTEGER PRIMARY KEY,
+                certificate_id INTEGER NOT NULL UNIQUE,
+                serial VARCHAR(80) NOT NULL,
+                share_url VARCHAR(500) DEFAULT '',
+                google_save_url VARCHAR(500) DEFAULT '',
+                created_at TIMESTAMP,
+                last_pushed_at TIMESTAMP,
+                revoked_at TIMESTAMP,
+                sync_error VARCHAR(300) DEFAULT ''
+            )
+            """
+        )
+    if "wallet_sync_jobs" not in tables:
+        statements.append(
+            """
+            CREATE TABLE wallet_sync_jobs (
+                id INTEGER PRIMARY KEY,
+                certificate_id INTEGER NOT NULL UNIQUE,
+                status VARCHAR(16) DEFAULT 'pending',
+                attempts INTEGER DEFAULT 0,
+                last_error VARCHAR(500) DEFAULT '',
+                created_at TIMESTAMP,
+                updated_at TIMESTAMP
+            )
+            """
+        )
+    if "wallet_fetch_log" not in tables:
+        statements.append(
+            """
+            CREATE TABLE wallet_fetch_log (
+                id INTEGER PRIMARY KEY,
+                certificate_id INTEGER NOT NULL,
+                client_key VARCHAR(80) DEFAULT '',
+                created_at TIMESTAMP
+            )
+            """
+        )
     if "iiko_terminals" not in tables:
         statements.append(
             """
@@ -423,6 +484,9 @@ def _ensure_app_settings_row(engine: Engine) -> None:
                 INSERT INTO app_settings (
                     id,
                     wallet_buttons_enabled,
+                    wallet_enabled,
+                    wallet_show_balance,
+                    wallet_notify_on_change,
                     debit_code_enabled,
                     debit_code_scope,
                     debit_code_min_amount,
@@ -430,7 +494,7 @@ def _ensure_app_settings_row(engine: Engine) -> None:
                     debit_code_max_attempts,
                     debit_code_on_failure
                 )
-                SELECT 1, FALSE, FALSE, 'marked', 0, 120, 3, 'deny'
+                SELECT 1, FALSE, FALSE, FALSE, FALSE, FALSE, 'marked', 0, 120, 3, 'deny'
                 WHERE NOT EXISTS (SELECT 1 FROM app_settings WHERE id = 1)
                 """
             )

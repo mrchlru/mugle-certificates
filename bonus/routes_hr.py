@@ -29,9 +29,12 @@ from bonus.catalog import (
 )
 from bonus.app_settings import (
     get_app_settings,
+    set_wallet_balance_settings,
     set_wallet_buttons_enabled,
+    set_wallet_enabled,
     update_debit_code_settings,
     wallet_buttons_enabled,
+    wallet_enabled,
 )
 from bonus.audit import (
     accrual_nominal_audit_detail,
@@ -178,6 +181,7 @@ def dashboard(
         status_options=status_choices(),
         templates=list_templates(db),
         card_base=public_base(request),
+        wallet_pilot_enabled=wallet_enabled(db),
     )
 
 
@@ -211,6 +215,7 @@ def dashboard_cards_more(
         cards_total=page.total,
         cards_offset=page.next_offset,
         cards_has_more=page.has_more,
+        wallet_pilot_enabled=wallet_enabled(db),
     )
     response.headers["X-Has-More"] = "1" if page.has_more else "0"
     response.headers["X-Next-Offset"] = str(page.next_offset)
@@ -549,6 +554,39 @@ def settings_page(
 ):
     """Настройки главного администратора: кошельки и импорт."""
     return _render_settings(request, db)
+
+
+@router.post("/hr/settings/wallet-pilot")
+def settings_wallet_pilot(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin)),
+    enabled: str = Form("0"),
+    show_balance: str = Form("0"),
+    notify_on_change: str = Form("0"),
+    csrf_token: str = Form(""),
+):
+    """Пилот Apple Wallet через WalletWallet."""
+    try:
+        guard_csrf(request, csrf_token)
+        set_wallet_enabled(db, enabled == "1")
+        set_wallet_balance_settings(
+            db,
+            show_balance=show_balance == "1",
+            notify_on_change=notify_on_change == "1",
+        )
+        write_audit(
+            db,
+            actor=user,
+            action=AuditAction.wallet_settings,
+            summary="Настройки Apple Wallet (WalletWallet)",
+            detail=f"enabled={enabled == '1'} balance={show_balance == '1'}",
+        )
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+    else:
+        flash(request, "Настройки Apple Wallet сохранены")
+    return RedirectResponse("/hr/settings#wallet-pilot", status_code=303)
 
 
 @router.post("/hr/settings/wallet-buttons")
@@ -1230,6 +1268,13 @@ def certificate_page(
     just_created = created == 1
     syncing = just_created and sync_status in {"pending", "none"}
     sync_failed = just_created and sync_status == "failed"
+    from bonus.models import WalletPass
+    from sqlalchemy import select
+
+    pass_row = db.scalar(select(WalletPass).where(WalletPass.certificate_id == certificate.id))
+    wallet_sync_error = ""
+    if pass_row is not None and (pass_row.sync_error or "").strip():
+        wallet_sync_error = pass_row.sync_error.strip()
     return render(
         request,
         "hr_certificate.html",
@@ -1240,6 +1285,9 @@ def certificate_page(
         syncing=syncing,
         sync_failed=sync_failed,
         sync_sheets=sheets_enabled(),
+        wallet_allowed=bool(getattr(certificate, "wallet_allowed", False)),
+        wallet_pilot_enabled=wallet_enabled(db),
+        wallet_sync_error=wallet_sync_error,
     )
 
 
@@ -1292,6 +1340,95 @@ def certificate_barcode_png(
         media_type="image/png",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.post("/hr/c/{certificate_id}/wallet-allowed")
+def certificate_wallet_allowed(
+    certificate_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin)),
+    enabled: str = Form("0"),
+    csrf_token: str = Form(""),
+):
+    """Выдача или снятие доступа Apple Wallet для одной карты."""
+    from bonus.wallet_access import set_wallet_allowed
+
+    certificate = _certificate_or_redirect(db, request, certificate_id)
+    if certificate is None:
+        return RedirectResponse("/hr", status_code=303)
+    try:
+        guard_csrf(request, csrf_token)
+        set_wallet_allowed(db, certificate, allowed=enabled == "1", actor=user)
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+    else:
+        flash(
+            request,
+            "Доступ к Apple Wallet выдан" if enabled == "1" else "Доступ к Apple Wallet снят",
+        )
+    return RedirectResponse(f"/hr/c/{certificate_id}", status_code=303)
+
+
+@router.post("/hr/wallet-access/batch")
+def wallet_access_batch(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin)),
+    certificate_ids: str = Form(""),
+    allow: str = Form("1"),
+    csrf_token: str = Form(""),
+):
+    """Массовая выдача или снятие Wallet по выбранным id."""
+    from bonus.wallet_access import set_wallet_allowed_bulk
+
+    try:
+        guard_csrf(request, csrf_token)
+        ids = _parse_id_list(certificate_ids)
+        count = set_wallet_allowed_bulk(db, ids, allowed=allow == "1", actor=user)
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+        return RedirectResponse("/hr", status_code=303)
+    flash(request, f"Wallet: обновлено карт {count}")
+    return RedirectResponse("/hr", status_code=303)
+
+
+@router.post("/hr/wallet-access/filter")
+def wallet_access_filter(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin)),
+    q: str = Form(""),
+    template: int = Form(0),
+    sort: str = Form("name"),
+    status: str = Form("all"),
+    allow: str = Form("1"),
+    csrf_token: str = Form(""),
+):
+    """Выдача или снятие Wallet по текущему фильтру сводки (до 2000 карт)."""
+    from bonus.present import search_certificate_rows
+    from bonus.wallet_access import set_wallet_allowed_bulk
+
+    try:
+        guard_csrf(request, csrf_token)
+        template_id = parse_summary_template_filter(template)
+        page = search_certificate_rows(
+            db,
+            q,
+            template_id,
+            sort=normalize_sort(sort),
+            status=normalize_status_filter(status),
+            offset=0,
+            limit=2000,
+        )
+        ids = [card.id for card in page.cards]
+        count = set_wallet_allowed_bulk(db, ids, allowed=allow == "1", actor=user)
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+        return RedirectResponse("/hr", status_code=303)
+    extra = " (не все по фильтру)" if page.has_more else ""
+    flash(request, f"Wallet: обновлено карт {count}{extra}")
+    return RedirectResponse("/hr", status_code=303)
 
 
 @router.post("/hr/c/{certificate_id}/require-debit-code")
@@ -1928,6 +2065,7 @@ def _render_settings(request: Request, db: Session, **extra):
         "hr_settings.html",
         section="settings",
         wallet_buttons_enabled=wallet_buttons_enabled(db),
+        wallet_pilot_enabled=wallet_enabled(db),
         app_settings=get_app_settings(db),
         kassy_summary=build_settings_kassy_summary(db),
         sheets_queue=queue_stats(db),

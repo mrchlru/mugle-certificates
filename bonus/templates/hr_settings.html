@@ -54,9 +54,35 @@
     </form>
   </section>
 
+  <section class="design-panel design-wallet-settings" id="wallet-pilot">
+    <header class="design-panel-head">
+      <h2>Apple Wallet (WalletWallet)</h2>
+    </header>
+    <form method="post" action="/hr/settings/wallet-pilot" class="design-create stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <label class="switch">
+        <input type="checkbox" name="enabled" value="1" {% if wallet_pilot_enabled|default(false) %}checked{% endif %}>
+        <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+        <span class="switch-copy">Пилот Apple Wallet через WalletWallet</span>
+      </label>
+      <p class="muted design-hint">По умолчанию выключено. Кнопка на карте появится только у карт с выданным доступом в сводке.</p>
+      <label class="switch">
+        <input type="checkbox" name="show_balance" value="1" {% if app_settings.wallet_show_balance|default(false) %}checked{% endif %}>
+        <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+        <span class="switch-copy">Показывать баланс на pass и обновлять после операций</span>
+      </label>
+      <label class="switch">
+        <input type="checkbox" name="notify_on_change" value="1" {% if app_settings.wallet_notify_on_change|default(false) %}checked{% endif %}>
+        <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+        <span class="switch-copy">Уведомление на экране блокировки при смене баланса (changeMessage)</span>
+      </label>
+      <button class="btn" type="submit">Сохранить</button>
+    </form>
+  </section>
+
   <section class="design-panel design-wallet-settings">
     <header class="design-panel-head">
-      <h2>Кошельки</h2>
+      <h2>Кошельки (legacy)</h2>
     </header>
     <form method="post" action="/hr/settings/wallet-buttons" class="design-create">
       <input type="hidden" name="csrf_token" value="{{ csrf }}">

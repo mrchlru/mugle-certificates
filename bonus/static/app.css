@@ -1045,14 +1045,25 @@ body.partners-dialog-open {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 50px;
-  padding: 0 18px;
-  border-radius: 8px;
-  background: #000;
-  color: #fff;
-  font-size: 14px;
-  font-weight: 600;
+  min-height: 48px;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
   text-decoration: none;
+}
+
+.apple-wallet-btn img {
+  display: block;
+  width: min(151px, 100%);
+  height: auto;
+}
+
+.wallet-actions-note {
+  display: block;
+  margin-top: 8px;
+  font-size: 13px;
+  text-align: center;
+  max-width: 280px;
 }
 
 .wallet-card {

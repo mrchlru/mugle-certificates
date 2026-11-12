@@ -178,6 +178,7 @@ class CardRow:
     expires_on: date | None
     status: CertificateStatus
     single_use: bool
+    wallet_allowed: bool = False
 
 
 @dataclass(frozen=True)
@@ -464,6 +465,7 @@ def search_certificate_rows(
             Certificate.expires_on,
             Certificate.status,
             Certificate.single_use,
+            Certificate.wallet_allowed,
         )
         .join(User, Certificate.holder_id == User.id)
         .outerjoin(Segment, Certificate.segment_id == Segment.id)
@@ -488,6 +490,7 @@ def search_certificate_rows(
             expires_on=row[10],
             status=row[11],
             single_use=bool(row[12]),
+            wallet_allowed=bool(row[13]),
         )
         for row in rows
     )

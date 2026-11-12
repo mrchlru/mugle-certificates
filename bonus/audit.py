@@ -52,6 +52,11 @@ _ACTION_LABELS: dict[str, str] = {
     AuditAction.link_delivery_mark.value: "Отметка рассылки",
     AuditAction.login_unblock.value: "Разблокировка входа",
     AuditAction.sheets_dedupe.value: "Очистка дублей Google Sheets",
+    AuditAction.wallet_access_grant.value: "Wallet: выдача доступа",
+    AuditAction.wallet_access_revoke.value: "Wallet: снятие доступа",
+    AuditAction.wallet_issue.value: "Wallet: выдача pass",
+    AuditAction.wallet_provider_quota.value: "Wallet: квота провайдера",
+    AuditAction.wallet_settings.value: "Wallet: настройки",
 }
 
 

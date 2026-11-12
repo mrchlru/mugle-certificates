@@ -51,6 +51,20 @@
         <p class="muted share-sync-hint">Ссылка появится здесь, как только запись завершится.</p>
       </div>
     </div>
+    {% if wallet_pilot_enabled|default(false) %}
+    <form method="post" action="/hr/c/{{ card.id }}/wallet-allowed" class="design-create">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <label class="switch">
+        <input type="checkbox" name="enabled" value="1" {% if wallet_allowed|default(false) %}checked{% endif %}>
+        <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+        <span class="switch-copy">Доступ к Apple Wallet (WalletWallet)</span>
+      </label>
+      {% if wallet_sync_error %}
+      <p class="muted design-hint bad">{{ wallet_sync_error }}</p>
+      {% endif %}
+      <button class="btn soft" type="submit">Сохранить</button>
+    </form>
+    {% endif %}
     <form method="post" action="/hr/c/{{ card.id }}/require-debit-code" class="design-create">
       <input type="hidden" name="csrf_token" value="{{ csrf }}">
       <label class="switch">

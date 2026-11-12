@@ -26,6 +26,7 @@ from bonus.routes_iiko import router as iiko_router
 from bonus.routes_kassy import router as kassy_router
 from bonus.routes_spasibo import router as spasibo_router
 from bonus.sheets_queue import sheets_queue_worker
+from bonus.wallet_queue import wallet_queue_worker
 
 
 @asynccontextmanager
@@ -35,7 +36,10 @@ async def _lifespan(_app: FastAPI):
     (settings.data_path() / "uploads").mkdir(parents=True, exist_ok=True)
     configure_database(settings.normalized_database_url())
     bootstrap(settings)
-    workers = [asyncio.create_task(sheets_queue_worker(), name="bonus-sheets-queue")]
+    workers = [
+        asyncio.create_task(sheets_queue_worker(), name="bonus-sheets-queue"),
+        asyncio.create_task(wallet_queue_worker(), name="bonus-wallet-queue"),
+    ]
     if settings.accrual_scheduler_enabled:
         workers.append(asyncio.create_task(accrual_worker(), name="bonus-accrual"))
     try:

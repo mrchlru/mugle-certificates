@@ -58,6 +58,20 @@
 <div class="summary-batch-bar" id="summary-batch-root" data-csrf="{{ csrf }}">
   <div class="summary-batch-actions">
     <button type="button" class="btn soft" id="summary-batch-open" disabled>Действие для выбранных…</button>
+    {% if wallet_pilot_enabled|default(false) %}
+    <form method="post" action="/hr/wallet-access/batch" class="inline-form summary-wallet-batch" id="wallet-batch-grant">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <input type="hidden" name="certificate_ids" value="" data-wallet-ids>
+      <input type="hidden" name="allow" value="1">
+      <button type="submit" class="btn soft" disabled data-wallet-btn>Выдать Wallet</button>
+    </form>
+    <form method="post" action="/hr/wallet-access/batch" class="inline-form summary-wallet-batch">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <input type="hidden" name="certificate_ids" value="" data-wallet-ids>
+      <input type="hidden" name="allow" value="0">
+      <button type="submit" class="btn soft" disabled data-wallet-btn>Забрать Wallet</button>
+    </form>
+    {% endif %}
     <p class="muted" id="summary-batch-hint">Отметьте строки в таблице.</p>
   </div>
   <div class="dash-extend summary-extend" id="summary-extend" hidden>
@@ -97,6 +111,9 @@
         <th>Остаток</th>
         <th>Срок</th>
         <th>Статус</th>
+        {% if wallet_pilot_enabled|default(false) %}
+        <th>Wallet</th>
+        {% endif %}
         <th>Ссылка</th>
       </tr>
     </thead>
@@ -233,6 +250,19 @@
     batchHint.textContent = n ? ("Выбрано карт: " + n) : "Отметьте строки в таблице.";
     if (extendPanel) extendPanel.hidden = n === 0;
     if (extendCount) extendCount.textContent = "Выбрано: " + n;
+    var idStr = "";
+    if (body && n) {
+      var sel = body.querySelectorAll("input.summary-pick:checked");
+      var parts = [];
+      for (var i = 0; i < sel.length; i++) parts.push(sel[i].value);
+      idStr = parts.join(" ");
+    }
+    document.querySelectorAll("[data-wallet-ids]").forEach(function (el) {
+      el.value = idStr;
+    });
+    document.querySelectorAll("[data-wallet-btn]").forEach(function (btn) {
+      btn.disabled = n === 0;
+    });
   }
 
   function syncPickAll() {

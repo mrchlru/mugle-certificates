@@ -671,7 +671,9 @@ def delete_certificate(db: Session, certificate: Certificate, actor: User) -> st
     )
     db.commit()
     from bonus.sheets_queue import enqueue_certificate_delete
+    from bonus.wallet_service import revoke_wallet_pass
 
+    revoke_wallet_pass(db, certificate)
     enqueue_certificate_delete(db, certificate)
     return public_number
 
@@ -1123,6 +1125,10 @@ def set_blocked(db: Session, certificate: Certificate, actor: User, blocked: boo
     )
     db.commit()
     db.refresh(certificate)
+    if blocked:
+        from bonus.wallet_service import revoke_wallet_pass
+
+        revoke_wallet_pass(db, certificate)
     _sync_usage(db, certificate)
     return restored
 
@@ -2272,6 +2278,14 @@ def _sync_usage(
     from bonus.sheets_queue import enqueue_certificate_ids
 
     enqueue_certificate_ids(db, [certificate.id])
+    _maybe_enqueue_wallet(db, certificate)
+
+
+def _maybe_enqueue_wallet(db: Session, certificate: Certificate) -> None:
+    """Обновление pass в Wallet, если разрешено и включён баланс на pass."""
+    from bonus.wallet_queue import enqueue_wallet_update
+
+    enqueue_wallet_update(db, certificate.id)
 
 
 def push_certificate_to_sheets(db: Session, certificate: Certificate) -> None:

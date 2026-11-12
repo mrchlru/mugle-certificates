@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     apple_wwdr_file: str = ""
     apple_pass_web_service_url: str = ""
     apple_pass_auth_token: str = ""
+    wallet_provider: str = "walletwallet"
+    walletwallet_api_key: str = ""
+    wallet_fetch_per_card_per_day: int = 10
+    wallet_fetch_per_ip_per_day: int = 40
     support_telegram: str = "@nkatine"
     login_allow_ips: str = ""
     forwarded_allow_ips: str = "127.0.0.1"
