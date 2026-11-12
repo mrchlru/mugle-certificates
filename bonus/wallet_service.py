@@ -171,7 +171,12 @@ def serve_wallet_pass(
             exc.status_code,
             exc.quota_exceeded,
         )
-        _audit_issue(db, certificate, "error", actor_id)
+        _audit_issue(
+            db,
+            certificate,
+            _wallet_issue_error_detail(exc),
+            actor_id,
+        )
         if exc.status_code == 429:
             return Response(
                 content=USER_ERROR,
@@ -268,6 +273,16 @@ def _use_ip_rate_limit(client_key: str) -> bool:
 def _hash_client(client_key: str) -> str:
     cleaned = (client_key or "local").strip() or "local"
     return hashlib.sha256(cleaned.encode("utf-8")).hexdigest()[:32]
+
+
+def _wallet_issue_error_detail(exc: WalletProviderError) -> str:
+    """Краткая причина для журнала (без тела pass и без ключа)."""
+    parts = ["error"]
+    if exc.status_code:
+        parts.append(f"http={exc.status_code}")
+    if exc.hint:
+        parts.append(exc.hint)
+    return " ".join(parts)[:200]
 
 
 def _audit_issue(

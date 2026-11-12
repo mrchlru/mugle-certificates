@@ -34,10 +34,18 @@ class CreatePassResult:
 class WalletProviderError(Exception):
     """Ошибка провайдера без утечки данных карты."""
 
-    def __init__(self, message: str, *, status_code: int = 0, quota_exceeded: bool = False) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int = 0,
+        quota_exceeded: bool = False,
+        hint: str = "",
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.quota_exceeded = quota_exceeded
+        self.hint = (hint or "").strip()[:200]
 
 
 class WalletProvider(Protocol):
@@ -282,8 +290,18 @@ def _handle_response(response: httpx.Response, method: str, path: str) -> dict[s
     _log_api_error(method, path, status, hint)
     quota = status == 429
     if status in {400, 401, 403, 404, 429, 500}:
-        raise WalletProviderError(USER_ERROR, status_code=status, quota_exceeded=quota)
-    raise WalletProviderError(USER_ERROR, status_code=status, quota_exceeded=quota)
+        raise WalletProviderError(
+            USER_ERROR,
+            status_code=status,
+            quota_exceeded=quota,
+            hint=hint,
+        )
+    raise WalletProviderError(
+        USER_ERROR,
+        status_code=status,
+        quota_exceeded=quota,
+        hint=hint,
+    )
 
 
 def _response_error_hint(response: httpx.Response) -> str:
