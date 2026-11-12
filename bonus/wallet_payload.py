@@ -84,6 +84,8 @@ def _apply_branding(
             body["logoURL"] = branding.logo_data_uri
             body["stripURL"] = branding.strip_data_uri
             body["iconURL"] = branding.icon_data_uri
+            # WalletWallet: хотя бы одно из title, primaryFields, logoText.
+            body["logoText"] = ORG_NAME
             return
     body["logoText"] = ORG_NAME
     body["colorPreset"] = "green"

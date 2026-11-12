@@ -142,7 +142,7 @@ def test_build_walletwallet_body_barcode_short_code() -> None:
     assert body["logoURL"].startswith("data:image/png;base64,")
     assert "stripURL" in body
     assert "color" in body
-    assert "logoText" not in body
+    assert body["logoText"] == "Teams Bonus"
     assert body["color"] == "#00A8A8"
 
 
