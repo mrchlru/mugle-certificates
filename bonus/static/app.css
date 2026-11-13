@@ -881,10 +881,15 @@ body:has(.wallet-wrap) .flash {
 }
 
 .partners-dialog[open] {
+  position: fixed;
+  inset: 0;
   display: flex;
   flex-direction: column;
-  width: min(560px, calc(100vw - 24px));
-  max-height: min(82vh, 720px);
+  box-sizing: border-box;
+  width: min(420px, calc(100% - 32px));
+  max-width: calc(100% - 32px);
+  max-height: min(72vh, 640px);
+  max-height: min(72dvh, 640px);
   margin: auto;
   padding: 0;
   overflow: hidden;
@@ -917,6 +922,8 @@ body:has(.wallet-wrap) .flash {
 
 body.partners-dialog-open {
   overflow: hidden;
+  overflow-x: hidden;
+  touch-action: none;
 }
 
 .partners-dialog-head {
@@ -1012,6 +1019,52 @@ body.partners-dialog-open {
 }
 
 @media (max-width: 560px) {
+  .partners-dialog[open] {
+    width: calc(100% - 28px);
+    max-width: calc(100% - 28px);
+    max-height: min(68vh, 560px);
+    max-height: min(68dvh, 560px);
+    border-radius: 16px;
+  }
+
+  .partners-dialog-head {
+    padding: 14px 14px 0;
+    gap: 8px;
+  }
+
+  .partners-dialog-head h2 {
+    font-size: 17px;
+    line-height: 1.3;
+  }
+
+  .partners-days {
+    margin: 12px 14px 0;
+    padding: 10px 12px;
+  }
+
+  .partners-days-caption {
+    font-size: 14px;
+  }
+
+  .use-days-chips {
+    gap: 4px;
+  }
+
+  .use-day {
+    min-width: 30px;
+    padding: 5px 6px;
+    font-size: 11px;
+  }
+
+  .partners-lead {
+    margin: 10px 14px 0;
+    font-size: 13px;
+  }
+
+  .partners-scroll {
+    padding: 12px 14px 14px;
+  }
+
   .partners-row {
     grid-template-columns: 1fr;
     gap: 4px;
