@@ -142,13 +142,16 @@ def public_certificate(token: str, request: Request, db: Session = Depends(get_d
 
 
 def _unavailable_reason(certificate: Certificate) -> str | None:
-    """Почему карта недоступна: deleted / blocked / expired, иначе None."""
+    """Почему карта недоступна: deleted / blocked / expired / used, иначе None."""
     if certificate.is_deleted:
         return "deleted"
     if certificate.status == CertificateStatus.blocked:
         return "blocked"
     if certificate.expires_on is not None and certificate.expires_on < today_msk():
         return "expired"
+    # Разовые ДР/бартер после списания: тот же экран CardExpired, что при блоке/удалении.
+    if bool(getattr(certificate, "single_use", False)) and int(certificate.balance or 0) <= 0:
+        return "used"
     return None
 
 
@@ -169,6 +172,11 @@ def _unavailable_copy(
             "Карта деактивирована",
             f"{who} временно недоступна, штрихкод скрыт.",
         )
+    if reason == "used":
+        return (
+            "Карта использована",
+            f"{who} уже погашена, штрихкод скрыт.",
+        )
     if reason == "expired" and certificate.expires_on is not None:
         day = certificate.expires_on.strftime("%d.%m.%Y")
         return (
@@ -182,7 +190,7 @@ def _unavailable_copy(
 
 
 def _certificate_expired(certificate: Certificate) -> bool:
-    """Карта недоступна: удалена, заблокирована или истёк срок."""
+    """Карта недоступна: удалена, заблокирована, истекла или использована."""
     return _unavailable_reason(certificate) is not None
 
 

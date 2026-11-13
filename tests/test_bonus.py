@@ -597,7 +597,7 @@ def test_set_certificate_single_use_on_card() -> None:
 
 
 def test_unavailable_reason_covers_deleted_blocked_expired() -> None:
-    from bonus.routes_card import _unavailable_reason
+    from bonus.routes_card import _unavailable_copy, _unavailable_reason
 
     db = _db()
     hr = _person(db, "hr", Role.hr)
@@ -617,6 +617,21 @@ def test_unavailable_reason_covers_deleted_blocked_expired() -> None:
     delete_certificate(db, deleted, admin)
     db.refresh(deleted)
     assert _unavailable_reason(deleted) == "deleted"
+
+    used = issue_certificate(db, _draft(100_00), hr, sync_external=False).certificate
+    used.single_use = True
+    used.balance = 0
+    db.commit()
+    assert _unavailable_reason(used) == "used"
+    title, sub = _unavailable_copy("used", "Анна", used)
+    assert title == "Карта использована"
+    assert "погашена" in sub
+
+    zero_reusable = issue_certificate(db, _draft(100_00), hr, sync_external=False).certificate
+    zero_reusable.single_use = False
+    zero_reusable.balance = 0
+    db.commit()
+    assert _unavailable_reason(zero_reusable) is None
 
 
 def test_blocked_and_expired_cannot_be_spent() -> None:
