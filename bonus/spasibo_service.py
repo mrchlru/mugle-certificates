@@ -356,6 +356,8 @@ def _tx_to_dict(item: TxView) -> dict[str, Any]:
     debit_types = {"debit", "migrate", "expire", "burn"}
     show_amount = item.tx_type not in {"block", "unblock"}
     is_minus = item.tx_type in debit_types
+    amount = int(item.amount or 0)
+    amount_display = format_money_plain(amount) if show_amount else ""
     meta_parts = [format_dt(item.created_at)]
     if item.actor_name:
         meta_parts.append(item.actor_name)
@@ -365,16 +367,40 @@ def _tx_to_dict(item: TxView) -> dict[str, Any]:
         meta_parts.append(item.order_ref)
     if item.comment:
         meta_parts.append(item.comment)
+    cheque_detail = (item.cheque_detail or "").strip()
+    if not cheque_detail:
+        cheque_detail = _fallback_cheque_detail(item)
     return {
         "id": item.id,
         "title": tx_label(item.tx_type, item.reversal_of_id),
         "meta": " · ".join(meta_parts),
-        "amount_display": format_money_plain(item.amount) if show_amount else "",
+        "amount_kopecks": amount if show_amount else 0,
+        "amount_rub": amount_display,
+        "amount_display": amount_display,
         "is_minus": is_minus,
         "show_amount": show_amount,
-        "cheque_detail": item.cheque_detail or "",
+        "restaurant": (item.restaurant or "").strip(),
+        "order_ref": (item.order_ref or "").strip(),
+        "comment": (item.comment or "").strip(),
+        "created_at": format_dt(item.created_at),
+        "cheque_detail": cheque_detail,
         "undone": item.undone,
     }
+
+
+def _fallback_cheque_detail(item: TxView) -> str:
+    """Собирает краткие детали заказа, если касса не прислала cheque_detail."""
+    parts: list[str] = []
+    restaurant = (item.restaurant or "").strip()
+    if restaurant:
+        parts.append(f"Ресторан: {restaurant}")
+    order_ref = (item.order_ref or "").strip()
+    if order_ref:
+        parts.append(f"Заказ: {order_ref}")
+    comment = (item.comment or "").strip()
+    if comment and comment not in {"Teams Bonus", "iiko"}:
+        parts.append(comment)
+    return "\n".join(parts)[:4000]
 
 
 def _idempotency_marker(key: str) -> str:

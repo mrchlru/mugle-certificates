@@ -347,6 +347,8 @@ def _cheque_text(body: DebitBody) -> str:
     if detail:
         return detail[:4000]
     parts: list[str] = []
+    if body.restaurant.strip():
+        parts.append(f"Ресторан: {body.restaurant.strip()}")
     if body.order_number.strip():
         parts.append(f"Заказ: {body.order_number.strip()}")
     if body.table.strip():
