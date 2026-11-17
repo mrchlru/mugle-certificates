@@ -2214,6 +2214,127 @@ def settings_birthday_report(
     )
 
 
+@router.get("/hr/settings/barter-import/sample.xlsx")
+def settings_barter_import_sample(
+    user: User = Depends(require(Role.admin)),
+):
+    """Шаблон Excel для массовой загрузки бартерных карт."""
+    from bonus.barter_import import build_sample_workbook
+
+    return Response(
+        content=build_sample_workbook(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": 'attachment; filename="barter_cards_sample.xlsx"'
+        },
+    )
+
+
+@router.post("/hr/settings/barter-preview")
+async def settings_barter_preview(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin)),
+    table: UploadFile = File(...),
+    csrf_token: str = Form(""),
+):
+    """Предпросмотр бартерных карт без записи в БД."""
+    from bonus.barter_import import preview_barter_workbook
+
+    try:
+        guard_csrf(request, csrf_token)
+        payload = await table.read()
+        preview = preview_barter_workbook(
+            db,
+            filename=table.filename or "upload.xlsx",
+            payload=payload,
+        )
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+        return RedirectResponse("/hr/settings#barter-import", status_code=303)
+    return _render_settings(request, db, barter_preview=preview)
+
+
+@router.post("/hr/settings/barter-commit")
+def settings_barter_commit(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require(Role.admin)),
+    batch_id: str = Form(""),
+    create_duplicates: str = Form("0"),
+    csrf_token: str = Form(""),
+):
+    """Выпуск бартерных карт по предпросмотру."""
+    from bonus.barter_import import (
+        build_barter_import_report,
+        commit_barter_import,
+        save_barter_import_report,
+    )
+
+    try:
+        guard_csrf(request, csrf_token)
+        results, issued_ids = commit_barter_import(
+            db,
+            batch_id=batch_id.strip(),
+            actor=user,
+            base_url=public_base(request),
+            create_duplicates=create_duplicates == "1",
+        )
+    except BonusError as exc:
+        flash(request, exc.message, "bad")
+        return RedirectResponse("/hr/settings#barter-import", status_code=303)
+    queued = enqueue_certificates_for_sheets(db, issued_ids) if issued_ids else 0
+    created = sum(1 for row in results if row.status == "создана")
+    skipped = sum(1 for row in results if row.status == "пропущена")
+    failed = sum(1 for row in results if row.status == "ошибка")
+    report_id = save_barter_import_report(
+        batch_id.strip() or "barter",
+        build_barter_import_report(results),
+    )
+    write_audit(
+        db,
+        actor=user,
+        action=AuditAction.import_rows,
+        summary=(
+            f"Карты бартера batch={batch_id}: создано {created}, "
+            f"пропущено {skipped}, ошибок {failed}; Sheets +{queued}"
+        ),
+        target_type="barter_import",
+        detail=batch_id.strip(),
+    )
+    return _render_settings(
+        request,
+        db,
+        barter_result_rows=results,
+        barter_result_created=created,
+        barter_result_skipped=skipped,
+        barter_result_failed=failed,
+        barter_result_queued=queued,
+        barter_report_id=report_id,
+    )
+
+
+@router.get("/hr/settings/barter-report/{report_id}.xlsx")
+def settings_barter_report(
+    report_id: str,
+    user: User = Depends(require(Role.admin)),
+):
+    """Скачивание отчёта по созданным бартерным картам."""
+    from bonus.barter_import import load_barter_import_report
+
+    try:
+        payload = load_barter_import_report(report_id)
+    except BonusError as exc:
+        return Response(exc.message, status_code=404)
+    return Response(
+        content=payload,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": 'attachment; filename="barter_cards_report.xlsx"'
+        },
+    )
+
+
 @router.get("/hr/settings/employee-report/{report_id}.xlsx")
 def settings_employee_report(
     report_id: str,
