@@ -126,3 +126,59 @@ def test_spasibo_redeem_idempotent(client: TestClient) -> None:
     )
     assert second.status_code == 200
     assert second.json()["replayed"] is True
+
+
+def test_spasibo_card_visible_with_zero_balance(client: TestClient) -> None:
+    from bonus.parts import list_parts
+
+    db = database.open_session()
+    try:
+        _, cert = _linked_holder(db, spasibo_id="777")
+        cert.balance = 0
+        for part in list_parts(db, cert.id):
+            part.balance = 0
+        db.commit()
+    finally:
+        db.close()
+    response = client.get(
+        "/api/spasibo/card?user_id=777",
+        headers={"X-Spasibo-Key": "test-spasibo-key"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["linked"] is True
+    assert data["balance_kopecks"] == 0
+    assert data["status_label"] == "Активен"
+
+
+def test_spasibo_history_includes_amount_and_cheque() -> None:
+    from datetime import datetime, timezone
+
+    from bonus.models import TxType
+    from bonus.present import TxView
+    from bonus.spasibo_service import _tx_to_dict
+
+    item = TxView(
+        id=1,
+        tx_type=TxType.debit.value,
+        amount=2_990_00,
+        balance_after=0,
+        comment="Teams Bonus",
+        created_at=datetime(2026, 11, 17, 12, 0, tzinfo=timezone.utc),
+        actor_name="",
+        restaurant="Базар",
+        order_ref="59190",
+        cheque_detail="",
+        holder_name="API Тест",
+        public_number="MR-1",
+        reversal_of_id=None,
+        undone=False,
+        can_undo=False,
+        can_undo_credit=False,
+    )
+    payload = _tx_to_dict(item)
+    assert payload["amount_kopecks"] == 2_990_00
+    assert payload["amount_display"] == "2 990"
+    assert payload["show_amount"] is True
+    assert "Базар" in payload["cheque_detail"]
+    assert "59190" in payload["cheque_detail"]

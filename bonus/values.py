@@ -123,8 +123,10 @@ def status_label(
         return "Заблокирован"
     if expires_on is not None and expires_on < today_msk():
         return "Срок истёк"
-    if balance <= 0:
-        return "Использован" if single_use else "Израсходован"
+    # Разовая карта с нулём — израсходована. Обычная (сотрудник и т.п.) остаётся
+    # активной при нуле: её всё равно показывают в «Спасибо» до следующего начисления.
+    if balance <= 0 and single_use:
+        return "Использован"
     if single_use:
         return "Активен · разовое использование"
     return "Активен"
