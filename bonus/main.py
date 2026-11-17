@@ -24,6 +24,7 @@ from bonus.routes_desk import router as desk_router
 from bonus.routes_hr import router as hr_router
 from bonus.routes_iiko import router as iiko_router
 from bonus.routes_kassy import router as kassy_router
+from bonus.routes_dzhani import router as dzhani_router
 from bonus.routes_spasibo import router as spasibo_router
 from bonus.sheets_queue import sheets_queue_worker
 
@@ -73,6 +74,7 @@ def create_app() -> FastAPI:
     app.include_router(kassy_router)
     app.include_router(iiko_router)
     app.include_router(spasibo_router)
+    app.include_router(dzhani_router)
     app.add_exception_handler(Redirect, _redirect)
     app.add_api_route("/health", health, methods=["GET"])
     app.add_api_route("/live", live, methods=["GET"])

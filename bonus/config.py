@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     s3_prefix: str = "templates"
     iiko_api_key: str = ""
     spasibo_api_key: str = ""
+    dzhani_api_key: str = ""
+    dzhani_default_segment_id: int | None = None
+    dzhani_default_template_id: int | None = None
+    dzhani_default_color: str = "#b3122b"
+    dzhani_default_expires_on: str = "2027-02-28"
     iiko_plugin_payment_type_name: str = "Teams Pro Bonus"
     iiko_plugin_payment_system_key: str = "TeamsProBonus"
     iiko_plugin_payment_system_name: str = "Teams Pro"
