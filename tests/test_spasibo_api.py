@@ -182,3 +182,55 @@ def test_spasibo_history_includes_amount_and_cheque() -> None:
     assert payload["show_amount"] is True
     assert "Базар" in payload["cheque_detail"]
     assert "59190" in payload["cheque_detail"]
+
+
+def _sample_tx_view(**overrides: object):
+    from datetime import datetime, timezone
+
+    from bonus.models import TxType
+    from bonus.present import TxView
+
+    values = {
+        "id": 1,
+        "tx_type": TxType.debit.value,
+        "amount": 10_000,
+        "balance_after": 0,
+        "comment": "тест",
+        "created_at": datetime(2026, 11, 17, 12, 0, tzinfo=timezone.utc),
+        "actor_name": "Главный администратор",
+        "restaurant": "",
+        "order_ref": "",
+        "cheque_detail": "",
+        "holder_name": "API Тест",
+        "public_number": "MR-1",
+        "reversal_of_id": None,
+        "undone": False,
+        "can_undo": False,
+        "can_undo_credit": False,
+    }
+    values.update(overrides)
+    return TxView(**values)
+
+
+def test_spasibo_history_hides_cheque_for_non_restaurant_ops() -> None:
+    from bonus.models import TxType
+    from bonus.spasibo_service import _tx_to_dict
+
+    for tx_type, comment in (
+        (TxType.credit.value, "обмен 10.0 спасибок → 100 бонусов"),
+        (TxType.issue.value, "Выпуск сертификата · Карта сотрудника"),
+        (TxType.migrate.value, "Лимит начисления"),
+        (TxType.burn.value, "Сгорание остатка"),
+        (TxType.expire.value, "Сгорание по сроку"),
+    ):
+        payload = _tx_to_dict(_sample_tx_view(tx_type=tx_type, comment=comment))
+        assert payload["cheque_detail"] == "", tx_type
+
+
+def test_spasibo_history_hides_cheque_for_admin_debit_without_order() -> None:
+    from bonus.spasibo_service import _tx_to_dict
+
+    payload = _tx_to_dict(
+        _sample_tx_view(comment="Списание бонусов", cheque_detail="")
+    )
+    assert payload["cheque_detail"] == ""

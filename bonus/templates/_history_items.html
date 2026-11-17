@@ -11,7 +11,7 @@
           {% if item.order_ref %} · {{ item.order_ref }}{% endif %}
           {% if item.comment %} · {{ item.comment }}{% endif %}
         </p>
-        {% if item.cheque_detail %}
+        {% if item.tx_type == 'debit' and item.cheque_detail %}
         <details class="history-cheque">
           <summary>Чек заказа</summary>
           <pre class="history-cheque-body">{{ item.cheque_detail }}</pre>

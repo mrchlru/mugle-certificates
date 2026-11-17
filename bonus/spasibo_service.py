@@ -367,9 +367,6 @@ def _tx_to_dict(item: TxView) -> dict[str, Any]:
         meta_parts.append(item.order_ref)
     if item.comment:
         meta_parts.append(item.comment)
-    cheque_detail = (item.cheque_detail or "").strip()
-    if not cheque_detail:
-        cheque_detail = _fallback_cheque_detail(item)
     return {
         "id": item.id,
         "title": tx_label(item.tx_type, item.reversal_of_id),
@@ -383,18 +380,30 @@ def _tx_to_dict(item: TxView) -> dict[str, Any]:
         "order_ref": (item.order_ref or "").strip(),
         "comment": (item.comment or "").strip(),
         "created_at": format_dt(item.created_at),
-        "cheque_detail": cheque_detail,
+        "cheque_detail": _tx_cheque_detail(item),
         "undone": item.undone,
     }
 
 
+def _tx_cheque_detail(item: TxView) -> str:
+    """Чек только у списания в ресторане; начисления/сгорания/выпуск — без чека."""
+    if item.tx_type != "debit":
+        return ""
+    stored = (item.cheque_detail or "").strip()
+    if stored:
+        return stored
+    return _fallback_cheque_detail(item)
+
+
 def _fallback_cheque_detail(item: TxView) -> str:
     """Собирает краткие детали заказа, если касса не прислала cheque_detail."""
-    parts: list[str] = []
     restaurant = (item.restaurant or "").strip()
+    order_ref = (item.order_ref or "").strip()
+    if not restaurant and not order_ref:
+        return ""
+    parts: list[str] = []
     if restaurant:
         parts.append(f"Ресторан: {restaurant}")
-    order_ref = (item.order_ref or "").strip()
     if order_ref:
         parts.append(f"Заказ: {order_ref}")
     comment = (item.comment or "").strip()
