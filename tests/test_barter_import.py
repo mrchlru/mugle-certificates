@@ -50,7 +50,7 @@ def test_barter_preview_and_commit() -> None:
     admin = User(login="a", password_hash=hash_password("x"), full_name="Admin", role=Role.admin)
     db.add(admin)
     db.commit()
-    segment = create_segment(db, "Бартер на все рестораны", AccrualPeriod.yearly)
+    segment = create_segment(db, "Бартер внутренний", AccrualPeriod.yearly)
     png = _tiny_png()
     template = save_template(
         db,
@@ -67,7 +67,7 @@ def test_barter_preview_and_commit() -> None:
                 "ООО",
                 "Ресторан / офис",
                 "Должность",
-                "Сегмент",
+                "Шаблон",
                 "Срок действия",
                 "Номинал",
                 "Комментарий",
@@ -101,11 +101,12 @@ def test_barter_preview_and_commit() -> None:
     assert cert is not None
     assert cert.ledger_sheet == "barter"
     assert cert.template_id == template.id
+    assert cert.segment_id == segment.id
     report = build_barter_import_report(results)
     assert len(report) > 1000
 
 
-def test_barter_unknown_segment() -> None:
+def test_barter_unknown_template() -> None:
     db = _db()
     payload = _workbook_bytes(
         [
@@ -114,7 +115,7 @@ def test_barter_unknown_segment() -> None:
                 "ООО",
                 "Ресторан / офис",
                 "Должность",
-                "Сегмент",
+                "Шаблон",
                 "Срок действия",
                 "Номинал",
             ),
@@ -123,7 +124,7 @@ def test_barter_unknown_segment() -> None:
                 "МУГЛЕ",
                 "ХВВ",
                 "Повар",
-                "Несуществующий сегмент",
+                "Несуществующий шаблон",
                 date(2026, 6, 1),
                 1000,
             ),
@@ -132,6 +133,7 @@ def test_barter_unknown_segment() -> None:
     preview = preview_barter_workbook(db, filename="bad.xlsx", payload=payload)
     assert preview.ok_rows == 0
     assert preview.error_rows == 1
+    assert "шаблон" in preview.rows[0].error.casefold()
     assert "не найден" in preview.rows[0].error.casefold()
 
 
