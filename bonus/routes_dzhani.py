@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Annotated
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -18,6 +19,7 @@ from bonus.services import BonusError, IssueDraft, issue_certificate
 from bonus.values import format_money_plain, format_short_code, parse_date, status_label
 
 router = APIRouter(prefix="/api/dzhani", tags=["dzhani"])
+MSK = ZoneInfo("Europe/Moscow")
 
 
 class IssueBody(BaseModel):
@@ -25,6 +27,10 @@ class IssueBody(BaseModel):
 
     nominal_rub: int = Field(gt=0, le=1_000_000)
     balance_rub: int | None = Field(default=None, gt=0, le=1_000_000)
+    first_name: str = Field(default="", max_length=80)
+    last_name: str = Field(default="", max_length=80)
+    phone: str = Field(default="", max_length=40)
+    birth_date: str = Field(default="", max_length=32)
     contact: str = Field(default="", max_length=200)
     order_id: str = Field(default="", max_length=80)
     note: str = Field(default="", max_length=500)
@@ -94,12 +100,11 @@ def issue_dzhani_certificate(
     settings = get_settings()
     segment_id = body.segment_id or settings.dzhani_default_segment_id
     template_id = body.template_id or settings.dzhani_default_template_id
-    expires = _parse_expires(body.expires_on) or _parse_expires(
-        settings.dzhani_default_expires_on
-    )
+    expires = _resolve_expires(body.expires_on)
     balance_rub = body.balance_rub if body.balance_rub is not None else body.nominal_rub
-    contact = body.contact.strip()
-    full_name = _holder_name(contact, body.order_id)
+    phone = (body.phone or body.contact).strip()
+    birth = _parse_expires(body.birth_date)
+    full_name = _holder_full_name(body.first_name, body.last_name, phone, body.order_id)
     note = body.note.strip() or f"Чёрная пятница Джани · {body.order_id}".strip(" ·")
     if idempotency_key.strip():
         note = f"{note} · idk:{idempotency_key.strip()}"[:500]
@@ -120,12 +125,13 @@ def issue_dzhani_certificate(
                 color=(body.color or settings.dzhani_default_color or "#b3122b")[:32],
                 department="Джани ресторани",
                 job_title="Покупатель Чёрной пятницы",
-                phone=contact if _looks_like_phone(contact) else "",
+                phone=phone[:40],
                 discount_percent=0,
                 single_use=body.single_use,
                 segment_name="Чёрная пятница Джани",
                 ledger_sheet=(body.ledger_sheet or "thanks").strip()[:32] or "thanks",
                 company="Джани",
+                birth_date=birth,
             ),
             actor=None,
         )
@@ -188,6 +194,17 @@ def _find_by_idempotency(db: Session, key: str) -> Certificate | None:
     )
 
 
+def _resolve_expires(raw: str) -> date:
+    """Срок из запроса или год с сегодня (МСК)."""
+    from datetime import datetime
+
+    parsed = _parse_expires(raw)
+    if parsed is not None:
+        return parsed
+    today_msk = datetime.now(MSK).date()
+    return today_msk + timedelta(days=365)
+
+
 def _parse_expires(raw: str) -> date | None:
     try:
         return parse_date(raw)
@@ -195,12 +212,18 @@ def _parse_expires(raw: str) -> date | None:
         return None
 
 
-def _holder_name(contact: str, order_id: str) -> str:
-    if contact and "@" in contact:
-        local = contact.split("@", 1)[0].strip()
-        return f"Покупатель {local}"[:120] if local else "Покупатель Джани"
-    if _looks_like_phone(contact):
-        return f"Покупатель {contact[-4:]}"[:120]
+def _holder_full_name(
+    first_name: str,
+    last_name: str,
+    phone: str,
+    order_id: str,
+) -> str:
+    first = " ".join(first_name.split()).strip()
+    last = " ".join(last_name.split()).strip()
+    if first or last:
+        return f"{last} {first}".strip()[:120]
+    if _looks_like_phone(phone):
+        return f"Покупатель {phone[-4:]}"[:120]
     if order_id:
         return f"Покупатель {order_id[-6:]}"[:120]
     return "Покупатель Джани"

@@ -13,7 +13,6 @@
 | `DZHANI_DEFAULT_SEGMENT_ID` | Сегмент по умолчанию, если витрина не передала |
 | `DZHANI_DEFAULT_TEMPLATE_ID` | Шаблон баннера по умолчанию |
 | `DZHANI_DEFAULT_COLOR` | Цвет карты (`#b3122b`) |
-| `DZHANI_DEFAULT_EXPIRES_ON` | Срок `YYYY-MM-DD` |
 
 ## API
 
@@ -26,8 +25,9 @@
 Тело (JSON):
 
 - `nominal_rub`, `balance_rub` — рубли
-- `contact` — email или телефон покупателя
-- `order_id`, `note`, `expires_on`
+- `first_name`, `last_name`, `phone`, `birth_date` — данные покупателя
+- `order_id`, `note`
+- `expires_on` — дата окончания (`YYYY-MM-DD`); если пусто — год с сегодня
 - `segment_id`, `template_id`, `color`
 - `ledger_sheet` — по умолчанию `thanks`
 - `single_use` — по умолчанию `true`
