@@ -1,4 +1,4 @@
-"""Массовая загрузка бартерных сертификатов (сегмент из колонки Excel)."""
+"""Массовая загрузка бартерных сертификатов (шаблон из колонки Excel)."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from typing import Any
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.utils import get_column_letter
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from bonus.config import get_settings
@@ -30,13 +30,13 @@ _HEADER_ALIASES: dict[str, set[str]] = {
     "company": {"ооо", "юрлицо", "организация", "company"},
     "department": {"ресторан / офис", "ресторан/офис", "ресторан", "офис", "отдел"},
     "job_title": {"должность", "позиция"},
-    "segment": {
-        "сегмент",
-        "повод",
-        "повод/бартер",
-        "бартер",
-        "вид бартера",
-        "шаблон сегмента",
+    "template": {
+        "шаблон",
+        "баннер",
+        "шаблон баннера",
+        "оформление",
+        "вид карты",
+        "название шаблона",
     },
     "expires_on": {
         "срок действия",
@@ -56,7 +56,7 @@ _SAMPLE_HEADERS = (
     "ООО",
     "Ресторан / офис",
     "Должность",
-    "Сегмент",
+    "Шаблон",
     "Срок действия",
     "Номинал",
     "Комментарий",
@@ -85,7 +85,7 @@ class BarterImportRow:
     company: str
     department: str
     job_title: str
-    segment_name: str
+    template_name: str
     expires_on: date | None
     nominal: int
     phone: str
@@ -209,12 +209,12 @@ def commit_barter_import(
                     "",
                     "",
                     "пропущена",
-                    "Возможный дубль (ФИО + ООО + сегмент + срок)",
+                    "Возможный дубль (ФИО + ООО + шаблон + срок)",
                 )
             )
             continue
         try:
-            segment, template = _resolve_segment_template(db, row.segment_name)
+            template, segment = _resolve_template(db, row.template_name)
             discount = template.discount_percent or segment.discount_percent or 0
             draft = _draft_from_row(
                 row,
@@ -283,59 +283,38 @@ def load_barter_import_report(report_id: str) -> bytes:
     return path.read_bytes()
 
 
-def _resolve_segment_template(db: Session, segment_name: str) -> tuple[Segment, CardTemplate]:
-    """Находит активный сегмент и шаблон баннера для него."""
-    name = (segment_name or "").strip()
+def _resolve_template(db: Session, template_name: str) -> tuple[CardTemplate, Segment]:
+    """Находит активный шаблон по имени; сегмент берётся из привязки шаблона."""
+    name = (template_name or "").strip()
     if not name:
-        raise BonusError("Сегмент: обязательное поле")
-    segment = db.scalar(
-        select(Segment).where(
-            Segment.name == name,
-            Segment.is_deleted.is_(False),
-            Segment.is_active.is_(True),
+        raise BonusError("Шаблон: обязательное поле")
+    template = db.scalar(
+        select(CardTemplate).where(
+            CardTemplate.name == name,
+            CardTemplate.is_deleted.is_(False),
+            CardTemplate.is_active.is_(True),
         )
     )
-    if segment is None:
-        segment = db.scalar(
-            select(Segment).where(
-                Segment.name.ilike(name),
-                Segment.is_deleted.is_(False),
-                Segment.is_active.is_(True),
-            )
-        )
-    if segment is None:
-        raise BonusError(f"Сегмент «{name}» не найден в Оформлении")
-    templates = list(
-        db.scalars(
+    if template is None:
+        template = db.scalar(
             select(CardTemplate)
             .where(
+                CardTemplate.name.ilike(name),
                 CardTemplate.is_deleted.is_(False),
                 CardTemplate.is_active.is_(True),
-                or_(
-                    CardTemplate.segment_id == segment.id,
-                    CardTemplate.segment2_id == segment.id,
-                ),
             )
             .order_by(CardTemplate.id.desc())
         )
-    )
-    if not templates:
-        by_name = db.scalar(
-            select(CardTemplate).where(
-                CardTemplate.name == segment.name,
-                CardTemplate.is_deleted.is_(False),
-                CardTemplate.is_active.is_(True),
-            )
+    if template is None:
+        raise BonusError(f"Шаблон «{name}» не найден в Оформлении")
+    if template.segment_id is None:
+        raise BonusError(f"У шаблона «{template.name}» не привязан сегмент")
+    segment = db.get(Segment, template.segment_id)
+    if segment is None or segment.is_deleted or not segment.is_active:
+        raise BonusError(
+            f"Сегмент шаблона «{template.name}» недоступен — проверьте Оформление"
         )
-        if by_name is None:
-            raise BonusError(
-                f"Для сегмента «{segment.name}» нет активного шаблона баннера в Оформлении"
-            )
-        return segment, by_name
-    for item in templates:
-        if (item.name or "").strip().casefold() == segment.name.casefold():
-            return segment, item
-    return segment, templates[0]
+    return template, segment
 
 
 def _parse_row(
@@ -349,7 +328,7 @@ def _parse_row(
     company = _clean_text(_cell(cells, mapping, "company"), 200)
     department = _clean_text(_cell(cells, mapping, "department"), 120)
     job_title = _clean_text(_cell(cells, mapping, "job_title"), 120)
-    segment_name = _clean_text(_cell(cells, mapping, "segment"), 120)
+    template_name = _clean_text(_cell(cells, mapping, "template"), 120)
     phone = _clean_phone(_cell(cells, mapping, "phone"))
     note = _clean_text(_cell(cells, mapping, "note"), 500)
     if len(" ".join(full_name.split())) < 2:
@@ -360,11 +339,11 @@ def _parse_row(
         errors.append("Ресторан / офис: обязательное поле")
     if not job_title:
         errors.append("Должность: обязательное поле")
-    if not segment_name:
-        errors.append("Сегмент: обязательное поле")
+    if not template_name:
+        errors.append("Шаблон: обязательное поле")
     else:
         try:
-            _resolve_segment_template(db, segment_name)
+            _resolve_template(db, template_name)
         except BonusError as exc:
             errors.append(exc.message)
     try:
@@ -383,7 +362,7 @@ def _parse_row(
         company=company,
         department=department,
         job_title=job_title,
-        segment_name=segment_name,
+        template_name=template_name,
         expires_on=expires_on,
         nominal=nominal,
         phone=phone,
@@ -435,7 +414,7 @@ def _mark_duplicates(db: Session, rows: list[BarterImportRow]) -> None:
         key = (
             row.full_name.casefold(),
             row.company.casefold(),
-            row.segment_name.casefold(),
+            row.template_name.casefold(),
             row.expires_on.isoformat(),
         )
         if key in existing:
@@ -447,11 +426,11 @@ def _existing_keys(db: Session) -> set[tuple[str, str, str, str]]:
         select(
             User.full_name,
             Certificate.company,
-            Segment.name,
+            CardTemplate.name,
             Certificate.expires_on,
         )
         .join(User, Certificate.holder_id == User.id)
-        .outerjoin(Segment, Certificate.segment_id == Segment.id)
+        .outerjoin(CardTemplate, Certificate.template_id == CardTemplate.id)
         .where(
             Certificate.is_deleted.is_(False),
             Certificate.status == CertificateStatus.active,
@@ -462,10 +441,10 @@ def _existing_keys(db: Session) -> set[tuple[str, str, str, str]]:
         (
             str(full_name or "").casefold(),
             str(company or "").casefold(),
-            str(segment_name or "").casefold(),
+            str(template_name or "").casefold(),
             expires_on.isoformat() if expires_on is not None else "",
         )
-        for full_name, company, segment_name, expires_on in rows
+        for full_name, company, template_name, expires_on in rows
         if expires_on is not None
     }
 
@@ -495,7 +474,9 @@ def _row_from_dict(data: dict[str, Any]) -> BarterImportRow:
         company=str(data["company"]),
         department=str(data["department"]),
         job_title=str(data["job_title"]),
-        segment_name=str(data.get("segment_name") or ""),
+        template_name=str(
+            data.get("template_name") or data.get("segment_name") or ""
+        ),
         expires_on=date.fromisoformat(expires) if expires else None,
         nominal=int(data["nominal"]),
         phone=str(data.get("phone") or ""),
@@ -560,7 +541,7 @@ def _map_headers(headers: list[str]) -> dict[str, int]:
         "company",
         "department",
         "job_title",
-        "segment",
+        "template",
         "expires_on",
         "nominal",
     ]
@@ -569,7 +550,7 @@ def _map_headers(headers: list[str]) -> dict[str, int]:
         "company": "ООО",
         "department": "Ресторан / офис",
         "job_title": "Должность",
-        "segment": "Сегмент",
+        "template": "Шаблон",
         "expires_on": "Срок действия",
         "nominal": "Номинал",
     }
