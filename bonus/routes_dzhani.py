@@ -143,29 +143,45 @@ def issue_dzhani_certificate(
 
 @router.get("/card", response_model=CardStatusResponse)
 def dzhani_card_status(
-    public_number: str,
     db: Session = Depends(get_db),
     _: None = Depends(require_dzhani_key),
+    public_number: str = "",
+    short_code: str = "",
 ) -> CardStatusResponse:
-    """Статус сертификата по номеру для синхронизации реестра."""
+    """Статус сертификата по short_code или public_number.
+
+    Удалённые карты → 404, чтобы витрина убрала их из «Мои сертификаты».
+    """
     del _
-    number = public_number.strip()
-    cert = db.scalar(
-        select(Certificate).where(
-            Certificate.public_number == number,
-            Certificate.is_deleted.is_(False),
-        )
-    )
-    if cert is None:
+    cert = _find_certificate(db, public_number=public_number, short_code=short_code)
+    if cert is None or cert.is_deleted:
         raise HTTPException(status_code=404, detail="Сертификат не найден")
     return CardStatusResponse(
         public_number=cert.public_number,
         short_code=cert.short_code,
         status=cert.status.value if isinstance(cert.status, CertificateStatus) else str(cert.status),
-        status_label=status_label(cert.status),
+        status_label=status_label(cert.status, cert.balance, cert.expires_on, cert.single_use),
         balance_rub=cert.balance // 100,
         balance_display=format_money_plain(cert.balance),
     )
+
+
+def _find_certificate(
+    db: Session,
+    *,
+    public_number: str = "",
+    short_code: str = "",
+) -> Certificate | None:
+    """Ищет карту по short_code (8 цифр) или public_number (MR-…)."""
+    code = "".join(ch for ch in short_code.strip() if ch.isdigit())
+    if len(code) >= 8:
+        found = db.scalar(select(Certificate).where(Certificate.short_code == code[-8:]))
+        if found is not None:
+            return found
+    number = public_number.strip()
+    if number:
+        return db.scalar(select(Certificate).where(Certificate.public_number == number))
+    return None
 
 
 def _to_issue_response(cert: Certificate, root: str) -> IssueResponse:

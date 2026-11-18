@@ -34,6 +34,7 @@
 
 Ответ: `public_number`, `short_code`, `token`, `card_url`, `balance_rub`, `status`.
 
-### `GET /api/dzhani/card?public_number=`
+### `GET /api/dzhani/card?short_code=` или `?public_number=`
 
-Статус и баланс карты для синхронизации реестра витрины.
+Статус и баланс карты для синхронизации реестра витрины.  
+Предпочтительно `short_code` (8 цифр). Удалённая карта → `404` (витрина скрывает сертификат).
