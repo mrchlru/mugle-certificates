@@ -45,6 +45,7 @@ from bonus.services import (
     undo_credit,
     undo_debit,
 )
+from bonus.present import load_card
 from bonus.values import format_date, parse_money
 
 
@@ -395,6 +396,40 @@ def test_renew_expired_card_restores_last_balance() -> None:
     assert set_certificate_expiry(db, issued.certificate, date(2031, 1, 1), actor=hr) == 0
     db.refresh(issued.certificate)
     assert issued.certificate.balance == 350_000
+
+
+def test_template_hide_holder_updates_existing_cards() -> None:
+    db = _db()
+    hr = _person(db, "hr", Role.hr)
+    template = save_template(
+        db,
+        name="Бартер скрытый",
+        filename="barter.png",
+        payload=_tiny_png(),
+        content_type="image/png",
+        hide_holder=False,
+    )
+    issued = issue_certificate(
+        db,
+        IssueDraft(
+            full_name="Гость Бартер",
+            login="",
+            password="",
+            nominal=100_000,
+            balance=None,
+            note="",
+            expires_on=None,
+            template_id=template.id,
+            color=template.color,
+        ),
+        hr,
+    )
+    card = load_card(db, issued.certificate, "https://example.test", hr)
+    assert card.hide_holder is False
+    update_template(db, template, name=template.name, hide_holder=True)
+    db.refresh(issued.certificate)
+    card = load_card(db, issued.certificate, "https://example.test", hr)
+    assert card.hide_holder is True
 
 
 def test_template_replace_deletes_old_file() -> None:

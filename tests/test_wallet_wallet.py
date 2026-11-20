@@ -20,6 +20,7 @@ from bonus.security import hash_password
 from bonus.services import IssueDraft, issue_certificate
 from bonus.wallet_assets import WalletBranding
 from bonus.wallet_context import wallet_holder_display_name
+from bonus.pkpass_fields import face_secondary_walletwallet
 from bonus.wallet_payload import _expiration_rfc3339, build_walletwallet_body
 from bonus.wallet_provider import CreatePassResult, WalletProviderError, WalletWalletProvider
 from bonus.wallet_service import certificate_wallet_visible, serve_wallet_pass
@@ -151,6 +152,21 @@ def test_build_walletwallet_body_barcode_short_code() -> None:
     assert "labelColor" not in body
     assert "Тип" not in labels
     assert "footerFields" not in body
+
+
+def test_face_secondary_hides_owner_when_template_flag() -> None:
+    cert = SimpleNamespace(
+        expires_on=date(2026, 12, 31),
+        discount_percent=0,
+        template=SimpleNamespace(hide_holder=True),
+    )
+    fields = face_secondary_walletwallet(
+        cert,
+        SimpleNamespace(full_name="Секрет"),
+        discount_percent=0,
+        date_layout="owner_label",
+    )
+    assert fields == []
 
 
 def test_build_walletwallet_body_basic_branding() -> None:

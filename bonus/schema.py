@@ -102,6 +102,10 @@ def ensure_schema(engine: Engine) -> None:
             statements.append(
                 "ALTER TABLE card_templates ADD COLUMN is_deleted BOOLEAN DEFAULT FALSE"
             )
+        if "hide_holder" not in columns:
+            statements.append(
+                "ALTER TABLE card_templates ADD COLUMN hide_holder BOOLEAN DEFAULT FALSE"
+            )
     if "certificate_parts" not in tables:
         statements.append(
             """

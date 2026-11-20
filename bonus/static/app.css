@@ -1224,11 +1224,21 @@ body.partners-dialog-open {
 
 .wallet-body { padding: 20px 18px 22px; }
 
+.wallet-owner.is-blank {
+  user-select: none;
+  pointer-events: none;
+}
+
+.wallet-owner.is-blank .wallet-label {
+  min-height: 1.2em;
+}
+
 .wallet-holder {
   margin: 8px 0 0;
   font-size: 22px;
   font-weight: 700;
   line-height: 1.25;
+  min-height: 1.25em;
 }
 
 .wallet-expiry {

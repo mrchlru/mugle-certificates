@@ -338,6 +338,7 @@ def save_template(
     color: str = "#00A8A8",
     segment_id: int | None = None,
     segment2_id: int | None = None,
+    hide_holder: bool = False,
 ) -> CardTemplate:
     """Сохраняет баннер; без логотипа на карточке будет дефолтный."""
     cleaned = " ".join(name.split()) or Path(filename).stem or "Шаблон"
@@ -354,6 +355,7 @@ def save_template(
         segment_id=primary,
         segment2_id=secondary,
         discount_percent=normalize_discount(discount_percent),
+        hide_holder=hide_holder,
         is_active=True,
         is_deleted=False,
     )
@@ -411,6 +413,7 @@ def update_template(
     color: str = "#00A8A8",
     segment_id: int | None = None,
     segment2_id: int | None = None,
+    hide_holder: bool = False,
     filename: str = "",
     payload: bytes | None = None,
     content_type: str = "",
@@ -418,7 +421,7 @@ def update_template(
     logo_payload: bytes | None = None,
     logo_content_type: str = "",
 ) -> CardTemplate:
-    """Меняет название, цвет, сегмент(ы) и при необходимости баннер/логотип."""
+    """Меняет название, цвет, сегмент(ы), скрытие владельца и при необходимости баннер/логотип."""
     if template.is_deleted:
         raise BonusError("Удалённый шаблон нельзя менять — загрузите новый")
     cleaned = " ".join(name.split()) or template.name
@@ -427,6 +430,7 @@ def update_template(
     template.name = cleaned[:120]
     template.discount_percent = normalize_discount(discount_percent)
     template.color = normalize_color(color or "#00A8A8")
+    template.hide_holder = hide_holder
     primary, secondary = _template_segments(db, segment_id, segment2_id)
     template.segment_id = primary
     template.segment2_id = secondary

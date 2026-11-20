@@ -28,6 +28,12 @@ def owner_field_label(certificate: Certificate, *, date_layout: str) -> str:
     return f"Владелец карты · до {until}"
 
 
+def template_hides_holder(certificate: Certificate) -> bool:
+    """Читает флаг шаблона: не показывать ФИО/тип на лице карты."""
+    template = getattr(certificate, "template", None)
+    return bool(getattr(template, "hide_holder", False)) if template is not None else False
+
+
 def face_secondary_walletwallet(
     certificate: Certificate,
     holder: User | None,
@@ -37,14 +43,15 @@ def face_secondary_walletwallet(
 ) -> list[dict[str, str]]:
     """Владелец и скидка; без «Тип» и без отдельного «Срок» в строке."""
     fields: list[dict[str, str]] = []
-    owner = wallet_holder_display_name(holder)
-    if owner:
-        fields.append(
-            {
-                "label": owner_field_label(certificate, date_layout=date_layout),
-                "value": owner,
-            }
-        )
+    if not template_hides_holder(certificate):
+        owner = wallet_holder_display_name(holder)
+        if owner:
+            fields.append(
+                {
+                    "label": owner_field_label(certificate, date_layout=date_layout),
+                    "value": owner,
+                }
+            )
     discount = int(discount_percent or certificate.discount_percent or 0)
     if discount:
         fields.append({"label": "Скидка", "value": f"{discount}%"})
@@ -79,10 +86,11 @@ def face_store_card_apple(
     """storeCard: secondary + auxiliary (срок под владельцем в PassKit)."""
     secondary: list[dict[str, str]] = []
     auxiliary: list[dict[str, str]] = []
-    owner = wallet_holder_display_name(holder)
-    if owner:
-        label = owner_field_label(certificate, date_layout=date_layout)
-        secondary.append({"key": "holder", "label": label.upper(), "value": owner})
+    if not template_hides_holder(certificate):
+        owner = wallet_holder_display_name(holder)
+        if owner:
+            label = owner_field_label(certificate, date_layout=date_layout)
+            secondary.append({"key": "holder", "label": label.upper(), "value": owner})
     discount = int(discount_percent or certificate.discount_percent or 0)
     if discount:
         secondary.append(
