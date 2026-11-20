@@ -19,10 +19,19 @@
     {% endif %}
   </div>
   <div class="wallet-body">
-    <p class="wallet-label" data-tilt-depth="2">Владелец карты</p>
-    <p class="wallet-holder" data-tilt-depth="2">
-      {{ card.holder_name }}{% if card.segment_name %}, {{ card.segment_name|lower }}{% endif %}
-    </p>
+    {% if card.hide_holder %}
+    <div class="wallet-owner is-blank" aria-hidden="true" data-tilt-depth="2">
+      <p class="wallet-label">&nbsp;</p>
+      <p class="wallet-holder">&nbsp;</p>
+    </div>
+    {% else %}
+    <div class="wallet-owner" data-tilt-depth="2">
+      <p class="wallet-label">Владелец карты</p>
+      <p class="wallet-holder">
+        {{ card.holder_name }}{% if card.segment_name %}, {{ card.segment_name|lower }}{% endif %}
+      </p>
+    </div>
+    {% endif %}
     {% if card.expires_on %}
     <p class="wallet-expiry" data-tilt-depth="2">Действует до {{ card.expires_on|day }}</p>
     {% endif %}

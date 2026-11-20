@@ -166,6 +166,8 @@ class CardTemplate(Base):
         ForeignKey("segments.id"), nullable=True, index=True
     )
     discount_percent: Mapped[int] = mapped_column(Integer, default=0)
+    # Не показывать ФИО и тип (название шаблона) на лицевой стороне карты.
+    hide_holder: Mapped[bool] = mapped_column(default=False)
     is_active: Mapped[bool] = mapped_column(default=True)
     # Мягкое удаление: не для новых карт; выпущенные сохраняют визуал по template_id.
     is_deleted: Mapped[bool] = mapped_column(default=False)

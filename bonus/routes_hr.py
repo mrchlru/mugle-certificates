@@ -1052,6 +1052,7 @@ def template_create(
     color: str = Form("#00A8A8"),
     segment_id: int = Form(0),
     segment2_id: int = Form(0),
+    hide_holder: str = Form("0"),
     image: UploadFile = File(...),
     logo: UploadFile | None = File(None),
     csrf_token: str = Form(""),
@@ -1080,6 +1081,7 @@ def template_create(
             color=color,
             segment_id=segment_id or None,
             segment2_id=segment2_id or None,
+            hide_holder=hide_holder == "1",
         )
     except BonusError as exc:
         flash(request, exc.message, "bad")
@@ -1099,6 +1101,7 @@ async def template_update(
     color: str = Form("#00A8A8"),
     segment_id: int = Form(0),
     segment2_id: int = Form(0),
+    hide_holder: str = Form("0"),
     image: UploadFile | None = File(None),
     logo: UploadFile | None = File(None),
     csrf_token: str = Form(""),
@@ -1131,6 +1134,7 @@ async def template_update(
             color=color,
             segment_id=segment_id or None,
             segment2_id=segment2_id or None,
+            hide_holder=hide_holder == "1",
             filename=filename,
             payload=payload,
             content_type=content_type,

@@ -138,8 +138,9 @@ def _build_pass_json(
 ) -> dict[str, Any]:
     """Собирает pass.json storeCard из сертификата и шаблона."""
     template = getattr(certificate, "template", None)
+    hide_holder = bool(getattr(template, "hide_holder", False)) if template is not None else False
     program = ""
-    if template is not None:
+    if template is not None and not hide_holder:
         program = str(getattr(template, "name", "") or "").strip()
     if not program:
         program = (settings.apple_pass_description or "Бонус").strip() or "Бонус"
@@ -152,6 +153,15 @@ def _build_pass_json(
     rubles = max(0, int(certificate.balance)) // 100
     short = (certificate.short_code or "").replace("-", "").replace(" ", "")
     serial = certificate.public_number or str(certificate.id)
+    secondary: list[dict[str, str]] = []
+    if not hide_holder:
+        secondary.append(
+            {
+                "key": "holder",
+                "label": "ВЛАДЕЛЕЦ",
+                "value": name,
+            }
+        )
     body: dict[str, Any] = {
         "formatVersion": 1,
         "passTypeIdentifier": settings.apple_pass_type_id.strip(),
@@ -159,7 +169,7 @@ def _build_pass_json(
         "teamIdentifier": settings.apple_team_id.strip(),
         "organizationName": org,
         "description": program,
-        "logoText": program,
+        "logoText": program if not hide_holder else org,
         "foregroundColor": "rgb(255, 255, 255)",
         "backgroundColor": f"rgb({rgb[0]}, {rgb[1]}, {rgb[2]})",
         "labelColor": "rgb(255, 255, 255)",
@@ -185,14 +195,8 @@ def _build_pass_json(
                     "value": f"{rubles} ₽",
                 }
             ],
-            "secondaryFields": [
-                {
-                    "key": "holder",
-                    "label": "ВЛАДЕЛЕЦ",
-                    "value": name,
-                }
-            ],
-            "auxiliaryFields": _auxiliary_fields(certificate),
+            "secondaryFields": secondary,
+            "auxiliaryFields": _auxiliary_fields(certificate, hide_type=hide_holder),
             "backFields": _back_fields(certificate, base_url),
         },
     }
@@ -204,10 +208,14 @@ def _build_pass_json(
     return body
 
 
-def _auxiliary_fields(certificate: Certificate) -> list[dict[str, str]]:
+def _auxiliary_fields(
+    certificate: Certificate,
+    *,
+    hide_type: bool = False,
+) -> list[dict[str, str]]:
     fields: list[dict[str, str]] = []
     segment = getattr(certificate, "segment", None)
-    if segment is not None and getattr(segment, "name", None):
+    if not hide_type and segment is not None and getattr(segment, "name", None):
         fields.append(
             {
                 "key": "segment",

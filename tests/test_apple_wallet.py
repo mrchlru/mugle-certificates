@@ -53,3 +53,32 @@ def test_build_pass_json_from_template() -> None:
     assert body["backgroundColor"] == "rgb(0, 181, 150)"
     assert body["storeCard"]["primaryFields"][0]["value"] == "2500 ₽"
     assert body["barcode"]["message"] == "12345678"
+    assert body["storeCard"]["secondaryFields"][0]["value"] == "Анна"
+
+
+def test_build_pass_json_hides_holder_when_template_flag() -> None:
+    settings = Settings(
+        apple_pass_type_id="pass.com.mugle.bonus",
+        apple_team_id="TEAM123",
+        apple_organization_name="Mugle Rest",
+    )
+    template = SimpleNamespace(name="Бартер", color="#00B596", hide_holder=True)
+    cert = SimpleNamespace(
+        id=5,
+        public_number="MR-00005",
+        short_code="87654321",
+        balance=100_000,
+        color="#00B596",
+        discount_percent=0,
+        token="tok2",
+        expires_on=None,
+        status=CertificateStatus.active,
+        template=template,
+        segment=SimpleNamespace(name="Бартер"),
+    )
+    body = _build_pass_json(
+        cert, SimpleNamespace(full_name="Секрет"), base_url="https://bonus.example", settings=settings
+    )
+    assert body["storeCard"]["secondaryFields"] == []
+    assert all(field["key"] != "segment" for field in body["storeCard"]["auxiliaryFields"])
+    assert body["logoText"] == "Mugle Rest"

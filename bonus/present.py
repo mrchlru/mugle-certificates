@@ -102,6 +102,7 @@ class CardView:
     discount_percent: int
     single_use: bool
     segment_name: str
+    hide_holder: bool
     template_url: str
     logo_url: str
     logo_custom: bool
@@ -997,6 +998,7 @@ def _card_view(
     logo_url = "/static/logo.svg"
     logo_custom = False
     template_name = ""
+    hide_holder = False
     template = certificate.template
     if certificate.template_id is not None and template is None:
         from bonus.models import CardTemplate as TemplateModel
@@ -1006,6 +1008,7 @@ def _card_view(
         from bonus.catalog import template_logo_is_custom, template_logo_url
 
         template_name = (template.name or "").strip()
+        hide_holder = bool(template.hide_holder)
         if template.image_path:
             template_path = media_url(template.image_path)
         logo_url = template_logo_url(template)
@@ -1075,6 +1078,7 @@ def _card_view(
         discount_percent=certificate.discount_percent or 0,
         single_use=bool(certificate.single_use),
         segment_name=segment_label,
+        hide_holder=hide_holder,
         template_url=template_path,
         logo_url=logo_url,
         logo_custom=logo_custom,
@@ -1130,12 +1134,14 @@ def preview_birthday_card(db: Session, segment: Segment) -> CardView:
     template_path = ""
     logo_url = "/static/logo.svg"
     logo_custom = False
+    hide_holder = False
     discount = segment.discount_percent or 0
     if template is not None:
         if template.image_path:
             template_path = media_url(template.image_path)
         logo_url = template_logo_url(template)
         logo_custom = template_logo_is_custom(template)
+        hide_holder = bool(template.hide_holder)
         if template.discount_percent:
             discount = template.discount_percent
     short_code = "12345678"
@@ -1162,6 +1168,7 @@ def preview_birthday_card(db: Session, segment: Segment) -> CardView:
         discount_percent=discount,
         single_use=bool(segment.single_use),
         segment_name=segment.name,
+        hide_holder=hide_holder,
         template_url=template_path,
         logo_url=logo_url,
         logo_custom=logo_custom,

@@ -167,6 +167,11 @@
           </label>
           <p class="muted design-hint">Два сегмента = комбинированная карта (например Ланч + Бонусы). Разовые сегменты во второй слот нельзя.</p>
         </label>
+        <label class="switch">
+          <input type="checkbox" name="hide_holder" value="1">
+          <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+          <span class="switch-copy">Скрыть ФИО и тип на карточке</span>
+        </label>
         <label class="field">Баннер
           <span class="file-pick">
             <input type="file" name="image" accept="image/jpeg,image/png,image/webp" required data-file-pick>
@@ -230,6 +235,11 @@
                   </select>
                 </label>
               </label>
+              <label class="switch">
+                <input type="checkbox" name="hide_holder" value="1" {% if item.hide_holder %}checked{% endif %}>
+                <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+                <span class="switch-copy">Скрыть ФИО и тип на карточке</span>
+              </label>
               <label class="field">Заменить баннер
                 <span class="file-pick">
                   <input type="file" name="image" accept="image/jpeg,image/png,image/webp" data-file-pick>
@@ -251,6 +261,9 @@
                 <span class="design-color-swatch" style="background: {{ item.color or '#00A8A8' }}" title="{{ item.color or '#00A8A8' }}"></span>
                 {% if item.discount_percent %}
                 <span class="muted design-meta">{{ item.discount_percent }}%</span>
+                {% endif %}
+                {% if item.hide_holder %}
+                <span class="muted design-meta">без ФИО</span>
                 {% endif %}
                 {% if item.segment_id %}
                 {% for segment in segments if segment.id == item.segment_id %}
